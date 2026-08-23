@@ -51,7 +51,7 @@ class PainelMetricasTests(TestCase):
         self.client.force_login(self.gestor)
         resposta = self.client.get(reverse("core:painel"))
         texto = resposta.content.decode()
-        self.assertIn("Aguardando pagamento</th>", texto) or None
+        self.assertIn(">Aguardando pagamento<", texto)
         self.assertIn("1 pedido(s)", texto)
 
     def test_filtro_por_periodo(self):

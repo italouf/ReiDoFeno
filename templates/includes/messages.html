@@ -1,0 +1,13 @@
+{% if messages %}
+  {% for mensagem in messages %}
+    <div class="alerta alerta--{{ mensagem.tags|default:'info' }}" role="{% if mensagem.tags == 'error' or mensagem.tags == 'warning' %}alert{% else %}status{% endif %}">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        {% if mensagem.tags == 'success' %}<use href="#i-ok"/>
+        {% elif mensagem.tags == 'error' %}<use href="#i-erro"/>
+        {% elif mensagem.tags == 'warning' %}<use href="#i-alerta"/>
+        {% else %}<use href="#i-info"/>{% endif %}
+      </svg>
+      <div>{{ mensagem }}</div>
+    </div>
+  {% endfor %}
+{% endif %}

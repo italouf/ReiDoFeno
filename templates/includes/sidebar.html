@@ -1,0 +1,69 @@
+{% comment %}
+Sidebar da gestão. Ativo por view_name real (request.resolver_match).
+<!-- Futuramente: filtrar itens por perfil (gestor/vendedor/administrador) -->
+{% endcomment %}
+<aside class="lateral" id="lateral" data-gaveta aria-label="Menu lateral">
+  <a class="marca-lateral" href="{% url 'core:painel' %}">
+    <strong><svg viewBox="0 0 20 20" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><use href="#i-marca"/></svg>Rei do Feno</strong>
+    <span>Gestão · Feira de Santana · Iaçu</span>
+  </a>
+
+  <nav aria-label="Navegação principal">
+    <div class="menu-grupo">
+      <p class="menu-titulo" id="titulo-menu-visao">Visão</p>
+      <a class="menu-item" href="{% url 'core:painel' %}" {% if request.resolver_match.view_name == 'core:painel' %}aria-current="page"{% endif %}>
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-painel"/></svg>Painel
+      </a>
+      <a class="menu-item" href="{% url 'analytics:aviso_lista' %}" {% if request.resolver_match.view_name == 'analytics:aviso_lista' %}aria-current="page"{% endif %}>
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-aviso"/></svg>Avisos
+      </a>
+    </div>
+
+    <div class="menu-grupo">
+      <p class="menu-titulo">Catálogo</p>
+      <a class="menu-item" href="{% url 'catalog:produto_lista' %}" {% if request.resolver_match.view_name in 'catalog:produto_lista catalog:produto_novo catalog:produto_editar' %}aria-current="page"{% endif %}>
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-caixa"/></svg>Produtos
+      </a>
+      <a class="menu-item" href="{% url 'catalog:categoria_lista' %}" {% if request.resolver_match.view_name in 'catalog:categoria_lista catalog:categoria_novo catalog:categoria_editar' %}aria-current="page"{% endif %}>
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-filtro"/></svg>Categorias
+      </a>
+    </div>
+
+    <div class="menu-grupo">
+      <p class="menu-titulo">Operação</p>
+      <a class="menu-item" href="{% url 'stock:estoque_lista' %}" {% if request.resolver_match.view_name == 'stock:estoque_lista' %}aria-current="page"{% endif %}>
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-caixa"/></svg>Estoque
+      </a>
+      <a class="menu-item" href="{% url 'stock:movimento_lista' %}" {% if request.resolver_match.view_name in 'stock:movimento_lista stock:movimento_entrada stock:movimento_saida stock:movimento_ajuste stock:movimento_transferencia' %}aria-current="page"{% endif %}>
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-setas"/></svg>Movimentações
+      </a>
+      <a class="menu-item" href="{% url 'sales:pedidos_internos' %}" {% if request.resolver_match.view_name in 'sales:pedidos_internos sales:pedido_interno_detail' %}aria-current="page"{% endif %}>
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-documento"/></svg>Pedidos
+      </a>
+    </div>
+
+    <div class="menu-grupo">
+      <p class="menu-titulo">Comercial</p>
+      <a class="menu-item" href="{% url 'customers:cliente_lista' %}" {% if request.resolver_match.view_name in 'customers:cliente_lista customers:cliente_detalhe customers:cliente_novo customers:cliente_editar customers:interacao_novo' %}aria-current="page"{% endif %}>
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-cliente"/></svg>Clientes
+      </a>
+      <a class="menu-item" href="{% url 'costs:despesa_lista' %}" {% if request.resolver_match.view_name in 'costs:despesa_lista costs:despesa_novo costs:despesa_editar' %}aria-current="page"{% endif %}>
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-dinheiro"/></svg>Custos
+      </a>
+    </div>
+
+    <div class="menu-grupo">
+      <p class="menu-titulo">Conta</p>
+      <a class="menu-item" href="{% url 'sales:minhas_metricas' %}" {% if request.resolver_match.view_name == 'sales:minhas_metricas' %}aria-current="page"{% endif %}>
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-grafico"/></svg>Minhas métricas
+      </a>
+      <a class="menu-item" href="{% url 'privacy:minha_privacidade' %}" {% if request.resolver_match.view_name == 'privacy:minha_privacidade' %}aria-current="page"{% endif %}>
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-escudo"/></svg>Privacidade
+      </a>
+    </div>
+  </nav>
+
+  <div class="menu-rodape">
+    {% include "includes/nav_user.html" %}
+  </div>
+</aside>

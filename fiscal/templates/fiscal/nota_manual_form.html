@@ -1,21 +1,16 @@
 {% extends "base.html" %}
 {% block title %}NF-e manual — {{ pedido.numero }}{% endblock %}
 {% block content %}
-<div class="card form-cartao">
-    <h1>Registrar NF-e manual</h1>
-    <p>Pedido <strong>{{ pedido.numero }}</strong> · {{ pedido.cliente.nome }}</p>
-    <form method="post">
-        {% csrf_token %}
-        {% for campo in form.visible_fields %}
-            <div class="field">
-                {{ campo.label_tag }}
-                {{ campo }}
-                {{ campo.errors }}
-            </div>
-        {% endfor %}
-        <button type="submit" class="btn">Vincular nota ao pedido</button>
-        <a class="btn btn--secundario"
-           href="{% url 'sales:pedido_interno_detail' pedido.pk %}">Cancelar</a>
-    </form>
+<div class="cartao form-cartao">
+  <h1>Registrar NF-e manual</h1>
+  <p style="color:var(--tinta-700);">Pedido <strong>{{ pedido.numero }}</strong> · {{ pedido.cliente.nome }}</p>
+  <form method="post" data-enviar>
+    {% csrf_token %}
+    {% include "components/form_campos.html" with form=form %}
+    <div class="form-acoes">
+      <button type="submit" class="btn">Vincular nota ao pedido</button>
+      <a class="btn btn--secundario" href="{% url 'sales:pedido_interno_detail' pedido.pk %}">Cancelar</a>
+    </div>
+  </form>
 </div>
 {% endblock %}

@@ -1,31 +1,16 @@
 {% extends "base.html" %}
 {% block title %}Avisos — Rei do Feno{% endblock %}
 {% block content %}
-<h1>Avisos</h1>
+{% include "components/cabecalho_pagina.html" with titulo="Avisos" descricao="Estoque baixo, recompra provável e pendências fiscais geradas pelo sistema." %}
 
 {% if avisos %}
-<table class="tabela">
-    <thead><tr><th>Data</th><th>Severidade</th><th>Mensagem</th><th>Status</th><th></th></tr></thead>
-    <tbody>
-        {% for aviso in avisos %}
-        <tr>
-            <td>{{ aviso.criado_em|date:"d/m H:i" }}</td>
-            <td><span class="badge {% if aviso.severidade == 'erro' %}badge--erro{% elif aviso.severidade == 'alerta' %}badge--alerta{% else %}badge--info{% endif %}">{{ aviso.get_severidade_display }}</span></td>
-            <td>{{ aviso.mensagem }}</td>
-            <td>{% if aviso.lido %}<span class="badge badge--neutro">Lido</span>{% else %}<span class="badge badge--alerta">Não lido</span>{% endif %}</td>
-            <td>
-                {% if not aviso.lido %}
-                <form method="post" action="{% url 'analytics:aviso_ler' aviso.pk %}">
-                    {% csrf_token %}
-                    <button type="submit" class="btn btn--secundario">Marcar lido</button>
-                </form>
-                {% endif %}
-            </td>
-        </tr>
-        {% endfor %}
-    </tbody>
-</table>
+<div class="cartao" style="padding:0;">
+  {% for aviso in avisos %}
+    {% include "components/aviso_item.html" %}
+  {% endfor %}
+</div>
+{% include "components/paginacao.html" %}
 {% else %}
-<div class="vazio">Nenhum aviso no momento.</div>
+{% include "components/estado_vazio.html" with icone="i-aviso" titulo="Nenhum aviso no momento." descricao="Os avisos comerciais são gerados automaticamente todos os dias às 8h." %}
 {% endif %}
 {% endblock %}

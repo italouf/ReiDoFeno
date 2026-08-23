@@ -119,7 +119,7 @@ AXES_RESET_ON_SUCCESS = True
 AXES_VERBOSE = 0
 
 LOGIN_URL = "/accounts/login/"
-LOGIN_REDIRECT_URL = "/painel/"
+LOGIN_REDIRECT_URL = "/painel/painel/"
 LOGOUT_REDIRECT_URL = "/accounts/login/"
 
 PASSWORD_HASHERS = [
@@ -143,6 +143,7 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+STATICFILES_DIRS = [BASE_DIR / "static"]
 MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
 

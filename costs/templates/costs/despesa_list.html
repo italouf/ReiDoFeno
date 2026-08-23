@@ -1,27 +1,34 @@
 {% extends "base.html" %}
 {% block title %}Custos e despesas — Rei do Feno{% endblock %}
 {% block content %}
-<h1>Custos e despesas</h1>
-<p><a class="btn" href="{% url 'costs:despesa_novo' %}">Nova despesa</a></p>
+{% include "components/cabecalho_pagina.html" with titulo="Custos e despesas" contador=despesas|length acao_url="/custos/despesas/novo/" acao_texto="Nova despesa" %}
 
 {% if despesas %}
-<table class="tabela">
-    <thead><tr><th>Data</th><th>Categoria</th><th>Tipo</th><th>Fornecedor</th><th>Valor</th><th>Recorrência</th><th></th></tr></thead>
+<div class="tabela-envolve">
+  <table class="tabela">
+    <thead><tr>
+      <th scope="col">Data</th><th scope="col">Categoria</th><th scope="col">Tipo</th>
+      <th scope="col">Fornecedor</th><th scope="col" class="num">Valor</th>
+      <th scope="col">Recorrência</th><th scope="col"><span class="visually-hidden">Ações</span></th>
+    </tr></thead>
     <tbody>
-        {% for despesa in despesas %}
-        <tr>
-            <td>{{ despesa.data|date:"d/m/Y" }}</td>
-            <td>{{ despesa.get_categoria_display }}</td>
-            <td>{{ despesa.tipo|default:"—" }}</td>
-            <td>{{ despesa.fornecedor|default:"—" }}</td>
-            <td>R$ {{ despesa.valor }}</td>
-            <td>{{ despesa.get_recorrencia_display }}</td>
-            <td><a href="{% url 'costs:despesa_editar' despesa.pk %}">Editar</a></td>
-        </tr>
-        {% endfor %}
+      {% for despesa in despesas %}
+      <tr>
+        <td>{{ despesa.data|date:"d/m/Y" }}</td>
+        <td>{{ despesa.get_categoria_display }}</td>
+        <td>{{ despesa.tipo|default:"—" }}</td>
+        <td>{{ despesa.fornecedor|default:"—" }}</td>
+        <td class="num">R$ {{ despesa.valor }}</td>
+        <td>{{ despesa.get_recorrencia_display }}</td>
+        <td><a class="btn btn--secundario btn--pequeno" href="{% url 'costs:despesa_editar' despesa.pk %}">Editar</a></td>
+      </tr>
+      {% endfor %}
     </tbody>
-</table>
+  </table>
+</div>
+{% include "components/paginacao.html" %}
 {% else %}
-<div class="vazio">Nenhuma despesa registrada ainda.</div>
+{% url 'costs:despesa_novo' as url_despesa %}
+{% include "components/estado_vazio.html" with icone="i-dinheiro" titulo="Nenhuma despesa registrada ainda." descricao="Lance despesas para enxergar o lucro real no painel." acao_url=url_despesa acao_texto="Nova despesa" %}
 {% endif %}
 {% endblock %}

@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}Página não encontrada — Rei do Feno{% endblock %}
+{% block content %}
+<div class="estado-vazio">
+  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-busca"/></svg>
+  <strong>Página não encontrada</strong>
+  <p>O endereço acessado não existe ou foi movido. Confira o link ou volte para começar de novo.</p>
+  <p style="margin-bottom:0"><a class="btn" href="{% url 'core:painel' %}">Voltar ao painel</a></p>
+</div>
+{% endblock %}

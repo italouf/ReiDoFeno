@@ -1,25 +1,30 @@
 {% extends "base.html" %}
 {% block title %}Unidades — Rei do Feno{% endblock %}
 {% block content %}
-<h1>Unidades</h1>
-<p><a class="btn" href="{% url 'core:unidade_novo' %}">Nova unidade</a></p>
+{% url 'core:unidade_novo' as url_unidade_novo %}
+{% include "components/cabecalho_pagina.html" with titulo="Unidades" contador=unidades|length acao_url=url_unidade_novo acao_texto="Nova unidade" %}
 
 {% if unidades %}
-<table class="tabela">
-    <thead><tr><th>Nome</th><th>Cidade</th><th>Tipo</th><th>Status</th><th></th></tr></thead>
+<div class="tabela-envolve">
+  <table class="tabela">
+    <thead><tr>
+      <th scope="col">Nome</th><th scope="col">Cidade</th><th scope="col">Tipo</th>
+      <th scope="col">Status</th><th scope="col"><span class="visually-hidden">Ações</span></th>
+    </tr></thead>
     <tbody>
-        {% for unidade in unidades %}
-        <tr>
-            <td>{{ unidade.nome }}</td>
-            <td>{{ unidade.cidade }}</td>
-            <td>{{ unidade.get_tipo_display }}</td>
-            <td>{% if unidade.ativa %}<span class="badge badge--ok">Ativa</span>{% else %}<span class="badge badge--neutro">Inativa</span>{% endif %}</td>
-            <td><a href="{% url 'core:unidade_editar' unidade.pk %}">Editar</a></td>
-        </tr>
-        {% endfor %}
+      {% for unidade in unidades %}
+      <tr>
+        <td style="font-weight:600;">{{ unidade.nome }}</td>
+        <td>{{ unidade.cidade }}</td>
+        <td>{{ unidade.get_tipo_display }}</td>
+        <td>{% if unidade.ativa %}<span class="badge badge--ok">Ativa</span>{% else %}<span class="badge badge--neutro">Inativa</span>{% endif %}</td>
+        <td><a class="btn btn--secundario btn--pequeno" href="{% url 'core:unidade_editar' unidade.pk %}">Editar</a></td>
+      </tr>
+      {% endfor %}
     </tbody>
-</table>
+  </table>
+</div>
 {% else %}
-<div class="vazio">Nenhuma unidade cadastrada ainda.</div>
+{% include "components/estado_vazio.html" with icone="i-unidade" titulo="Nenhuma unidade cadastrada ainda." descricao="Unidades são os estoques físicos: Feira de Santana e Iaçu." acao_url=url_unidade_novo acao_texto="Nova unidade" %}
 {% endif %}
 {% endblock %}

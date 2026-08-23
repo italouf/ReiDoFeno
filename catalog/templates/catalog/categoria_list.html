@@ -1,24 +1,25 @@
 {% extends "base.html" %}
 {% block title %}Categorias — Rei do Feno{% endblock %}
 {% block content %}
-<h1>Categorias</h1>
-<p><a class="btn" href="{% url 'catalog:categoria_novo' %}">Nova categoria</a></p>
+{% include "components/cabecalho_pagina.html" with titulo="Categorias" contador=categorias|length acao_url="/catalogo/categorias/novo/" acao_texto="Nova categoria" %}
 
 {% if categorias %}
-<table class="tabela">
-    <thead><tr><th>Nome</th><th>Descrição</th><th>Status</th><th></th></tr></thead>
+<div class="tabela-envolve">
+  <table class="tabela">
+    <thead><tr><th scope="col">Nome</th><th scope="col">Descrição</th><th scope="col">Status</th><th scope="col"><span class="visually-hidden">Ações</span></th></tr></thead>
     <tbody>
-        {% for categoria in categorias %}
-        <tr>
-            <td>{{ categoria.nome }}</td>
-            <td>{{ categoria.descricao|default:"—" }}</td>
-            <td>{% if categoria.ativa %}<span class="badge badge--ok">Ativa</span>{% else %}<span class="badge badge--neutro">Inativa</span>{% endif %}</td>
-            <td><a href="{% url 'catalog:categoria_editar' categoria.pk %}">Editar</a></td>
-        </tr>
-        {% endfor %}
+      {% for categoria in categorias %}
+      <tr>
+        <td style="font-weight:600;">{{ categoria.nome }}</td>
+        <td>{{ categoria.descricao|default:"—" }}</td>
+        <td>{% if categoria.ativa %}<span class="badge badge--ok">Ativa</span>{% else %}<span class="badge badge--neutro">Inativa</span>{% endif %}</td>
+        <td><a class="btn btn--secundario btn--pequeno" href="{% url 'catalog:categoria_editar' categoria.pk %}">Editar</a></td>
+      </tr>
+      {% endfor %}
     </tbody>
-</table>
+  </table>
+</div>
 {% else %}
-<div class="vazio">Nenhuma categoria cadastrada ainda.</div>
+{% include "components/estado_vazio.html" with icone="i-filtro" titulo="Nenhuma categoria cadastrada ainda." descricao="Categorias organizam a vitrine e os relatórios de venda." acao_url="/catalogo/categorias/novo/" acao_texto="Nova categoria" %}
 {% endif %}
 {% endblock %}

@@ -1,19 +1,15 @@
 {% extends "base.html" %}
 {% block title %}{% if object %}Editar unidade{% else %}Nova unidade{% endif %} — Rei do Feno{% endblock %}
 {% block content %}
-<div class="card form-cartao">
-    <h1>{% if object %}Editar unidade{% else %}Nova unidade{% endif %}</h1>
-    <form method="post">
-        {% csrf_token %}
-        {% for campo in form.visible_fields %}
-            <div class="field">
-                {{ campo.label_tag }}
-                {{ campo }}
-                {{ campo.errors }}
-            </div>
-        {% endfor %}
-        <button type="submit" class="btn">Salvar</button>
-        <a class="btn btn--secundario" href="{% url 'core:unidade_lista' %}">Cancelar</a>
-    </form>
+<div class="cartao form-cartao">
+  <h1>{% if object %}Editar unidade{% else %}Nova unidade{% endif %}</h1>
+  <form method="post" data-enviar>
+    {% csrf_token %}
+    {% include "components/form_campos.html" with form=form %}
+    <div class="form-acoes">
+      <button type="submit" class="btn">Salvar</button>
+      <a class="btn btn--secundario" href="{% url 'core:unidade_lista' %}">Cancelar</a>
+    </div>
+  </form>
 </div>
 {% endblock %}

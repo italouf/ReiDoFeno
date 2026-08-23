@@ -1,27 +1,33 @@
 {% extends "base.html" %}
 {% block title %}Pedidos — Rei do Feno{% endblock %}
 {% block content %}
-<h1>Pedidos</h1>
+{% include "components/cabecalho_pagina.html" with titulo="Pedidos" contador=pedidos|length %}
+
 {% if pedidos %}
-<div style="overflow-x:auto">
-<table class="tabela">
-    <thead><tr><th>Número</th><th>Cliente</th><th>Unidade</th><th>Modalidade</th><th>Total</th><th>Status</th><th></th></tr></thead>
+<div class="tabela-envolve">
+  <table class="tabela">
+    <thead><tr>
+      <th scope="col">Número</th><th scope="col">Cliente</th><th scope="col">Unidade</th>
+      <th scope="col">Modalidade</th><th scope="col" class="num">Total</th>
+      <th scope="col">Status</th><th scope="col"><span class="visually-hidden">Ações</span></th>
+    </tr></thead>
     <tbody>
-        {% for pedido in pedidos %}
-        <tr>
-            <td>{{ pedido.numero }}</td>
-            <td>{{ pedido.cliente.nome }}</td>
-            <td>{{ pedido.unidade.nome }}</td>
-            <td>{{ pedido.get_modalidade_display }}</td>
-            <td>R$ {{ pedido.total }}</td>
-            <td><span class="badge badge--info">{{ pedido.get_status_display }}</span></td>
-            <td><a href="{% url 'sales:pedido_interno_detail' pedido.pk %}">Abrir</a></td>
-        </tr>
-        {% endfor %}
+      {% for pedido in pedidos %}
+      <tr>
+        <td style="font-weight:600;">{{ pedido.numero }}</td>
+        <td>{{ pedido.cliente.nome }}</td>
+        <td>{{ pedido.unidade.nome }}</td>
+        <td>{{ pedido.get_modalidade_display }}</td>
+        <td class="num">R$ {{ pedido.total }}</td>
+        <td>{% include "components/status_pedido.html" with status=pedido.status rotulo=pedido.get_status_display %}</td>
+        <td><a class="btn btn--secundario btn--pequeno" href="{% url 'sales:pedido_interno_detail' pedido.pk %}">Abrir</a></td>
+      </tr>
+      {% endfor %}
     </tbody>
-</table>
+  </table>
 </div>
+{% include "components/paginacao.html" %}
 {% else %}
-<div class="vazio">Nenhum pedido registrado ainda.</div>
+{% include "components/estado_vazio.html" with icone="i-documento" titulo="Nenhum pedido registrado ainda." descricao="Pedidos da loja online e do balcão aparecem aqui." %}
 {% endif %}
 {% endblock %}

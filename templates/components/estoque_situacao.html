@@ -1,0 +1,9 @@
+{% comment %}
+Situação de estoque de um item (saldo disponível vs mínimo).
+Uso: {% include "components/estoque_situacao.html" with disponivel=item.disponivel minimo=item.quantidade_minima %}
+{% endcomment %}
+{% if disponivel <= minimo %}
+  <span class="badge badge--alerta"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-alerta"/></svg>Estoque baixo</span>
+{% else %}
+  <span class="badge badge--ok">OK</span>
+{% endif %}

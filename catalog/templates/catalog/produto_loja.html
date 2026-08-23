@@ -1,15 +1,62 @@
 {% extends "base_loja.html" %}
 {% block title %}{{ produto.nome }} — Rei do Feno{% endblock %}
 {% block content %}
-<h1>{{ produto.nome }} <span class="badge">{{ produto.categoria.nome }}</span></h1>
-<p>Preço balcão por {{ produto.get_unidade_medida_display }}:
-    <strong>R$ {{ produto.preco_online }}</strong></p>
-<p>Unidade de venda: {{ produto.get_unidade_medida_display }}</p>
-<form method="post" action="{% url 'sales:adicionar' %}" style="display:flex; gap:.5rem; align-items:center">
-    {% csrf_token %}
-    <input type="hidden" name="produto_id" value="{{ produto.pk }}">
-    <input type="number" name="quantidade" value="1" min="1" step="1" style="width:5rem" aria-label="Quantidade">
-    <button type="submit" class="btn">Adicionar ao carrinho</button>
-</form>
-<a class="btn btn--secundario" href="{% url 'loja:catalogo' %}">Voltar à vitrine</a>
+<nav aria-label="Trilha de navegação" style="margin-bottom:var(--espaco-4); font-size:.9rem; color:var(--tinta-500);">
+  <a href="{% url 'loja:catalogo' %}" style="color:var(--tinta-500);">Vitrine</a>
+  <span aria-hidden="true"> / </span>{{ produto.categoria.nome }}
+</nav>
+
+<article class="produto-detalhe">
+  <div class="produto-detalhe__midia">
+    {% include "components/produto_imagem.html" with produto=produto %}
+    <p class="produto-detalhe__nota">Imagem ilustrativa; o produto é vendido por {{ produto.get_unidade_medida_display }}.</p>
+  </div>
+
+  <div class="produto-detalhe__compra">
+    <p class="rotulo" style="color:var(--palha-600); margin:0 0 var(--espaco-2);">{{ produto.categoria.nome }}</p>
+    <h1 style="margin-top:0;">{{ produto.nome }}</h1>
+    <p style="color:var(--tinta-700);">Unidade de venda: {{ produto.get_unidade_medida_display }} · retirada nas unidades ou entrega.</p>
+
+    <div class="cartao" style="display:flex; align-items:center; justify-content:space-between; gap:var(--espaco-4); padding:var(--espaco-5); margin-top:var(--espaco-5);">
+      <div>
+        <p class="rotulo" style="margin:0 0 var(--espaco-1);">Preço online</p>
+        <p class="num" style="margin:0; font-size:2rem; font-weight:700; letter-spacing:-0.01em;">R$ {{ produto.preco_online }}</p>
+      </div>
+      <form method="post" action="{% url 'sales:adicionar' %}" data-enviar>
+        {% csrf_token %}
+        <input type="hidden" name="produto_id" value="{{ produto.pk }}">
+        <label for="quantidade" class="rotulo" style="display:block;">Quantidade</label>
+        <div style="display:flex; gap:var(--espaco-2); align-items:center;">
+          <input type="number" id="quantidade" name="quantidade" value="1" min="1" step="1" style="width:5rem;">
+          <button type="submit" class="btn">
+            <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-carrinho"/></svg>
+            Adicionar ao carrinho
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <ul class="produto-detalhe__beneficios">
+      <li>
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-unidade"/></svg>
+        Retirada nas unidades de Feira de Santana ou Iaçu
+      </li>
+      <li>
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-carrinho"/></svg>
+        Entrega combinada com o vendedor
+      </li>
+      <li>
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-ok"/></svg>
+        Pagamento seguro via Mercado Pago (Pix ou cartão)
+      </li>
+    </ul>
+
+    <p style="margin-top:var(--espaco-5);">
+      <a class="btn btn--fantasma" href="{% url 'loja:catalogo' %}">
+        <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4.5 6.5 10l5.5 5.5"/></svg>
+        Voltar à vitrine
+      </a>
+    </p>
+  </div>
+</article>
 {% endblock %}

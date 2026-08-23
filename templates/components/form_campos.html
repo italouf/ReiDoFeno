@@ -1,0 +1,27 @@
+{% comment %}
+Loop padrão de campos de formulário Django.
+Uso: {% include "components/form_campos.html" with form=form %}
+{% endcomment %}
+{% for campo_escondido in form.hidden_fields %}{{ campo_escondido }}{% endfor %}
+{% if form.non_field_errors %}
+  <div class="alerta alerta--erro" role="alert">
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-erro"/></svg>
+    <div>
+      <ul class="erro-lista" style="margin:0; padding-left:1.1rem;">
+        {% for erro in form.non_field_errors %}<li>{{ erro }}</li>{% endfor %}
+      </ul>
+    </div>
+  </div>
+{% endif %}
+{% for f in form.visible_fields %}
+  <div class="campo{% if f.errors %} campo--invalido{% endif %}">
+    {{ f.label_tag }}
+    {{ f }}
+    {% if f.help_text %}<span class="helptext">{{ f.help_text }}</span>{% endif %}
+    {% if f.errors %}
+      <ul class="erro-lista" role="alert">
+        {% for erro in f.errors %}<li>{{ erro }}</li>{% endfor %}
+      </ul>
+    {% endif %}
+  </div>
+{% endfor %}

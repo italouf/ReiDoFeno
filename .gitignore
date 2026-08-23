@@ -3,6 +3,11 @@
 *.env
 .venv/
 
+# Opencode
+.opencode/
+openspec/
+.impeccable/
+
 # Python
 __pycache__/
 *.py[cod]
@@ -28,3 +33,5 @@ reports/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Impeccable

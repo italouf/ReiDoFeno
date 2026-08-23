@@ -1,0 +1,18 @@
+{% include "includes/icones.html" %}
+<div class="form-autentica">
+  <h1>Entrar</h1>
+  <p class="ajuste">Acesse o sistema de gestão e a loja da Rei do Feno.</p>
+  <form method="post" data-enviar>
+    {% csrf_token %}
+    {% if form.non_field_errors %}
+      <div class="alerta alerta--erro" role="alert">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-erro"/></svg>
+        <div>{{ form.non_field_errors }}</div>
+      </div>
+    {% endif %}
+    <div class="campo">{{ form.username.label_tag }}{{ form.username }}{{ form.username.errors }}</div>
+    <div class="campo">{{ form.password.label_tag }}{{ form.password }}{{ form.password.errors }}</div>
+    <button type="submit" class="btn" style="width:100%; min-height:48px;">Entrar</button>
+  </form>
+  <p style="margin-bottom:0;"><a href="{% url 'accounts:password_reset' %}" style="font-size:.9rem;">Esqueci minha senha</a></p>
+</div>

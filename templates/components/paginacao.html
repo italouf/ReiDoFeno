@@ -1,0 +1,22 @@
+{% comment %}
+Paginação Django (page_obj). Uso: {% include "components/paginacao.html" %} dentro de {% if is_paginated %}.
+{% endcomment %}
+{% if is_paginated and page_obj.paginator.num_pages > 1 %}
+<nav class="paginacao" aria-label="Paginação">
+  {% if page_obj.has_previous %}
+    <a href="?page={{ page_obj.previous_page_number }}{{ querystring }}" rel="prev">Anterior</a>
+  {% else %}
+    <span aria-hidden="true">Anterior</span>
+  {% endif %}
+  <span aria-current="{% if not page_obj.has_other_pages %}page{% endif %}">
+    Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}
+  </span>
+  {% if page_obj.number %}
+  {% endif %}
+  {% if page_obj.has_next %}
+    <a href="?page={{ page_obj.next_page_number }}{{ querystring }}" rel="next">Próxima</a>
+  {% else %}
+    <span aria-hidden="true">Próxima</span>
+  {% endif %}
+</nav>
+{% endif %}

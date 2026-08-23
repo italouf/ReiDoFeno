@@ -1,0 +1,22 @@
+{% load static %}
+{% comment %}
+Imagem ilustrativa do produto (fotos de banco, licenças livres — ver docs/imagens-produtos.md).
+Resolve por nome/categoria; sem foto correspondente, placeholder desenhado.
+Uso: {% include "components/produto_imagem.html" with produto=produto %}
+{% endcomment %}
+{% with nome=produto.nome|lower cat=produto.categoria.nome|lower %}
+  {% if 'alfafa' in nome %}
+    <img class="produto-imagem" src="{% static 'img/produtos/feno-alfafa.jpg' %}" alt="Fardos de feno de alfafa no campo (imagem ilustrativa)" loading="lazy" width="800" height="600">
+  {% elif 'tifton' in nome or 'coastcross' in nome or 'feno' in nome or 'feno' in cat %}
+    <img class="produto-imagem" src="{% static 'img/produtos/feno-graminea.jpg' %}" alt="Fardos de feno de gramínea no campo (imagem ilustrativa)" loading="lazy" width="800" height="600">
+  {% elif 'raç' in nome or 'racao' in nome or 'raç' in cat or 'racao' in cat %}
+    <img class="produto-imagem" src="{% static 'img/produtos/racao-equinos.jpg' %}" alt="Pellets de ração para equinos (imagem ilustrativa)" loading="lazy" width="800" height="600">
+  {% elif 'farelo' in nome or 'soja' in nome or 'suplemento' in nome %}
+    <img class="produto-imagem" src="{% static 'img/produtos/suplemento.jpg' %}" alt="Farelo/suplemento proteico (imagem ilustrativa)" loading="lazy" width="800" height="600">
+  {% else %}
+    <div class="produto-imagem produto-imagem--vazio">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-caixa"/></svg>
+      <span class="rotulo">{{ produto.categoria.nome }}</span>
+    </div>
+  {% endif %}
+{% endwith %}

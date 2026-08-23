@@ -1,65 +1,83 @@
 {% extends "base.html" %}
 {% block title %}{{ pedido.numero }} — Rei do Feno{% endblock %}
 {% block content %}
-<h1>{{ pedido.numero }}
-    <span class="badge {% if pedido.status == 'pago' or pedido.status == 'concluido' %}badge--ok{% elif pedido.status == 'cancelado' or pedido.status == 'falhou' %}badge--erro{% else %}badge--alerta{% endif %}">{{ pedido.get_status_display }}</span>
-</h1>
-<p>
-    Cliente: {{ pedido.cliente.nome }}
+{% include "components/cabecalho_pagina.html" with titulo=pedido.numero %}
+<p style="margin:-1rem 0 var(--espaco-5); display:flex; flex-wrap:wrap; align-items:center; gap:var(--espaco-2);">
+  {% include "components/status_pedido.html" with status=pedido.status rotulo=pedido.get_status_display %}
+  <span style="color:var(--tinta-700);">
+    Cliente: {{ pedido.cliente.nome }} · {{ pedido.get_modalidade_display }} @ {{ pedido.unidade.nome }} ·
+    Criado em {{ pedido.criado_em|date:"d/m/Y H:i" }}{% if pedido.usuario_criador %} por {{ pedido.usuario_criador.username }}{% endif %}
     {% if pedido.cliente.whatsapp_url %}
-        · <a href="{{ pedido.cliente.whatsapp_url }}" target="_blank" rel="noopener">WhatsApp do cliente</a>
+      · <a href="{{ pedido.cliente.whatsapp_url }}" target="_blank" rel="noopener">WhatsApp do cliente</a>
     {% endif %}
-    ·
-    {{ pedido.get_modalidade_display }} @ {{ pedido.unidade.nome }} ·
-    Criado em {{ pedido.criado_em|date:"d/m/Y H:i" }}
-    {% if pedido.usuario_criador %}por {{ pedido.usuario_criador.username }}{% endif %}
+  </span>
 </p>
 
-<table class="tabela">
-    <thead><tr><th>Produto</th><th>Qtd.</th><th>Preço unit.</th><th>Subtotal</th></tr></thead>
+<div class="tabela-envolve">
+  <table class="tabela">
+    <thead><tr>
+      <th scope="col">Produto</th><th scope="col" class="num">Qtd.</th>
+      <th scope="col" class="num">Preço unit.</th><th scope="col" class="num">Subtotal</th>
+    </tr></thead>
     <tbody>
-        {% for item in pedido.itens.all %}
-        <tr>
-            <td>{{ item.produto_nome }}</td>
-            <td>{{ item.quantidade }}</td>
-            <td>R$ {{ item.preco_unitario }}</td>
-            <td>R$ {{ item.subtotal }}</td>
-        </tr>
-        {% endfor %}
-        <tr><td colspan="3"><strong>Total</strong></td><td><strong>R$ {{ pedido.total }}</strong></td></tr>
+      {% for item in pedido.itens.all %}
+      <tr>
+        <td>{{ item.produto_nome }}</td>
+        <td class="num">{{ item.quantidade }}</td>
+        <td class="num">R$ {{ item.preco_unitario }}</td>
+        <td class="num">R$ {{ item.subtotal }}</td>
+      </tr>
+      {% endfor %}
+      <tfoot>
+        <tr><td colspan="3">Total</td><td class="num">R$ {{ pedido.total }}</td></tr>
+      </tfoot>
     </tbody>
-</table>
+  </table>
+</div>
 
 {% if pagamento %}
-<p>Pagamento: <span class="badge badge--info">{{ pagamento.get_status_display }}</span>
-   via {{ pagamento.provedor }}</p>
+<section class="cartao" style="margin-top:var(--espaco-5);">
+  <h2 style="margin-top:0;">Pagamento</h2>
+  {% include "components/status_pedido.html" with status=pagamento.status rotulo=pagamento.get_status_display %}
+  <p style="margin:var(--espaco-2) 0 0; color:var(--tinta-700);">Provedor: {{ pagamento.provedor }}</p>
+</section>
 {% endif %}
 
 {% if pedido.status == 'pago' %}
-    {% if pedido.nota_fiscal %}
-        <p>NF-e: <strong>{{ pedido.nota_fiscal.numero }}</strong>
-           ({{ pedido.nota_fiscal.get_origem_display }})
-           {% if pedido.nota_fiscal.link_documento %}
-               · <a href="{{ pedido.nota_fiscal.link_documento }}" target="_blank" rel="noopener">Ver documento</a>
-           {% endif %}</p>
-    {% else %}
-        <p class="alerta alerta--alerta">Pedido pago sem NF-e emitida.</p>
-        <a class="btn btn--secundario"
-           href="{% url 'fiscal:nota_manual' pedido.pk %}">Registrar NF-e manual</a>
-    {% endif %}
+  {% if pedido.nota_fiscal %}
+  <section class="cartao" style="margin-top:var(--espaco-5);">
+    <h2 style="margin-top:0;">Nota fiscal</h2>
+    <p style="margin:0;">
+      NF-e <strong>{{ pedido.nota_fiscal.numero }}</strong> ({{ pedido.nota_fiscal.get_origem_display }})
+      {% if pedido.nota_fiscal.link_documento %}
+        · <a href="{{ pedido.nota_fiscal.link_documento }}" target="_blank" rel="noopener">Ver documento</a>
+      {% endif %}
+    </p>
+  </section>
+  {% else %}
+  <div class="alerta alerta--alerta" role="status" style="margin-top:var(--espaco-5);">
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-documento"/></svg>
+    <div>Pedido pago sem NF-e emitida.</div>
+  </div>
+  <a class="btn btn--secundario" href="{% url 'fiscal:nota_manual' pedido.pk %}">Registrar NF-e manual</a>
+  {% endif %}
 {% endif %}
 
 {% if proximos_status %}
-<h2>Atualizar status</h2>
-<form method="post" action="{% url 'sales:pedido_atualizar_status' pedido.pk %}" style="display:flex; gap:.5rem; flex-wrap:wrap">
+<section class="cartao" style="margin-top:var(--espaco-5);">
+  <h2 style="margin-top:0;">Atualizar status</h2>
+  <form method="post" action="{% url 'sales:pedido_atualizar_status' pedido.pk %}">
     {% csrf_token %}
-    {% for valor, rotulo in proximos_status %}
+    <div class="grupo-botoes">
+      {% for valor, rotulo in proximos_status %}
         {% if valor != 'pago' %}
-        <button type="submit" name="status" value="{{ valor }}" class="btn btn--secundario">{{ rotulo }}</button>
+        <button type="submit" name="status" value="{{ valor }}" class="btn btn--secundario btn--pequeno">{{ rotulo }}</button>
         {% endif %}
-    {% endfor %}
-</form>
-<p class="helptext">O status "Pago" é definido automaticamente pela confirmação do provedor de pagamento.</p>
+      {% endfor %}
+    </div>
+    <p class="helptext">O status “Pago” é definido automaticamente pela confirmação do provedor de pagamento.</p>
+  </form>
+</section>
 {% else %}
 <p class="helptext">Este pedido está em estado final.</p>
 {% endif %}

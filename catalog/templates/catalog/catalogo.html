@@ -1,39 +1,52 @@
 {% extends "base_loja.html" %}
 {% block title %}Vitrine — Rei do Feno{% endblock %}
 {% block content %}
-<h1>Vitrine</h1>
+<div class="cabecalho-pagina">
+  <div class="cabecalho-pagina__texto">
+    <h1>Vitrine</h1>
+    <p>Feno, ração e suplementos com retirada nas unidades ou entrega.</p>
+  </div>
+</div>
 
-<form method="get" class="field">
+<ul class="faixa-beneficios" aria-label="Condições de compra">
+  <li>
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-unidade"/></svg>
+    Retirada em Feira de Santana ou Iaçu
+  </li>
+  <li>
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-carrinho"/></svg>
+    Entrega combinada com o vendedor
+  </li>
+  <li>
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-ok"/></svg>
+    Pagamento via Mercado Pago
+  </li>
+</ul>
+
+<form method="get" class="filtro-barra">
+  <div class="campo" style="min-width:14rem;">
     <label for="categoria">Categoria</label>
-    <select id="categoria" name="categoria" onchange="this.form.submit()">
-        <option value="">Todas</option>
-        {% for categoria in categorias %}
-            <option value="{{ categoria.pk }}" {% if categoria.pk|stringformat:"s" == categoria_selecionada %}selected{% endif %}>
-                {{ categoria.nome }}
-            </option>
-        {% endfor %}
+    <select id="categoria" name="categoria" data-no-busy onchange="this.form.submit()">
+      <option value="">Todas as categorias</option>
+      {% for categoria in categorias %}
+        <option value="{{ categoria.pk }}" {% if categoria.pk|stringformat:"s" == categoria_selecionada %}selected{% endif %}>
+          {{ categoria.nome }}
+        </option>
+      {% endfor %}
     </select>
+  </div>
+  <noscript><button type="submit" class="btn btn--secundario">Filtrar</button></noscript>
 </form>
 
 {% if produtos %}
 <div class="cartoes">
-    {% for produto in produtos %}
-    <section class="card">
-        <h2><a href="{% url 'loja:produto' produto.pk %}">{{ produto.nome }}</a></h2>
-        <p>{{ produto.categoria.nome }} · {{ produto.get_unidade_medida_display }}</p>
-        <p style="font-size:1.25rem"><strong>R$ {{ produto.preco_online }}</strong></p>
-        <a class="btn" href="{% url 'loja:produto' produto.pk %}">Ver detalhes</a>
-    </section>
-    {% endfor %}
+  {% for produto in produtos %}
+    {% include "components/produto_cartao.html" with produto=produto %}
+  {% endfor %}
 </div>
-{% if is_paginated %}
-<nav class="paginacao" aria-label="Paginação">
-    {% if page_obj.has_previous %}<a href="?page={{ page_obj.previous_page_number }}">Anterior</a>{% endif %}
-    <span>Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}</span>
-    {% if page_obj.has_next %}<a href="?page={{ page_obj.next_page_number }}">Próxima</a>{% endif %}
-</nav>
-{% endif %}
+{% include "components/paginacao.html" %}
 {% else %}
-<div class="vazio">Nenhum produto disponível no momento.</div>
+{% url 'loja:catalogo' as url_catalogo %}
+{% include "components/estado_vazio.html" with icone="i-caixa" titulo="Nenhum produto disponível no momento." descricao="Ajuste o filtro de categoria ou volte mais tarde — o estoque é atualizado diariamente." acao_url=url_catalogo acao_texto="Ver todas" %}
 {% endif %}
 {% endblock %}

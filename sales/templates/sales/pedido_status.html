@@ -1,28 +1,37 @@
 {% extends "base_loja.html" %}
 {% block title %}Pedido {{ pedido.numero }} — Rei do Feno{% endblock %}
 {% block content %}
-<h1>Pedido {{ pedido.numero }}
-    <span class="badge {% if pedido.status == 'pago' or pedido.status == 'concluido' %}badge--ok{% elif pedido.status == 'cancelado' or pedido.status == 'falhou' %}badge--erro{% else %}badge--alerta{% endif %}">{{ pedido.get_status_display }}</span>
-</h1>
-<p>Olá, {{ pedido.cliente.nome }}. Modalidade: <strong>{{ pedido.get_modalidade_display }}</strong> · Unidade: {{ pedido.unidade.nome }}</p>
+<article style="max-width:38rem;">
+  <h1 style="display:flex; flex-wrap:wrap; align-items:center; gap:var(--espaco-3);">
+    Pedido {{ pedido.numero }}
+    {% include "components/status_pedido.html" with status=pedido.status rotulo=pedido.get_status_display %}
+  </h1>
+  <p>Olá, {{ pedido.cliente.nome }}. Modalidade: <strong>{{ pedido.get_modalidade_display }}</strong> · Unidade: {{ pedido.unidade.nome }}</p>
 
-<table class="tabela">
-    <thead><tr><th>Produto</th><th>Qtd.</th><th>Preço unit.</th><th>Subtotal</th></tr></thead>
-    <tbody>
+  <div class="tabela-envolve" style="margin-top:var(--espaco-5);">
+    <table class="tabela">
+      <thead><tr><th scope="col">Produto</th><th scope="col" class="num">Qtd.</th><th scope="col" class="num">Preço unit.</th><th scope="col" class="num">Subtotal</th></tr></thead>
+      <tbody>
         {% for item in pedido.itens.all %}
         <tr>
-            <td>{{ item.produto_nome }}</td>
-            <td>{{ item.quantidade }}</td>
-            <td>R$ {{ item.preco_unitario }}</td>
-            <td>R$ {{ item.subtotal }}</td>
+          <td>{{ item.produto_nome }}</td>
+          <td class="num">{{ item.quantidade }}</td>
+          <td class="num">R$ {{ item.preco_unitario }}</td>
+          <td class="num">R$ {{ item.subtotal }}</td>
         </tr>
         {% endfor %}
-        <tr><td colspan="3"><strong>Total</strong></td><td><strong>R$ {{ pedido.total }}</strong></td></tr>
-    </tbody>
-</table>
+        <tfoot>
+          <tr><td colspan="3">Total</td><td class="num">R$ {{ pedido.total }}</td></tr>
+        </tfoot>
+      </tbody>
+    </table>
+  </div>
 
-{% if pedido.status == 'aguardando_pagamento' %}
-<p><a class="btn" href="{% url 'sales:pagamento_iniciar' pedido.token_acesso %}">Ir para o pagamento</a></p>
-{% endif %}
-<p style="color:var(--tinta-500)">Guarde este link para acompanhar seu pedido.</p>
+  {% if pedido.status == 'aguardando_pagamento' %}
+  <p style="margin-top:var(--espaco-5);"><a class="btn" href="{% url 'sales:pagamento_iniciar' pedido.token_acesso %}" style="min-height:48px;">
+    Ir para o pagamento
+  </a></p>
+  {% endif %}
+  <p style="color:var(--tinta-500); font-size:.9rem;">Guarde este link para acompanhar seu pedido.</p>
+</article>
 {% endblock %}

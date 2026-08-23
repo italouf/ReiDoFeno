@@ -1,21 +1,16 @@
 {% extends "base.html" %}
 {% block title %}Nova interação — {{ cliente.nome }}{% endblock %}
 {% block content %}
-<div class="card form-cartao">
-    <h1>Nova interação</h1>
-    <p>Cliente: <strong>{{ cliente.nome }}</strong></p>
-    <form method="post">
-        {% csrf_token %}
-        {% for campo in form.visible_fields %}
-            <div class="field">
-                {{ campo.label_tag }}
-                {{ campo }}
-                {{ campo.errors }}
-            </div>
-        {% endfor %}
-        <button type="submit" class="btn">Registrar</button>
-        <a class="btn btn--secundario"
-           href="{% url 'customers:cliente_detalhe' cliente.pk %}">Cancelar</a>
-    </form>
+<div class="cartao form-cartao">
+  <h1>Nova interação</h1>
+  <p style="color:var(--tinta-700);">Cliente: <strong>{{ cliente.nome }}</strong></p>
+  <form method="post" data-enviar>
+    {% csrf_token %}
+    {% include "components/form_campos.html" with form=form %}
+    <div class="form-acoes">
+      <button type="submit" class="btn">Registrar</button>
+      <a class="btn btn--secundario" href="{% url 'customers:cliente_detalhe' cliente.pk %}">Cancelar</a>
+    </div>
+  </form>
 </div>
 {% endblock %}

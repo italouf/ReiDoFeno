@@ -1,49 +1,70 @@
 {% extends "base.html" %}
 {% block title %}{{ cliente.nome }} — Rei do Feno{% endblock %}
 {% block content %}
-<h1>{{ cliente.nome }}
-    <span class="badge badge--info">{{ cliente.get_tipo_pessoa_display }}</span>
-    <span class="badge">{{ cliente.get_categoria_display }}</span>
-</h1>
-
-<p>
-    Documento: {{ cliente.documento }} ·
-    Telefone:
-    {% if cliente.telefone %}
-        {{ cliente.telefone }}{% if cliente.whatsapp_url %} (<a href="{{ cliente.whatsapp_url }}" target="_blank" rel="noopener">WhatsApp</a>){% endif %}
-    {% else %}—{% endif %}
-    · E-mail: {{ cliente.email|default:"—" }}
+{% include "components/cabecalho_pagina.html" with titulo=cliente.nome %}
+<p style="margin:-1rem 0 var(--espaco-5); display:flex; flex-wrap:wrap; align-items:center; gap:var(--espaco-2);">
+  <span class="badge badge--info">{{ cliente.get_tipo_pessoa_display }}</span>
+  {% include "components/cliente_categoria.html" with categoria=cliente.categoria %}
 </p>
-<p>Endereço: {{ cliente.logradouro|default:"—" }}, {{ cliente.numero|default:"—" }}{% if cliente.cidade %} — {{ cliente.cidade }}/{{ cliente.uf }} (CEP {{ cliente.cep|default:"—" }}){% endif %}</p>
-{% if cliente.preferencia %}<p><strong>Preferência:</strong> {{ cliente.preferencia }}</p>{% endif %}
 
-<section class="card">
-    <h2>Histórico de pedidos</h2>
-    <div class="vazio">Nenhum pedido registrado ainda para este cliente.</div>
+<section class="cartao">
+  <h2>Dados de contato</h2>
+  <dl style="margin:0;">
+    <div class="linha-dado"><dt>Documento (CPF/CNPJ)</dt><dd>{{ cliente.documento }}</dd></div>
+    <div class="linha-dado">
+      <dt>Telefone</dt>
+      <dd>
+        {% if cliente.telefone %}
+          {{ cliente.telefone }}{% if cliente.whatsapp_url %} · <a href="{{ cliente.whatsapp_url }}" target="_blank" rel="noopener">WhatsApp</a>{% endif %}
+        {% else %}—{% endif %}
+      </dd>
+    </div>
+    <div class="linha-dado"><dt>E-mail</dt><dd>{{ cliente.email|default:"—" }}</dd></div>
+    <div class="linha-dado">
+      <dt>Endereço</dt>
+      <dd>{{ cliente.logradouro|default:"—" }}, {{ cliente.numero|default:"—" }}{% if cliente.cidade %} — {{ cliente.cidade }}/{{ cliente.uf }} (CEP {{ cliente.cep|default:"—" }}){% endif %}</dd>
+    </div>
+    {% if cliente.preferencia %}
+    <div class="linha-dado"><dt>Preferência de compra</dt><dd>{{ cliente.preferencia }}</dd></div>
+    {% endif %}
+  </dl>
 </section>
 
-<section class="card" style="margin-top:1rem">
+<div class="cartoes" style="grid-template-columns:1fr;">
+  <section class="cartao">
+    <h2>Histórico de pedidos</h2>
+    {% include "components/estado_vazio.html" with icone="i-documento" titulo="Nenhum pedido registrado ainda para este cliente." descricao="Os pedidos do balcão e da loja aparecem aqui." %}
+  </section>
+
+  <section class="cartao">
     <h2>Interações</h2>
     {% if interacoes %}
-        <table class="tabela">
-            <thead><tr><th>Data</th><th>Tipo</th><th>Vendedor</th><th>Observação</th></tr></thead>
-            <tbody>
-                {% for interacao in interacoes %}
-                <tr>
-                    <td>{{ interacao.criado_em|date:"d/m/Y H:i" }}</td>
-                    <td>{{ interacao.get_tipo_display }}</td>
-                    <td>{{ interacao.vendedor.username }}</td>
-                    <td>{{ interacao.observacao|default:"—" }}</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
+    <div class="tabela-envolve" style="border:0;">
+      <table class="tabela">
+        <thead><tr><th scope="col">Data</th><th scope="col">Tipo</th><th scope="col">Vendedor</th><th scope="col">Observação</th></tr></thead>
+        <tbody>
+          {% for interacao in interacoes %}
+          <tr>
+            <td>{{ interacao.criado_em|date:"d/m/Y H:i" }}</td>
+            <td>{{ interacao.get_tipo_display }}</td>
+            <td>{{ interacao.vendedor.username }}</td>
+            <td>{{ interacao.observacao|default:"—" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
     {% else %}
-        <div class="vazio">Nenhuma interação registrada.</div>
+    {% url 'customers:interacao_novo' cliente.pk as url_interacao %}
+    {% include "components/estado_vazio.html" with icone="i-cliente" titulo="Nenhuma interação registrada." descricao="Registre ligações, visitas e negociações para acompanhar a recompra." acao_url=url_interacao acao_texto="Registrar interação" %}
     {% endif %}
-    <a class="btn btn--secundario"
-       href="{% url 'customers:interacao_novo' cliente.pk %}">Registrar interação</a>
-</section>
+    <p style="margin:var(--espaco-4) 0 0;">
+      <a class="btn btn--secundario" href="{% url 'customers:interacao_novo' cliente.pk %}">Registrar interação</a>
+    </p>
+  </section>
+</div>
 
-{% if pode_gerenciar %}<a class="btn btn--secundario" href="{% url 'customers:cliente_editar' cliente.pk %}">Editar</a>{% endif %}
+<div class="form-acoes">
+  {% if pode_gerenciar %}<a class="btn btn--secundario" href="{% url 'customers:cliente_editar' cliente.pk %}">Editar cliente</a>{% endif %}
+</div>
 {% endblock %}

@@ -1,0 +1,20 @@
+{% comment %}
+Item da lista de avisos comerciais. Uso: {% for aviso in avisos %}{% include "components/aviso_item.html" %}{% endfor %}
+Espera `aviso` no contexto direto do loop.
+{% endcomment %}
+<article class="aviso-item {% if not aviso.lido %}aviso-item--nao-lido{% endif %}">
+  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
+       aria-hidden="true" style="{% if aviso.severidade == 'erro' %}color:#b02a37;{% elif aviso.severidade == 'alerta' %}color:#975a16;{% else %}color:#3d5a80;{% endif %}">
+    {% if aviso.severidade == 'erro' %}<use href="#i-erro"/>{% elif aviso.severidade == 'alerta' %}<use href="#i-alerta"/>{% else %}<use href="#i-info"/>{% endif %}
+  </svg>
+  <div style="flex:1;">
+    <p style="margin:0;">{{ aviso.mensagem }}</p>
+    <p style="margin:var(--espaco-1) 0 0;"><time>{{ aviso.criado_em|date:"d/m/Y H:i" }}</time>{% if not aviso.lido %} · <span class="badge badge--alerta">Não lido</span>{% endif %}</p>
+  </div>
+  {% if not aviso.lido %}
+  <form method="post" action="{% url 'analytics:aviso_ler' aviso.pk %}" data-no-busy>
+    {% csrf_token %}
+    <button type="submit" class="btn btn--secundario btn--pequeno">Marcar lido</button>
+  </form>
+  {% endif %}
+</article>

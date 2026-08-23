@@ -1,31 +1,40 @@
 {% extends "base.html" %}
 {% block title %}Clientes — Rei do Feno{% endblock %}
 {% block content %}
-<h1>Clientes</h1>
-{% if pode_gerenciar %}<p><a class="btn" href="{% url 'customers:cliente_novo' %}">Novo cliente</a></p>{% endif %}
+{% if pode_gerenciar %}
+  {% url 'customers:cliente_novo' as url_cliente_novo %}
+  {% include "components/cabecalho_pagina.html" with titulo="Clientes" contador=clientes|length acao_url=url_cliente_novo acao_texto="Novo cliente" %}
+{% else %}
+  {% include "components/cabecalho_pagina.html" with titulo="Clientes" contador=clientes|length %}
+{% endif %}
 
 {% if clientes %}
-<div style="overflow-x:auto">
-<table class="tabela">
-    <thead><tr><th>Nome</th><th>Tipo</th><th>Documento</th><th>Categoria</th><th>Telefone</th><th></th></tr></thead>
+<div class="tabela-envolve">
+  <table class="tabela">
+    <thead><tr>
+      <th scope="col">Nome</th><th scope="col">Tipo</th><th scope="col">Documento</th>
+      <th scope="col">Categoria</th><th scope="col">Telefone</th><th scope="col"><span class="visually-hidden">Ações</span></th>
+    </tr></thead>
     <tbody>
-        {% for cliente in clientes %}
-        <tr>
-            <td><a href="{% url 'customers:cliente_detalhe' cliente.pk %}">{{ cliente.nome }}</a></td>
-            <td>{{ cliente.get_tipo_pessoa_display }}</td>
-            <td>{{ cliente.documento }}</td>
-            <td>{{ cliente.get_categoria_display }}</td>
-            <td>{{ cliente.telefone|default:"—" }}</td>
-            <td>
-                {% if pode_gerenciar %}<a href="{% url 'customers:cliente_editar' cliente.pk %}">Editar</a>{% endif %}
-                {% if cliente.whatsapp_url and pode_gerenciar %}<a href="{{ cliente.whatsapp_url }}" target="_blank" rel="noopener">WhatsApp</a>{% endif %}
-            </td>
-        </tr>
-        {% endfor %}
+      {% for cliente in clientes %}
+      <tr>
+        <td style="font-weight:600;"><a href="{% url 'customers:cliente_detalhe' cliente.pk %}" style="color:var(--tinta-900); text-decoration:none;">{{ cliente.nome }}</a></td>
+        <td>{{ cliente.get_tipo_pessoa_display }}</td>
+        <td>{{ cliente.documento }}</td>
+        <td>{% include "components/cliente_categoria.html" with categoria=cliente.categoria %}</td>
+        <td>{{ cliente.telefone|default:"—" }}</td>
+        <td style="white-space:nowrap;">
+          {% if pode_gerenciar %}<a class="btn btn--secundario btn--pequeno" href="{% url 'customers:cliente_editar' cliente.pk %}">Editar</a>{% endif %}
+          {% if cliente.whatsapp_url and pode_gerenciar %}<a class="btn btn--secundario btn--pequeno" href="{{ cliente.whatsapp_url }}" target="_blank" rel="noopener">WhatsApp</a>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
     </tbody>
-</table>
+  </table>
 </div>
+{% include "components/paginacao.html" %}
 {% else %}
-<div class="vazio">Nenhum cliente cadastrado ainda.</div>
+{% url 'customers:cliente_novo' as url_cliente_novo2 %}
+{% include "components/estado_vazio.html" with icone="i-cliente" titulo="Nenhum cliente cadastrado ainda." descricao="Cadastre haras, fazendas e revendas para acompanhar histórico e recompra." acao_url=url_cliente_novo2 acao_texto="Novo cliente" %}
 {% endif %}
 {% endblock %}

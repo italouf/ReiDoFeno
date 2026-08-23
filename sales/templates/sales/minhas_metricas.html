@@ -1,28 +1,32 @@
 {% extends "base.html" %}
 {% block title %}Minhas métricas — Rei do Feno{% endblock %}
 {% block content %}
-<h1>Minhas métricas</h1>
-<div class="cartoes">
-    <section class="card">
-        <h2>Pedidos hoje</h2>
-        <p style="font-size:2rem; margin:0">{{ pedidos_hoje }}</p>
-    </section>
-    <section class="card">
-        <h2>Vendas totais</h2>
-        <p style="font-size:2rem; margin:0">R$ {{ vendas_total|floatformat:2 }}</p>
-    </section>
-    <section class="card">
-        <h2>Clientes atendidos</h2>
-        <p style="font-size:2rem; margin:0">{{ clientes_atendidos }}</p>
-    </section>
-    <section class="card">
-        <h2>Pedidos pendentes</h2>
-        <p style="font-size:2rem; margin:0">{{ pendentes }}</p>
-    </section>
-    <section class="card">
-        <h2>Interações hoje</h2>
-        <p style="font-size:2rem; margin:0">{{ interacoes_hoje }}</p>
-    </section>
-</div>
-<p><a class="btn btn--secundario" href="{% url 'sales:pedidos_internos' %}">Ver meus pedidos</a></p>
+{% include "components/cabecalho_pagina.html" with titulo="Minhas métricas" descricao="Seu desempenho de atendimento e vendas." %}
+
+<section class="cartao">
+  <dl class="painel-numeros">
+    <div class="numero-bloco">
+      <dt>Pedidos hoje</dt>
+      <dd>{{ pedidos_hoje }}</dd>
+    </div>
+    <div class="numero-bloco">
+      <dt>Vendas totais</dt>
+      <dd>R$ {{ vendas_total|floatformat:2 }}</dd>
+    </div>
+    <div class="numero-bloco">
+      <dt>Clientes atendidos</dt>
+      <dd>{{ clientes_atendidos }}</dd>
+    </div>
+    <div class="numero-bloco">
+      <dt>Pedidos pendentes</dt>
+      <dd>{{ pendentes }}</dd>
+    </div>
+    <div class="numero-bloco">
+      <dt>Interações hoje</dt>
+      <dd>{{ interacoes_hoje }}</dd>
+    </div>
+  </dl>
+</section>
+
+<p style="margin-top:var(--espaco-5);"><a class="btn btn--secundario" href="{% url 'sales:pedidos_internos' %}">Ver meus pedidos</a></p>
 {% endblock %}

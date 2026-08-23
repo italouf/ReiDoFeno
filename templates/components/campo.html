@@ -1,0 +1,15 @@
+{% comment %}
+Campo de formulário Django. Uso dentro de {% for field in form %}:
+{% include "components/campo.html" with campo=field %}
+Ou manualmente com id/label/nome/tipo.
+{% endcomment %}
+<div class="campo{% if campo.errors %} campo--invalido{% endif %}" {% if campo.field.required %}data-obrigatorio{% endif %}>
+  {% if campo.label_tag %}{{ campo.label_tag }}{% elif label %}<label for="{{ id|default:id }}">{{ label }}</label>{% endif %}
+  {% if campo %}{{ campo }}{% else %}<input type="{{ tipo|default:'text' }}" name="{{ nome }}" id="{{ id }}" value="{{ valor|default:'' }}" placeholder="{{ placeholder|default:'' }}"{% if obrigatorio %} required aria-required="true"{% endif %}>{% endif %}
+  {% if campo.help_text or ajuda %}<span class="helptext">{{ campo.help_text|default:ajuda }}</span>{% endif %}
+  {% if campo.errors %}
+    <ul class="erro-lista" role="alert">
+      {% for erro in campo.errors %}<li>{{ erro }}</li>{% endfor %}
+    </ul>
+  {% endif %}
+</div>

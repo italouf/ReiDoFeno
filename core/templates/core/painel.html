@@ -1,120 +1,146 @@
 {% extends "base.html" %}
 {% block title %}Painel — Rei do Feno{% endblock %}
 {% block content %}
-<h1>Painel</h1>
-<p>Olá, {{ user.get_full_name|default:user.username }}.
-    <span class="badge badge--info">{{ user.perfil }}</span></p>
+{% include "components/cabecalho_pagina.html" with titulo="Painel" %}
+<p style="margin:-1rem 0 var(--espaco-5); color:var(--tinta-700);">
+  Olá, {{ user.get_full_name|default:user.username }}.
+  <span class="badge badge--info">{{ user.perfil }}</span>
+</p>
 
-<section class="card" style="margin-bottom:1rem">
-    <h2>Período</h2>
-    <form method="get" style="display:flex; gap:.5rem; flex-wrap:wrap; align-items:end">
-        <div class="field">
-            <label for="inicio">Início</label>
-            <input type="date" id="inicio" name="inicio" value="{{ filtro_inicio }}">
-        </div>
-        <div class="field">
-            <label for="fim">Fim</label>
-            <input type="date" id="fim" name="fim" value="{{ filtro_fim }}">
-        </div>
-        <button type="submit" class="btn">Aplicar</button>
-    </form>
-    <table class="tabela">
-        <tbody>
-            <tr><th>Vendas no período</th><td><strong>R$ {{ metricas.total_vendas|floatformat:2 }}</strong> ({{ metricas.pedidos_vendidos }} pedidos)</td></tr>
-            <tr><th>Despesas do período</th><td>R$ {{ metricas.despesas_total|floatformat:2 }}</td></tr>
-            <tr><th>Lucro estimado</th><td><strong style="font-size:1.15rem">R$ {{ metricas.lucro_estimado|floatformat:2 }}</strong></td></tr>
-            <tr><th>Aguardando pagamento</th><td>{{ metricas.aguardando_total }} pedido(s)</td></tr>
-        </tbody>
-    </table>
+<form method="get" class="filtro-barra">
+  <div class="campo">
+    <label for="inicio">Início</label>
+    <input type="date" id="inicio" name="inicio" value="{{ filtro_inicio }}">
+  </div>
+  <div class="campo">
+    <label for="fim">Fim</label>
+    <input type="date" id="fim" name="fim" value="{{ filtro_fim }}">
+  </div>
+  <button type="submit" class="btn">Aplicar</button>
+</form>
+
+<section class="cartao" aria-labelledby="t-numeros">
+  <h2 id="t-numeros">Período</h2>
+  <dl class="painel-numeros">
+    <div class="numero-bloco">
+      <dt>Vendas no período</dt>
+      <dd>R$ {{ metricas.total_vendas|floatformat:2 }} <small>({{ metricas.pedidos_vendidos }} pedidos)</small></dd>
+    </div>
+    <div class="numero-bloco">
+      <dt>Despesas do período</dt>
+      <dd>R$ {{ metricas.despesas_total|floatformat:2 }}</dd>
+    </div>
+    <div class="numero-bloco">
+      <dt>Lucro estimado</dt>
+      <dd style="color:var(--verde-tinta);">R$ {{ metricas.lucro_estimado|floatformat:2 }}</dd>
+    </div>
+    <div class="numero-bloco">
+      <dt>Aguardando pagamento</dt>
+      <dd>{{ metricas.aguardando_total }} pedido(s)</dd>
+    </div>
+  </dl>
 </section>
 
 {% if metricas.top_produtos %}
-<section class="card" style="margin-bottom:1rem">
-    <h2>Produtos mais vendidos no período</h2>
+<section class="cartao">
+  <h2>Produtos mais vendidos no período</h2>
+  <div class="tabela-envolve">
     <table class="tabela">
-        <thead><tr><th>Produto</th><th>Qtd.</th><th>Receita</th></tr></thead>
-        <tbody>
+      <thead><tr><th scope="col">Produto</th><th scope="col" class="num">Qtd.</th><th scope="col" class="num">Receita</th></tr></thead>
+      <tbody>
         {% for linha in metricas.top_produtos %}
-            <tr><td>{{ linha.produto_nome }}</td><td>{{ linha.quantidade_vendida }}</td><td>R$ {{ linha.receita|floatformat:2 }}</td></tr>
+        <tr>
+          <td>{{ linha.produto_nome }}</td>
+          <td class="num">{{ linha.quantidade_vendida }}</td>
+          <td class="num">R$ {{ linha.receita|floatformat:2 }}</td>
+        </tr>
         {% endfor %}
-        </tbody>
+      </tbody>
     </table>
+  </div>
 </section>
 {% endif %}
 
 <div class="cartoes">
-    <section class="card">
-        <h2>Produtos ativos</h2>
-        <p style="font-size:2rem; margin:0">{{ total_produtos }}</p>
-    </section>
+  <section class="cartao">
+    <h2>Produtos ativos</h2>
+    <p style="font-size:2rem; font-weight:700; letter-spacing:-0.01em; margin:0; font-variant-numeric:tabular-nums;">{{ total_produtos }}</p>
+  </section>
 
-    <section class="card">
-        <h2>Estoque baixo</h2>
-        {% if estoques_baixos %}
-            <ul>
-            {% for item in estoques_baixos %}
-                <li>{{ item.produto.nome }} @ {{ item.unidade.nome }}: {{ item.quantidade }} (mín. {{ item.quantidade_minima }})</li>
-            {% endfor %}
-            </ul>
-        {% else %}
-            <div class="vazio">Nenhum item abaixo do mínimo.</div>
-        {% endif %}
-    </section>
+  <section class="cartao">
+    <h2>Estoque baixo</h2>
+    {% if estoques_baixos %}
+      <ul style="margin:0; padding-left:1.25rem;">
+        {% for item in estoques_baixos %}
+        <li>{{ item.produto.nome }} @ {{ item.unidade.nome }}: {{ item.quantidade }} (mín. {{ item.quantidade_minima }})</li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      {% include "components/estado_vazio.html" with icone="i-caixa" titulo="Nenhum item abaixo do mínimo." descricao="O estoque está acima do mínimo definido em todas as unidades." %}
+    {% endif %}
+  </section>
 
-    <section class="card">
-        <h2>Avisos recentes</h2>
-        {% if avisos_nao_lidos %}
-            <ul>
-            {% for aviso in avisos_nao_lidos %}
-                <li><span class="badge {% if aviso.severidade == 'erro' %}badge--erro{% elif aviso.severidade == 'alerta' %}badge--alerta{% else %}badge--info{% endif %}">{{ aviso.get_severidade_display }}</span> {{ aviso.mensagem }}</li>
-            {% endfor %}
-            </ul>
-        {% else %}
-            <div class="vazio">Nenhum aviso no momento.</div>
-        {% endif %}
-    </section>
+  <section class="cartao">
+    <h2>Avisos recentes</h2>
+    {% if avisos_nao_lidos %}
+      <ul style="margin:0; padding-left:0; list-style:none; display:grid; gap:var(--espaco-2);">
+        {% for aviso in avisos_nao_lidos %}
+        <li>
+          <span class="badge {% if aviso.severidade == 'erro' %}badge--erro{% elif aviso.severidade == 'alerta' %}badge--alerta{% else %}badge--info{% endif %}">{{ aviso.get_severidade_display }}</span>
+          {{ aviso.mensagem }}
+        </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      {% include "components/estado_vazio.html" with icone="i-aviso" titulo="Nenhum aviso no momento." descricao="Avisos de recompra e estoque aparecem aqui quando gerados." %}
+    {% endif %}
+  </section>
 </div>
 
-<section class="card" style="margin-top:1rem">
-    <h2>Últimas movimentações</h2>
-    {% if ultimas_movimentacoes %}
+<section class="cartao">
+  <h2>Últimas movimentações</h2>
+  {% if ultimas_movimentacoes %}
+  <div class="tabela-envolve">
     <table class="tabela">
-        <thead><tr><th>Data</th><th>Tipo</th><th>Produto</th><th>Unidade</th><th>Qtd.</th></tr></thead>
-        <tbody>
-            {% for movimento in ultimas_movimentacoes %}
-            <tr>
-                <td>{{ movimento.criado_em|date:"d/m H:i" }}</td>
-                <td>{{ movimento.get_tipo_display }}</td>
-                <td>{{ movimento.produto.nome }}</td>
-                <td>{{ movimento.unidade.nome }}</td>
-                <td>{{ movimento.quantidade }}</td>
-            </tr>
-            {% endfor %}
-        </tbody>
+      <thead><tr><th scope="col">Data</th><th scope="col">Tipo</th><th scope="col">Produto</th><th scope="col">Unidade</th><th scope="col" class="num">Qtd.</th></tr></thead>
+      <tbody>
+        {% for movimento in ultimas_movimentacoes %}
+        <tr>
+          <td>{{ movimento.criado_em|date:"d/m H:i" }}</td>
+          <td>{{ movimento.get_tipo_display }}</td>
+          <td>{{ movimento.produto.nome }}</td>
+          <td>{{ movimento.unidade.nome }}</td>
+          <td class="num">{{ movimento.quantidade }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
     </table>
-    {% else %}
-    <div class="vazio">Sem movimentações registradas ainda.</div>
-    {% endif %}
+  </div>
+  {% else %}
+  {% include "components/estado_vazio.html" with icone="i-setas" titulo="Sem movimentações registradas ainda." descricao="Registre uma entrada ou saída para começar o histórico." acao_url="/estoque/movimentos/entrada/" acao_texto="Registrar entrada" %}
+  {% endif %}
 </section>
 
-<section class="card" style="margin-top:1rem">
-    <h2>Despesas recentes</h2>
-    {% if despesas_recentes %}
+<section class="cartao">
+  <h2>Despesas recentes</h2>
+  {% if despesas_recentes %}
+  <div class="tabela-envolve">
     <table class="tabela">
-        <thead><tr><th>Data</th><th>Categoria</th><th>Fornecedor</th><th>Valor</th></tr></thead>
-        <tbody>
-            {% for despesa in despesas_recentes %}
-            <tr>
-                <td>{{ despesa.data|date:"d/m/Y" }}</td>
-                <td>{{ despesa.get_categoria_display }}</td>
-                <td>{{ despesa.fornecedor|default:"—" }}</td>
-                <td>R$ {{ despesa.valor }}</td>
-            </tr>
-            {% endfor %}
-        </tbody>
+      <thead><tr><th scope="col">Data</th><th scope="col">Categoria</th><th scope="col">Fornecedor</th><th scope="col" class="num">Valor</th></tr></thead>
+      <tbody>
+        {% for despesa in despesas_recentes %}
+        <tr>
+          <td>{{ despesa.data|date:"d/m/Y" }}</td>
+          <td>{{ despesa.get_categoria_display }}</td>
+          <td>{{ despesa.fornecedor|default:"—" }}</td>
+          <td class="num">R$ {{ despesa.valor }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
     </table>
-    {% else %}
-    <div class="vazio">Sem despesas registradas ainda.</div>
-    {% endif %}
+  </div>
+  {% else %}
+  {% include "components/estado_vazio.html" with icone="i-dinheiro" titulo="Sem despesas registradas ainda." descricao="Lance despesas para acompanhar o lucro real do período." %}
+  {% endif %}
 </section>
 {% endblock %}

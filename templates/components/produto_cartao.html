@@ -1,0 +1,19 @@
+{% comment %}
+Cartão de produto da vitrine. Uso: {% include "components/produto_cartao.html" with produto=produto %}
+{% endcomment %}
+<article class="produto-cartao">
+  {% include "components/produto_imagem.html" with produto=produto %}
+  <div class="produto-cartao__corpo">
+    <p class="rotulo">{{ produto.categoria.nome }}</p>
+    <h3><a href="{% url 'loja:produto' produto.pk %}">{{ produto.nome }}</a></h3>
+    <p class="produto-cartao__especificacao">{{ produto.get_unidade_medida_display }}</p>
+    <div class="produto-cartao__preco">
+      {% if produto.ativo %}
+        <strong>R$ {{ produto.preco_online }}</strong>
+        <a class="btn btn--pequeno" href="{% url 'loja:produto' produto.pk %}">Ver detalhes</a>
+      {% else %}
+        <span class="badge badge--neutro">Indisponível</span>
+      {% endif %}
+    </div>
+  </div>
+</article>

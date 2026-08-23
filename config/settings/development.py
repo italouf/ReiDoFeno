@@ -14,3 +14,7 @@ STORAGES = {
 }
 
 INTERNAL_IPS = ["127.0.0.1"]
+
+# Estáticos ao vivo no runserver (WhiteNoise lê dos finders e reindexa).
+WHITENOISE_USE_FINDERS = True
+WHITENOISE_AUTOREFRESH = True

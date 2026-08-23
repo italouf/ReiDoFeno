@@ -1,0 +1,8 @@
+{% comment %}
+Categoria do cliente (atacado/varejo). Uso: {% include "components/cliente_categoria.html" with categoria=cliente.categoria %}
+{% endcomment %}
+{% if categoria == 'atacado' %}
+  <span class="badge badge--info">Atacado</span>
+{% else %}
+  <span class="badge badge--neutro">Varejo</span>
+{% endif %}

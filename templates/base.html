@@ -2,48 +2,43 @@
 <!DOCTYPE html>
 <html lang="pt-br">
 <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{% block title %}Rei do Feno — Gestão{% endblock %}</title>
-    <link rel="stylesheet" href="{% static 'css/app.css' %}">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Rei do Feno — Gestão{% endblock %}</title>
+  <link rel="preload" href="{% static 'fonts/archivo-var.woff2' %}" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="{% static 'css/app.css' %}">
 </head>
-<body>
-<header class="topbar">
-    <div class="topbar__inner">
-        <a class="marca" href="/">Rei do Feno</a>
-        <nav aria-label="Navegação principal">
-            <ul class="nav">
-                <li><a href="/">Painel</a></li>
-                <li><a href="{% url 'catalog:produto_lista' %}">Produtos</a></li>
-                <li><a href="{% url 'stock:movimento_lista' %}">Movimentações</a></li>
-                <li><a href="#custos">Custos</a></li>
-                <li><a href="{% url 'customers:cliente_lista' %}">Clientes</a></li>
-                <li><a href="#loja">Loja</a></li>
-                <li><a href="#vitrine">Vitrine</a></li>
-                <li><a href="{% url 'analytics:aviso_lista' %}">Avisos</a></li>
-                <li><a href="{% url 'sales:minhas_metricas' %}">Minhas métricas</a></li>
-            </ul>
-        </nav>
-        <span class="topbar__acao">
-            {% if user.is_authenticated %}
-                {{ user.username }}
-                <form method="post" action="{% url 'accounts:logout' %}" style="display:inline">
-                    {% csrf_token %}
-                    <button type="submit" class="btn btn--secundario">Sair</button>
-                </form>
-            {% else %}
-                <a href="{% url 'accounts:login' %}">Entrar</a>
-            {% endif %}
-        </span>
-    </div>
-</header>
-<main class="conteudo">
-    {% if messages %}
-        {% for mensagem in messages %}
-            <div class="alerta alerta--{{ mensagem.tags|default:'info' }}" role="status">{{ mensagem }}</div>
-        {% endfor %}
-    {% endif %}
-    {% block content %}{% endblock %}
-</main>
+<body class="gestao">
+<!--
+  CONTRATO DE DIREÇÃO — Rei do Feno v2
+  THESIS: o papel de pedido de uma casa agropecuária séria virou software;
+          recusa o dashboard SaaS genérico e o agro caricato.
+  OWN-WORLD: areia quente + tinta verde-institucional + fio de palha
+             dourado; borda fina vence sombra; Archivo auto-hospedada;
+             numerais tabulares.
+  STORY: a gestão lê números confiáveis, age sobre estoque/pedidos sem
+         ruído e confia no que vê; o estado fala antes da cor.
+  FIRST VIEWPORT: lateral verde-escuro com marca + grupos rotulados; barra
+                  superior branca; cabeçalho de página com ação primária à
+                  direita; conteúdo máx. 76rem sobre areia clara.
+  FORM: evolução do mundo vigente, refinado (SDD docs/visual-sdd.md §6).
+  FINISH: unreviewed and undocumented is unfinished; this build ends with
+          the finish review, the verdict, DESIGN.md, and every shipping
+          raster carrying its provenance.
+-->
+<a class="pulo" href="#conteudo">Pular para o conteúdo principal</a>
+{% include "includes/icones.html" %}
+<div class="estrutura">
+  {% include "includes/sidebar.html" %}
+  <div class="veu-gaveta" data-veu></div>
+  <div class="coluna">
+    {% include "includes/header_gestao.html" %}
+    <main id="conteudo" class="conteudo">
+      {% include "includes/messages.html" %}
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+</div>
+<script src="{% static 'js/app.js' %}" defer></script>
 </body>
 </html>

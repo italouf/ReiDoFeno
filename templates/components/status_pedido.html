@@ -1,0 +1,14 @@
+{% comment %}
+Selo de status de pedido. Uso: {% include "components/status_pedido.html" with status=pedido.status %}
+{% endcomment %}
+{% if status == 'pago' or status == 'concluido' %}
+  <span class="badge badge--ok"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-ok"/></svg>{{ rotulo|default:"Pago" }}</span>
+{% elif status == 'cancelado' or status == 'falhou' or status == 'recusado' %}
+  <span class="badge badge--erro"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-erro"/></svg>{{ rotulo|default:"Cancelado" }}</span>
+{% elif status == 'em_separacao' or status == 'pronto_para_entrega' or status == 'enviado' %}
+  <span class="badge badge--info"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-caixa"/></svg>{{ rotulo|default:"Em separação" }}</span>
+{% elif status == 'rascunho' %}
+  <span class="badge badge--neutro">{{ rotulo|default:"Rascunho" }}</span>
+{% else %}
+  <span class="badge badge--alerta"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-dinheiro"/></svg>{{ rotulo|default:"Aguardando pagamento" }}</span>
+{% endif %}
