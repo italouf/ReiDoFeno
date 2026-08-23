@@ -1,0 +1,60 @@
+{% extends "base_loja.html" %}
+{% block title %}Minha privacidade — Rei do Feno{% endblock %}
+{% block content %}
+<h1>Minha privacidade</h1>
+{% if not cliente %}
+<p class="alerta alerta--info">Nenhum cadastro de cliente vinculado à sua conta.</p>
+{% else %}
+
+<section class="card" style="margin-bottom:1rem">
+    <h2>Consentimentos</h2>
+    <table class="tabela">
+        <thead><tr><th>Finalidade</th><th>Situação</th><th></th></tr></thead>
+        <tbody>
+            {% for finalidade, ativo in consentimentos.items %}
+            <tr>
+                <td>{{ finalidade }}</td>
+                <td>{% if ativo %}<span class="badge badge--ok">Ativo</span>{% else %}<span class="badge badge--neutro">Sem consentimento</span>{% endif %}</td>
+                <td>
+                    {% if ativo %}
+                    <form method="post" action="{% url 'privacy:revogar_consentimento' finalidade %}">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn--perigo">Revogar</button>
+                    </form>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <p class="helptext">Marketing exige consentimento separado e pode ser revogado a qualquer momento.</p>
+</section>
+
+<section class="card">
+    <h2>Solicitações do titular</h2>
+    {% if solicitacoes %}
+        <table class="tabela">
+            <thead><tr><th>Tipo</th><th>Status</th><th>Aberta em</th><th>Prazo</th></tr></thead>
+            <tbody>
+            {% for solicitacao in solicitacoes %}
+                <tr>
+                    <td>{{ solicitacao.get_tipo_display }}</td>
+                    <td>{{ solicitacao.get_status_display }}</td>
+                    <td>{{ solicitacao.aberta_em|date:"d/m/Y" }}</td>
+                    <td>{{ solicitacao.prazo_limite|date:"d/m/Y" }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <div class="vazio">Nenhuma solicitação registrada.</div>
+    {% endif %}
+    <form method="post" action="{% url 'privacy:nova_solicitacao' %}" style="margin-top:.5rem">
+        {% csrf_token %}
+        {{ form.as_p }}
+        <button type="submit" class="btn">Enviar solicitação / exportar agora</button>
+    </form>
+</section>
+
+{% endif %}
+{% endblock %}

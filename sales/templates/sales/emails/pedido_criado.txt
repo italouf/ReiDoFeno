@@ -1,0 +1,15 @@
+Pedido {{ pedido.numero }} recebido!
+
+Olá, {{ pedido.cliente.nome }}.
+
+Recebemos seu pedido e ele está aguardando confirmação de pagamento.
+
+Modalidade: {{ pedido.get_modalidade_display }}
+Unidade: {{ pedido.unidade.nome }}
+
+Itens:
+{% for item in pedido.itens.all %}- {{ item.quantidade }}× {{ item.produto_nome }} — R$ {{ item.subtotal }}
+{% endfor %}
+Total: R$ {{ pedido.total }}
+
+Acompanhe seu pedido com o código: {{ pedido.token_acesso }}

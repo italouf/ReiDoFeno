@@ -1,0 +1,6 @@
+Pedido {{ pedido.numero }} cancelado
+
+Olá, {{ pedido.cliente.nome }}.
+
+Seu pedido {{ pedido.numero }} foi cancelado e nenhuma cobrança permanece ativa.
+Se isso foi um engano, entre em contato conosco.

@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}{% if object %}Editar categoria{% else %}Nova categoria{% endif %} — Rei do Feno{% endblock %}
+{% block content %}
+<div class="card form-cartao">
+    <h1>{% if object %}Editar categoria{% else %}Nova categoria{% endif %}</h1>
+    <form method="post">
+        {% csrf_token %}
+        {% for campo in form.visible_fields %}
+            <div class="field">
+                {{ campo.label_tag }}
+                {{ campo }}
+                {% if campo.help_text %}<p class="helptext">{{ campo.help_text }}</p>{% endif %}
+                {{ campo.errors }}
+            </div>
+        {% endfor %}
+        <button type="submit" class="btn">Salvar</button>
+        <a class="btn btn--secundario" href="{% url 'catalog:categoria_lista' %}">Cancelar</a>
+    </form>
+</div>
+{% endblock %}

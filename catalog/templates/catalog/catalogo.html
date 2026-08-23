@@ -1,0 +1,39 @@
+{% extends "base_loja.html" %}
+{% block title %}Vitrine — Rei do Feno{% endblock %}
+{% block content %}
+<h1>Vitrine</h1>
+
+<form method="get" class="field">
+    <label for="categoria">Categoria</label>
+    <select id="categoria" name="categoria" onchange="this.form.submit()">
+        <option value="">Todas</option>
+        {% for categoria in categorias %}
+            <option value="{{ categoria.pk }}" {% if categoria.pk|stringformat:"s" == categoria_selecionada %}selected{% endif %}>
+                {{ categoria.nome }}
+            </option>
+        {% endfor %}
+    </select>
+</form>
+
+{% if produtos %}
+<div class="cartoes">
+    {% for produto in produtos %}
+    <section class="card">
+        <h2><a href="{% url 'loja:produto' produto.pk %}">{{ produto.nome }}</a></h2>
+        <p>{{ produto.categoria.nome }} · {{ produto.get_unidade_medida_display }}</p>
+        <p style="font-size:1.25rem"><strong>R$ {{ produto.preco_online }}</strong></p>
+        <a class="btn" href="{% url 'loja:produto' produto.pk %}">Ver detalhes</a>
+    </section>
+    {% endfor %}
+</div>
+{% if is_paginated %}
+<nav class="paginacao" aria-label="Paginação">
+    {% if page_obj.has_previous %}<a href="?page={{ page_obj.previous_page_number }}">Anterior</a>{% endif %}
+    <span>Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}</span>
+    {% if page_obj.has_next %}<a href="?page={{ page_obj.next_page_number }}">Próxima</a>{% endif %}
+</nav>
+{% endif %}
+{% else %}
+<div class="vazio">Nenhum produto disponível no momento.</div>
+{% endif %}
+{% endblock %}

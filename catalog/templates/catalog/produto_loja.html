@@ -1,0 +1,15 @@
+{% extends "base_loja.html" %}
+{% block title %}{{ produto.nome }} — Rei do Feno{% endblock %}
+{% block content %}
+<h1>{{ produto.nome }} <span class="badge">{{ produto.categoria.nome }}</span></h1>
+<p>Preço balcão por {{ produto.get_unidade_medida_display }}:
+    <strong>R$ {{ produto.preco_online }}</strong></p>
+<p>Unidade de venda: {{ produto.get_unidade_medida_display }}</p>
+<form method="post" action="{% url 'sales:adicionar' %}" style="display:flex; gap:.5rem; align-items:center">
+    {% csrf_token %}
+    <input type="hidden" name="produto_id" value="{{ produto.pk }}">
+    <input type="number" name="quantidade" value="1" min="1" step="1" style="width:5rem" aria-label="Quantidade">
+    <button type="submit" class="btn">Adicionar ao carrinho</button>
+</form>
+<a class="btn btn--secundario" href="{% url 'loja:catalogo' %}">Voltar à vitrine</a>
+{% endblock %}

@@ -1,0 +1,51 @@
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings.development"
+python_files = ["test_*.py"]
+testpaths = [
+    "accounts",
+    "core",
+    "catalog",
+    "customers",
+    "stock",
+    "sales",
+    "costs",
+    "fiscal",
+    "privacy",
+    "analytics",
+]
+addopts = "-ra"
+faulthandler_timeout = 45
+
+[tool.coverage.run]
+branch = true
+source = [
+    "accounts",
+    "core",
+    "catalog",
+    "customers",
+    "stock",
+    "sales",
+    "costs",
+    "fiscal",
+    "privacy",
+    "analytics",
+]
+omit = ["*/migrations/*", "*/tests/*"]
+
+[tool.coverage.report]
+show_missing = true
+precision = 2
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = [".venv", "staticfiles", "reports"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "DJ"]
+
+[tool.ruff.lint.per-file-ignores]
+"**/migrations/*" = ["E501"]
+
+[tool.bandit]
+exclude_dirs = [".venv", "staticfiles", "reports", ".git"]

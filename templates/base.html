@@ -1,0 +1,49 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Rei do Feno — Gestão{% endblock %}</title>
+    <link rel="stylesheet" href="{% static 'css/app.css' %}">
+</head>
+<body>
+<header class="topbar">
+    <div class="topbar__inner">
+        <a class="marca" href="/">Rei do Feno</a>
+        <nav aria-label="Navegação principal">
+            <ul class="nav">
+                <li><a href="/">Painel</a></li>
+                <li><a href="{% url 'catalog:produto_lista' %}">Produtos</a></li>
+                <li><a href="{% url 'stock:movimento_lista' %}">Movimentações</a></li>
+                <li><a href="#custos">Custos</a></li>
+                <li><a href="{% url 'customers:cliente_lista' %}">Clientes</a></li>
+                <li><a href="#loja">Loja</a></li>
+                <li><a href="#vitrine">Vitrine</a></li>
+                <li><a href="{% url 'analytics:aviso_lista' %}">Avisos</a></li>
+                <li><a href="{% url 'sales:minhas_metricas' %}">Minhas métricas</a></li>
+            </ul>
+        </nav>
+        <span class="topbar__acao">
+            {% if user.is_authenticated %}
+                {{ user.username }}
+                <form method="post" action="{% url 'accounts:logout' %}" style="display:inline">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn--secundario">Sair</button>
+                </form>
+            {% else %}
+                <a href="{% url 'accounts:login' %}">Entrar</a>
+            {% endif %}
+        </span>
+    </div>
+</header>
+<main class="conteudo">
+    {% if messages %}
+        {% for mensagem in messages %}
+            <div class="alerta alerta--{{ mensagem.tags|default:'info' }}" role="status">{{ mensagem }}</div>
+        {% endfor %}
+    {% endif %}
+    {% block content %}{% endblock %}
+</main>
+</body>
+</html>

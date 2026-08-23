@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Minhas métricas — Rei do Feno{% endblock %}
+{% block content %}
+<h1>Minhas métricas</h1>
+<div class="cartoes">
+    <section class="card">
+        <h2>Pedidos hoje</h2>
+        <p style="font-size:2rem; margin:0">{{ pedidos_hoje }}</p>
+    </section>
+    <section class="card">
+        <h2>Vendas totais</h2>
+        <p style="font-size:2rem; margin:0">R$ {{ vendas_total|floatformat:2 }}</p>
+    </section>
+    <section class="card">
+        <h2>Clientes atendidos</h2>
+        <p style="font-size:2rem; margin:0">{{ clientes_atendidos }}</p>
+    </section>
+    <section class="card">
+        <h2>Pedidos pendentes</h2>
+        <p style="font-size:2rem; margin:0">{{ pendentes }}</p>
+    </section>
+    <section class="card">
+        <h2>Interações hoje</h2>
+        <p style="font-size:2rem; margin:0">{{ interacoes_hoje }}</p>
+    </section>
+</div>
+<p><a class="btn btn--secundario" href="{% url 'sales:pedidos_internos' %}">Ver meus pedidos</a></p>
+{% endblock %}

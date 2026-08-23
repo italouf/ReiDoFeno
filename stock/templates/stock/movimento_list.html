@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Movimentações — Rei do Feno{% endblock %}
+{% block content %}
+<h1>Movimentações</h1>
+<p>
+    <a class="btn" href="{% url 'stock:movimento_entrada' %}">Entrada</a>
+    <a class="btn" href="{% url 'stock:movimento_saida' %}">Saída</a>
+    <a class="btn btn--secundario" href="{% url 'stock:movimento_ajuste' %}">Ajuste</a>
+    <a class="btn btn--secundario" href="{% url 'stock:movimento_transferencia' %}">Transferência</a>
+</p>
+
+{% if movimentos %}
+<table class="tabela">
+    <thead><tr><th>Data</th><th>Tipo</th><th>Produto</th><th>Unidade</th><th>Qtd.</th><th>Motivo</th><th>Usuário</th></tr></thead>
+    <tbody>
+        {% for movimento in movimentos %}
+        <tr>
+            <td>{{ movimento.criado_em|date:"d/m/Y H:i" }}</td>
+            <td><span class="badge {% if movimento.tipo == 'entrada' %}badge--ok{% elif movimento.tipo == 'saida' %}badge--info{% else %}badge--neutro{% endif %}">{{ movimento.get_tipo_display }}</span></td>
+            <td>{{ movimento.produto.nome }}</td>
+            <td>{{ movimento.unidade.nome }}</td>
+            <td>{{ movimento.quantidade }}</td>
+            <td>{{ movimento.motivo|default:"—" }}</td>
+            <td>{{ movimento.usuario.username|default:"sistema" }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% if is_paginated %}
+<nav class="paginacao" aria-label="Paginação">
+    {% if page_obj.has_previous %}<a href="?page={{ page_obj.previous_page_number }}">Anterior</a>{% endif %}
+    <span>Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}</span>
+    {% if page_obj.has_next %}<a href="?page={{ page_obj.next_page_number }}">Próxima</a>{% endif %}
+</nav>
+{% endif %}
+{% else %}
+<div class="vazio">Nenhuma movimentação registrada ainda.</div>
+{% endif %}
+{% endblock %}

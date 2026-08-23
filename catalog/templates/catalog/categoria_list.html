@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Categorias — Rei do Feno{% endblock %}
+{% block content %}
+<h1>Categorias</h1>
+<p><a class="btn" href="{% url 'catalog:categoria_novo' %}">Nova categoria</a></p>
+
+{% if categorias %}
+<table class="tabela">
+    <thead><tr><th>Nome</th><th>Descrição</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+        {% for categoria in categorias %}
+        <tr>
+            <td>{{ categoria.nome }}</td>
+            <td>{{ categoria.descricao|default:"—" }}</td>
+            <td>{% if categoria.ativa %}<span class="badge badge--ok">Ativa</span>{% else %}<span class="badge badge--neutro">Inativa</span>{% endif %}</td>
+            <td><a href="{% url 'catalog:categoria_editar' categoria.pk %}">Editar</a></td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="vazio">Nenhuma categoria cadastrada ainda.</div>
+{% endif %}
+{% endblock %}

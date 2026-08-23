@@ -1,0 +1,23 @@
+{% extends "base_loja.html" %}
+{% block title %}Meus pedidos — Rei do Feno{% endblock %}
+{% block content %}
+<h1>Meus pedidos</h1>
+{% if pedidos %}
+<table class="tabela">
+    <thead><tr><th>Número</th><th>Data</th><th>Total</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+        {% for pedido in pedidos %}
+        <tr>
+            <td>{{ pedido.numero }}</td>
+            <td>{{ pedido.criado_em|date:"d/m/Y H:i" }}</td>
+            <td>R$ {{ pedido.total }}</td>
+            <td><span class="badge badge--info">{{ pedido.get_status_display }}</span></td>
+            <td><a href="{% url 'sales:pedido_token' pedido.token_acesso %}">Detalhes</a></td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="vazio">Você ainda não fez pedidos. <a href="{% url 'loja:catalogo' %}">Ver a vitrine</a>.</div>
+{% endif %}
+{% endblock %}

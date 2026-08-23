@@ -1,0 +1,14 @@
+{% extends "base_loja.html" %}
+{% block title %}Pagamento do pedido {{ pedido.numero }} — Rei do Feno{% endblock %}
+{% block content %}
+<div class="card form-cartao">
+    <h1>Pagamento</h1>
+    <p>Pedido <strong>{{ pedido.numero }}</strong> · Total: R$ {{ pedido.total }}</p>
+    <p>Escolha o resultado para simular o retorno do Mercado Pago (ambiente de desenvolvimento):</p>
+    <form method="post" action="{% url 'sales:simular_resultado' pedido.token_acesso %}" style="display:flex; gap:.5rem">
+        {% csrf_token %}
+        <button type="submit" name="resultado" value="aprovado" class="btn">Aprovar pagamento</button>
+        <button type="submit" name="resultado" value="recusado" class="btn btn--perigo">Recusar pagamento</button>
+    </form>
+</div>
+{% endblock %}

@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Sessão encerrada — Rei do Feno{% endblock %}
+{% block content %}
+<div class="card form-cartao">
+    <h1>Sessão encerrada</h1>
+    <p>Você saiu do sistema.</p>
+    <a href="{% url 'accounts:login' %}" class="btn">Entrar novamente</a>
+</div>
+{% endblock %}

@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Produtos — Rei do Feno{% endblock %}
+{% block content %}
+<h1>Produtos</h1>
+<p><a class="btn" href="{% url 'catalog:produto_novo' %}">Novo produto</a></p>
+
+{% if produtos %}
+<div style="overflow-x:auto">
+<table class="tabela">
+    <thead>
+        <tr>
+            <th>Nome</th><th>Categoria</th><th>Unid.</th>
+            <th>Custo</th><th>Balcão</th><th>Online</th><th>Status</th><th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for produto in produtos %}
+        <tr>
+            <td>{{ produto.nome }}</td>
+            <td>{{ produto.categoria }}</td>
+            <td>{{ produto.get_unidade_medida_display }}</td>
+            <td>R$ {{ produto.custo }}</td>
+            <td>R$ {{ produto.preco_balcao }}</td>
+            <td>R$ {{ produto.preco_online }}</td>
+            <td>{% if produto.ativo %}<span class="badge badge--ok">Ativo</span>{% else %}<span class="badge badge--neutro">Inativo</span>{% endif %}</td>
+            <td><a href="{% url 'catalog:produto_editar' produto.pk %}">Editar</a></td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</div>
+{% if is_paginated %}
+<nav class="paginacao" aria-label="Paginação">
+    {% if page_obj.has_previous %}<a href="?page={{ page_obj.previous_page_number }}">Anterior</a>{% endif %}
+    <span>Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}</span>
+    {% if page_obj.has_next %}<a href="?page={{ page_obj.next_page_number }}">Próxima</a>{% endif %}
+</nav>
+{% endif %}
+{% else %}
+<div class="vazio">Nenhum produto cadastrado ainda. Use "Novo produto" para começar.</div>
+{% endif %}
+{% endblock %}

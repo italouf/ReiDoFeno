@@ -1,0 +1,43 @@
+{% extends "base_loja.html" %}
+{% block title %}Checkout — Rei do Feno{% endblock %}
+{% block content %}
+<h1>Finalizar pedido</h1>
+
+<div class="cartoes">
+    <section class="card" style="flex:2">
+        <h2>Seus itens</h2>
+        <table class="tabela">
+            <thead><tr><th>Produto</th><th>Qtd.</th><th>Subtotal</th></tr></thead>
+            <tbody>
+                {% for item in itens %}
+                <tr>
+                    <td>{{ item.produto.nome }}</td>
+                    <td>{{ item.quantidade }}</td>
+                    <td>R$ {{ item.subtotal }}</td>
+                </tr>
+                {% endfor %}
+                <tr><td colspan="2"><strong>Total</strong></td><td><strong>R$ {{ total }}</strong></td></tr>
+            </tbody>
+        </table>
+    </section>
+
+    <section class="card" style="flex:3">
+        <h2>Identificação e entrega</h2>
+        <form method="post">
+            {% csrf_token %}
+            {% if form.non_field_errors %}
+                <ul class="erro-lista">{% for erro in form.non_field_errors %}<li>{{ erro }}</li>{% endfor %}</ul>
+            {% endif %}
+            {% for campo in form.visible_fields %}
+                <div class="field">
+                    {{ campo.label_tag }}
+                    {{ campo }}
+                    {% if campo.help_text %}<p class="helptext">{{ campo.help_text }}</p>{% endif %}
+                    {{ campo.errors }}
+                </div>
+            {% endfor %}
+            <button type="submit" class="btn">Revisar e pagar</button>
+        </form>
+    </section>
+</div>
+{% endblock %}

@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Clientes — Rei do Feno{% endblock %}
+{% block content %}
+<h1>Clientes</h1>
+{% if pode_gerenciar %}<p><a class="btn" href="{% url 'customers:cliente_novo' %}">Novo cliente</a></p>{% endif %}
+
+{% if clientes %}
+<div style="overflow-x:auto">
+<table class="tabela">
+    <thead><tr><th>Nome</th><th>Tipo</th><th>Documento</th><th>Categoria</th><th>Telefone</th><th></th></tr></thead>
+    <tbody>
+        {% for cliente in clientes %}
+        <tr>
+            <td><a href="{% url 'customers:cliente_detalhe' cliente.pk %}">{{ cliente.nome }}</a></td>
+            <td>{{ cliente.get_tipo_pessoa_display }}</td>
+            <td>{{ cliente.documento }}</td>
+            <td>{{ cliente.get_categoria_display }}</td>
+            <td>{{ cliente.telefone|default:"—" }}</td>
+            <td>
+                {% if pode_gerenciar %}<a href="{% url 'customers:cliente_editar' cliente.pk %}">Editar</a>{% endif %}
+                {% if cliente.whatsapp_url and pode_gerenciar %}<a href="{{ cliente.whatsapp_url }}" target="_blank" rel="noopener">WhatsApp</a>{% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</div>
+{% else %}
+<div class="vazio">Nenhum cliente cadastrado ainda.</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,28 @@
+{% extends "base_loja.html" %}
+{% block title %}Pedido {{ pedido.numero }} — Rei do Feno{% endblock %}
+{% block content %}
+<h1>Pedido {{ pedido.numero }}
+    <span class="badge {% if pedido.status == 'pago' or pedido.status == 'concluido' %}badge--ok{% elif pedido.status == 'cancelado' or pedido.status == 'falhou' %}badge--erro{% else %}badge--alerta{% endif %}">{{ pedido.get_status_display }}</span>
+</h1>
+<p>Olá, {{ pedido.cliente.nome }}. Modalidade: <strong>{{ pedido.get_modalidade_display }}</strong> · Unidade: {{ pedido.unidade.nome }}</p>
+
+<table class="tabela">
+    <thead><tr><th>Produto</th><th>Qtd.</th><th>Preço unit.</th><th>Subtotal</th></tr></thead>
+    <tbody>
+        {% for item in pedido.itens.all %}
+        <tr>
+            <td>{{ item.produto_nome }}</td>
+            <td>{{ item.quantidade }}</td>
+            <td>R$ {{ item.preco_unitario }}</td>
+            <td>R$ {{ item.subtotal }}</td>
+        </tr>
+        {% endfor %}
+        <tr><td colspan="3"><strong>Total</strong></td><td><strong>R$ {{ pedido.total }}</strong></td></tr>
+    </tbody>
+</table>
+
+{% if pedido.status == 'aguardando_pagamento' %}
+<p><a class="btn" href="{% url 'sales:pagamento_iniciar' pedido.token_acesso %}">Ir para o pagamento</a></p>
+{% endif %}
+<p style="color:var(--tinta-500)">Guarde este link para acompanhar seu pedido.</p>
+{% endblock %}

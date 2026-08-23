@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}{{ pedido.numero }} — Rei do Feno{% endblock %}
+{% block content %}
+<h1>{{ pedido.numero }}
+    <span class="badge {% if pedido.status == 'pago' or pedido.status == 'concluido' %}badge--ok{% elif pedido.status == 'cancelado' or pedido.status == 'falhou' %}badge--erro{% else %}badge--alerta{% endif %}">{{ pedido.get_status_display }}</span>
+</h1>
+<p>
+    Cliente: {{ pedido.cliente.nome }}
+    {% if pedido.cliente.whatsapp_url %}
+        · <a href="{{ pedido.cliente.whatsapp_url }}" target="_blank" rel="noopener">WhatsApp do cliente</a>
+    {% endif %}
+    ·
+    {{ pedido.get_modalidade_display }} @ {{ pedido.unidade.nome }} ·
+    Criado em {{ pedido.criado_em|date:"d/m/Y H:i" }}
+    {% if pedido.usuario_criador %}por {{ pedido.usuario_criador.username }}{% endif %}
+</p>
+
+<table class="tabela">
+    <thead><tr><th>Produto</th><th>Qtd.</th><th>Preço unit.</th><th>Subtotal</th></tr></thead>
+    <tbody>
+        {% for item in pedido.itens.all %}
+        <tr>
+            <td>{{ item.produto_nome }}</td>
+            <td>{{ item.quantidade }}</td>
+            <td>R$ {{ item.preco_unitario }}</td>
+            <td>R$ {{ item.subtotal }}</td>
+        </tr>
+        {% endfor %}
+        <tr><td colspan="3"><strong>Total</strong></td><td><strong>R$ {{ pedido.total }}</strong></td></tr>
+    </tbody>
+</table>
+
+{% if pagamento %}
+<p>Pagamento: <span class="badge badge--info">{{ pagamento.get_status_display }}</span>
+   via {{ pagamento.provedor }}</p>
+{% endif %}
+
+{% if pedido.status == 'pago' %}
+    {% if pedido.nota_fiscal %}
+        <p>NF-e: <strong>{{ pedido.nota_fiscal.numero }}</strong>
+           ({{ pedido.nota_fiscal.get_origem_display }})
+           {% if pedido.nota_fiscal.link_documento %}
+               · <a href="{{ pedido.nota_fiscal.link_documento }}" target="_blank" rel="noopener">Ver documento</a>
+           {% endif %}</p>
+    {% else %}
+        <p class="alerta alerta--alerta">Pedido pago sem NF-e emitida.</p>
+        <a class="btn btn--secundario"
+           href="{% url 'fiscal:nota_manual' pedido.pk %}">Registrar NF-e manual</a>
+    {% endif %}
+{% endif %}
+
+{% if proximos_status %}
+<h2>Atualizar status</h2>
+<form method="post" action="{% url 'sales:pedido_atualizar_status' pedido.pk %}" style="display:flex; gap:.5rem; flex-wrap:wrap">
+    {% csrf_token %}
+    {% for valor, rotulo in proximos_status %}
+        {% if valor != 'pago' %}
+        <button type="submit" name="status" value="{{ valor }}" class="btn btn--secundario">{{ rotulo }}</button>
+        {% endif %}
+    {% endfor %}
+</form>
+<p class="helptext">O status "Pago" é definido automaticamente pela confirmação do provedor de pagamento.</p>
+{% else %}
+<p class="helptext">Este pedido está em estado final.</p>
+{% endif %}
+{% endblock %}

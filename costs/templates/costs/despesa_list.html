@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Custos e despesas — Rei do Feno{% endblock %}
+{% block content %}
+<h1>Custos e despesas</h1>
+<p><a class="btn" href="{% url 'costs:despesa_novo' %}">Nova despesa</a></p>
+
+{% if despesas %}
+<table class="tabela">
+    <thead><tr><th>Data</th><th>Categoria</th><th>Tipo</th><th>Fornecedor</th><th>Valor</th><th>Recorrência</th><th></th></tr></thead>
+    <tbody>
+        {% for despesa in despesas %}
+        <tr>
+            <td>{{ despesa.data|date:"d/m/Y" }}</td>
+            <td>{{ despesa.get_categoria_display }}</td>
+            <td>{{ despesa.tipo|default:"—" }}</td>
+            <td>{{ despesa.fornecedor|default:"—" }}</td>
+            <td>R$ {{ despesa.valor }}</td>
+            <td>{{ despesa.get_recorrencia_display }}</td>
+            <td><a href="{% url 'costs:despesa_editar' despesa.pk %}">Editar</a></td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="vazio">Nenhuma despesa registrada ainda.</div>
+{% endif %}
+{% endblock %}

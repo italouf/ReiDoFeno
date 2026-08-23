@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Unidades — Rei do Feno{% endblock %}
+{% block content %}
+<h1>Unidades</h1>
+<p><a class="btn" href="{% url 'core:unidade_novo' %}">Nova unidade</a></p>
+
+{% if unidades %}
+<table class="tabela">
+    <thead><tr><th>Nome</th><th>Cidade</th><th>Tipo</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+        {% for unidade in unidades %}
+        <tr>
+            <td>{{ unidade.nome }}</td>
+            <td>{{ unidade.cidade }}</td>
+            <td>{{ unidade.get_tipo_display }}</td>
+            <td>{% if unidade.ativa %}<span class="badge badge--ok">Ativa</span>{% else %}<span class="badge badge--neutro">Inativa</span>{% endif %}</td>
+            <td><a href="{% url 'core:unidade_editar' unidade.pk %}">Editar</a></td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="vazio">Nenhuma unidade cadastrada ainda.</div>
+{% endif %}
+{% endblock %}

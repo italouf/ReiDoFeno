@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}{{ cliente.nome }} — Rei do Feno{% endblock %}
+{% block content %}
+<h1>{{ cliente.nome }}
+    <span class="badge badge--info">{{ cliente.get_tipo_pessoa_display }}</span>
+    <span class="badge">{{ cliente.get_categoria_display }}</span>
+</h1>
+
+<p>
+    Documento: {{ cliente.documento }} ·
+    Telefone:
+    {% if cliente.telefone %}
+        {{ cliente.telefone }}{% if cliente.whatsapp_url %} (<a href="{{ cliente.whatsapp_url }}" target="_blank" rel="noopener">WhatsApp</a>){% endif %}
+    {% else %}—{% endif %}
+    · E-mail: {{ cliente.email|default:"—" }}
+</p>
+<p>Endereço: {{ cliente.logradouro|default:"—" }}, {{ cliente.numero|default:"—" }}{% if cliente.cidade %} — {{ cliente.cidade }}/{{ cliente.uf }} (CEP {{ cliente.cep|default:"—" }}){% endif %}</p>
+{% if cliente.preferencia %}<p><strong>Preferência:</strong> {{ cliente.preferencia }}</p>{% endif %}
+
+<section class="card">
+    <h2>Histórico de pedidos</h2>
+    <div class="vazio">Nenhum pedido registrado ainda para este cliente.</div>
+</section>
+
+<section class="card" style="margin-top:1rem">
+    <h2>Interações</h2>
+    {% if interacoes %}
+        <table class="tabela">
+            <thead><tr><th>Data</th><th>Tipo</th><th>Vendedor</th><th>Observação</th></tr></thead>
+            <tbody>
+                {% for interacao in interacoes %}
+                <tr>
+                    <td>{{ interacao.criado_em|date:"d/m/Y H:i" }}</td>
+                    <td>{{ interacao.get_tipo_display }}</td>
+                    <td>{{ interacao.vendedor.username }}</td>
+                    <td>{{ interacao.observacao|default:"—" }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <div class="vazio">Nenhuma interação registrada.</div>
+    {% endif %}
+    <a class="btn btn--secundario"
+       href="{% url 'customers:interacao_novo' cliente.pk %}">Registrar interação</a>
+</section>
+
+{% if pode_gerenciar %}<a class="btn btn--secundario" href="{% url 'customers:cliente_editar' cliente.pk %}">Editar</a>{% endif %}
+{% endblock %}

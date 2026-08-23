@@ -1,0 +1,41 @@
+{% extends "base_loja.html" %}
+{% block title %}Carrinho — Rei do Feno{% endblock %}
+{% block content %}
+<h1>Carrinho</h1>
+
+{% if itens %}
+<table class="tabela">
+    <thead><tr><th>Produto</th><th>Preço</th><th>Quantidade</th><th>Subtotal</th><th></th></tr></thead>
+    <tbody>
+        {% for item in itens %}
+        <tr>
+            <td>{{ item.produto.nome }}</td>
+            <td>R$ {{ item.produto.preco_online }}</td>
+            <td>
+                <form method="post" action="{% url 'sales:alterar_item' item.produto.pk %}" style="display:flex; gap:.5rem">
+                    {% csrf_token %}
+                    <input type="number" name="quantidade" value="{{ item.quantidade }}" min="1" step="1" style="width:5rem" aria-label="Quantidade de {{ item.produto.nome }}">
+                    <button type="submit" class="btn btn--secundario">Atualizar</button>
+                </form>
+            </td>
+            <td>R$ {{ item.subtotal }}</td>
+            <td>
+                <form method="post" action="{% url 'sales:remover_item' item.produto.pk %}">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn--perigo">Remover</button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+        <tr>
+            <td colspan="3"><strong>Total</strong></td>
+            <td colspan="2"><strong style="font-size:1.2rem">R$ {{ total }}</strong></td>
+        </tr>
+    </tbody>
+</table>
+<p><a class="btn" href="{% url 'sales:checkout' %}">Finalizar pedido</a></p>
+{% else %}
+<div class="vazio">Seu carrinho está vazio.
+    <a href="{% url 'loja:catalogo' %}">Ver a vitrine</a>.</div>
+{% endif %}
+{% endblock %}

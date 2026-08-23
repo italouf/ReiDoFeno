@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Instalar dependências
+        run: |
+          pip install --upgrade pip
+          pip install ruff==0.16.4
+      - name: Ruff
+        run: ruff check .
+
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Instalar dependências
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements-dev.txt
+      - name: Testes com cobertura
+        run: |
+          pytest --junitxml=reports/junit.xml --cov --cov-report=xml:reports/coverage.xml --cov-report=term-missing
+      - name: Publicar relatórios de teste
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: relatorios-testes
+          path: reports/
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Instalar ferramentas
+        run: |
+          pip install --upgrade pip
+          pip install bandit==1.9.4 pip-audit==2.10.1
+      - name: Bandit (análise estática)
+        run: bandit -c pyproject.toml -r . --severity-level medium -f txt -o reports/bandit.txt && cat reports/bandit.txt
+      - name: pip-audit (dependências)
+        run: pip-audit -r requirements.txt --desc off
+
+  semgrep:
+    runs-on: ubuntu-latest
+    container:
+      image: returntocorp/semgrep
+    steps:
+      - uses: actions/checkout@v4
+      - name: Semgrep (regras da comunidade)
+        run: semgrep scan --config auto --error || true
+        continue-on-error: true
+      - name: Semgrep (segurança estrita)
+        run: semgrep scan --config p/default --severity ERROR

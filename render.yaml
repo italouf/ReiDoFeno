@@ -1,0 +1,79 @@
+services:
+  - type: web
+    name: rei-do-feno
+    env: python
+    plan: starter
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r requirements.txt
+      python manage.py collectstatic --noinput
+      python manage.py migrate --noinput
+    startCommand: gunicorn config.wsgi:application --bind 0.0.0.0:$PORT --workers 2 --timeout 60
+    healthCheckPath: /healthz/
+    autoDeploy: true
+    envVars:
+      - key: DJANGO_SETTINGS_MODULE
+        value: config.settings.production
+      - key: PYTHON_VERSION
+        value: "3.12.7"
+      - key: DJANGO_SECRET_KEY
+        sync: false
+      - key: DATABASE_URL
+        fromDatabase:
+          name: reidofeno-db
+          property: connectionString
+      - key: DJANGO_ALLOWED_HOSTS
+        sync: false
+      - key: CSRF_TRUSTED_ORIGINS
+        sync: false
+      - key: SITE_URL
+        sync: false
+      - key: MERCADOPAGO_ACCESS_TOKEN
+        sync: false
+      - key: MERCADOPAGO_WEBHOOK_SECRET
+        sync: false
+      - key: MERCADO_PAGO_FAKE
+        value: "False"
+      - key: BLING_API_KEY
+        sync: false
+      - key: BLING_FAKE
+        value: "False"
+      - key: SENTRY_DSN
+        sync: false
+      - key: EMAIL_BACKEND
+        value: django.core.mail.backends.smtp.EmailBackend
+      - key: EMAIL_HOST
+        sync: false
+      - key: EMAIL_PORT
+        value: "587"
+      - key: EMAIL_HOST_USER
+        sync: false
+      - key: EMAIL_HOST_PASSWORD
+        sync: false
+      - key: DEFAULT_FROM_EMAIL
+        sync: false
+      - key: PEDIDO_TIMEOUT_MINUTOS
+        value: "240"
+      - key: RECOMPRA_DIAS
+        value: "30"
+
+crons:
+  - type: cron
+    name: expirar-pedidos
+    schedule: "*/15 * * * *"
+    command: python manage.py expirar_pedidos
+  - type: cron
+    name: processar-fiscal
+    schedule: "*/30 * * * *"
+    command: python manage.py processar_fiscal
+  - type: cron
+    name: avisos-comerciais
+    schedule: "0 8 * * *"
+    command: python manage.py gerar_avisos_comerciais
+
+databases:
+  - name: reidofeno-db
+    plan: basic-256mb
+    databaseName: reidofeno
+    user: reidofeno
+    postgresMajorVersion: "15"

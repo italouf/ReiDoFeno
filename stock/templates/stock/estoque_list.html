@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Estoque — Rei do Feno{% endblock %}
+{% block content %}
+<h1>Estoque por unidade</h1>
+
+<form method="get" class="field">
+    <label for="unidade">Filtrar unidade</label>
+    <select id="unidade" name="unidade" onchange="this.form.submit()">
+        <option value="">Todas as unidades</option>
+        {% for unidade in unidades %}
+            <option value="{{ unidade.pk }}" {% if unidade.pk|stringformat:"s" == unidade_selecionada %}selected{% endif %}>
+                {{ unidade.nome }}
+            </option>
+        {% endfor %}
+    </select>
+</form>
+
+<p>
+    <a class="btn" href="{% url 'stock:movimento_entrada' %}">Entrada</a>
+    <a class="btn" href="{% url 'stock:movimento_saida' %}">Saída</a>
+    <a class="btn btn--secundario" href="{% url 'stock:movimento_ajuste' %}">Ajuste</a>
+    <a class="btn btn--secundario" href="{% url 'stock:movimento_transferencia' %}">Transferência</a>
+</p>
+
+{% if estoques %}
+<table class="tabela">
+    <thead><tr><th>Produto</th><th>Unidade</th><th>Saldo</th><th>Disponível</th><th>Mínimo</th><th>Status</th></tr></thead>
+    <tbody>
+        {% for item in estoques %}
+        <tr>
+            <td>{{ item.produto }}</td>
+            <td>{{ item.unidade.nome }}</td>
+            <td>{{ item.quantidade }}</td>
+            <td>{{ item.disponivel }}</td>
+            <td>{{ item.quantidade_minima }}</td>
+            <td>{% if item.disponivel <= item.quantidade_minima %}<span class="badge badge--alerta">Estoque baixo</span>{% else %}<span class="badge badge--ok">OK</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="vazio">Nenhum registro de estoque ainda. Registre uma entrada para começar.</div>
+{% endif %}
+{% endblock %}
