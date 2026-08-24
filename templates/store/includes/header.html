@@ -1,0 +1,62 @@
+{% comment %}
+Cabeçalho da loja: faixa verde (contato/retirada/conta) + linha principal
+(marca, busca, carrinho com contador) + navegação de categorias.
+{% endcomment %}
+<header class="topo-loja">
+  <div class="topo-faixa">
+    <div class="topo-faixa__inner">
+      <a href="https://wa.me/5575981457227" target="_blank" rel="noopener">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-cliente"/></svg>
+        (75) 98145-7227
+      </a>
+      <span>Retirada em Feira de Santana ou Iaçu · entrega combinada</span>
+      <span class="topo-faixa__acao">
+        {% if user.is_authenticated %}
+          <a href="{% url 'sales:meus_pedidos' %}">Meus pedidos</a>
+          <a href="{% url 'privacy:minha_privacidade' %}">Minha conta</a>
+        {% else %}
+          <a href="{% url 'accounts:login' %}?next={{ request.get_full_path|urlencode }}">Entrar</a>
+        {% endif %}
+      </span>
+    </div>
+  </div>
+
+  <div class="topo-loja__inner">
+    <button class="btn-menu" type="button" data-abrir-menu aria-expanded="false" aria-controls="nav-categorias">
+      <svg viewBox="0 0 20 20" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M3 5.5h14M3 10h14M3 14.5h14"/></svg>
+      <span class="visually-hidden">Abrir menu de categorias</span>
+    </button>
+
+    <a class="marca" href="{% url 'loja:catalogo' %}">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><use href="#i-marca"/></svg>
+      Rei do Feno
+    </a>
+
+    {% include "store/includes/search_bar.html" %}
+
+    <div class="topo-acoes">
+      {% if user.is_authenticated %}
+      <a class="icone-acao" href="{% url 'sales:meus_pedidos' %}">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-cliente"/></svg>
+        <span class="icone-acao__rotulo">Meus pedidos</span>
+      </a>
+      {% endif %}
+      <a class="icone-acao" href="{% url 'sales:carrinho' %}" data-carrinho-icone>
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-carrinho"/></svg>
+        <span class="icone-acao__rotulo">Carrinho</span>
+        <span class="contador-carrinho num" data-carrinho-contador {% if not itens_carrinho %}hidden{% endif %}>{{ itens_carrinho|default:"" }}</span>
+      </a>
+    </div>
+  </div>
+
+  <nav class="nav-categorias" id="nav-categorias" data-menu aria-label="Categorias">
+    <div class="nav-categorias__inner">
+      <span class="nav-categorias__titulo">Categorias</span>
+      <a href="{% url 'loja:catalogo' %}" {% if not categoria_selecionada and not busca %}aria-current="page"{% endif %}>Todos</a>
+      {% for categoria in categorias_loja %}
+        <a href="{% url 'loja:catalogo' %}?categoria={{ categoria.pk }}"
+           {% if categoria_selecionada == categoria.pk|stringformat:"s" %}aria-current="page"{% endif %}>{{ categoria.nome }}</a>
+      {% endfor %}
+    </div>
+  </nav>
+</header>

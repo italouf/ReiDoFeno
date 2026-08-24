@@ -1,0 +1,58 @@
+/* Rei do Feno — Loja · tokens do mundo "armazém agropecuário de porta aberta" */
+:root {
+  /* Cor de ação (única) */
+  --verde-folha: #4a6741;
+  --verde-folha-hover: #3e5737;
+  --verde-folha-escuro: #2f4229;
+
+  /* Acento */
+  --palha: #c4a95b;
+  --palha-claro: #f3ebd8;
+  --palha-borda: #d9c48a;
+
+  /* Âncora e neutros quentes */
+  --marrom-terra: #5c4a3a;
+  --marrom-texto: #3e3428;
+  --creme: #f7f3ec;
+  --branco-quente: #fdfcfa;
+  --cinza-texto: #6b6258;
+  --cinza-quente: #8c8279;
+  --borda: #e8e2da;
+
+  /* Funcionais (sempre com rótulo textual) */
+  --sucesso: #3d7a45;
+  --sucesso-fundo: #e6f0e7;
+  --alerta: #9a6f0e;
+  --alerta-fundo: #faf0d4;
+  --erro: #b34040;
+  --erro-fundo: #f9e8e8;
+  --info: #4a7a8c;
+  --info-fundo: #e7eff2;
+
+  /* Espaço: 4 / 8 / 12 / 16 / 24 / 32 / 48 / 64 */
+  --e1: 0.25rem;
+  --e2: 0.5rem;
+  --e3: 0.75rem;
+  --e4: 1rem;
+  --e5: 1.5rem;
+  --e6: 2rem;
+  --e7: 3rem;
+  --e8: 4rem;
+
+  /* Forma */
+  --raio: 8px;
+  --raio-pill: 999px;
+  --sombra-1: 0 1px 2px rgb(62 52 40 / 0.06), 0 4px 14px rgb(62 52 40 / 0.07);
+  --sombra-2: 0 2px 4px rgb(62 52 40 / 0.08), 0 14px 30px rgb(62 52 40 / 0.14);
+
+  /* Movimento */
+  --transicao: 160ms ease-out;
+
+  /* Tipografia */
+  --fonte-corpo: "Nunito Sans", system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  --fonte-titulo: "Lexend", "Nunito Sans", system-ui, sans-serif;
+
+  /* Estrutura */
+  --largura-conteudo: 75rem;
+  --altura-topo: 8.5rem;
+}

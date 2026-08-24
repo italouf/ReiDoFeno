@@ -1,57 +1,84 @@
-{% extends "base_loja.html" %}
+{% extends "store/base_store.html" %}
 {% block title %}{{ produto.nome }} — Rei do Feno{% endblock %}
 {% block content %}
-<nav aria-label="Trilha de navegação" style="margin-bottom:var(--espaco-4); font-size:.9rem; color:var(--tinta-500);">
-  <a href="{% url 'loja:catalogo' %}" style="color:var(--tinta-500);">Vitrine</a>
-  <span aria-hidden="true"> / </span>{{ produto.categoria.nome }}
+{% with breadcrumb_itens=produto.categoria.nome|default:"" %}
+<nav class="breadcrumb" aria-label="Trilha de navegação">
+  <a href="{% url 'loja:catalogo' %}">Início</a>
+  <span aria-hidden="true">/</span>
+  <a href="{% url 'loja:catalogo' %}?categoria={{ produto.categoria.pk }}">{{ produto.categoria.nome }}</a>
+  <span aria-hidden="true">/</span>
+  <span>{{ produto.nome }}</span>
 </nav>
+{% endwith %}
 
 <article class="produto-detalhe">
-  <div class="produto-detalhe__midia">
-    {% include "components/produto_imagem.html" with produto=produto %}
+  <div>
+    <div class="produto-detalhe__midia">
+      {% include "components/produto_imagem.html" with produto=produto %}
+    </div>
     <p class="produto-detalhe__nota">Imagem ilustrativa; o produto é vendido por {{ produto.get_unidade_medida_display }}.</p>
   </div>
 
-  <div class="produto-detalhe__compra">
-    <p class="rotulo" style="color:var(--palha-600); margin:0 0 var(--espaco-2);">{{ produto.categoria.nome }}</p>
+  <div>
+    <p class="card-produto__categoria">{{ produto.categoria.nome }}</p>
     <h1 style="margin-top:0;">{{ produto.nome }}</h1>
-    <p style="color:var(--tinta-700);">Unidade de venda: {{ produto.get_unidade_medida_display }} · retirada nas unidades ou entrega.</p>
 
-    <div class="cartao" style="display:flex; align-items:center; justify-content:space-between; gap:var(--espaco-4); padding:var(--espaco-5); margin-top:var(--espaco-5);">
-      <div>
-        <p class="rotulo" style="margin:0 0 var(--espaco-1);">Preço online</p>
-        <p class="num" style="margin:0; font-size:2rem; font-weight:700; letter-spacing:-0.01em;">R$ {{ produto.preco_online }}</p>
-      </div>
-      <form method="post" action="{% url 'sales:adicionar' %}" data-enviar>
-        {% csrf_token %}
-        <input type="hidden" name="produto_id" value="{{ produto.pk }}">
-        <label for="quantidade" class="rotulo" style="display:block;">Quantidade</label>
-        <div style="display:flex; gap:var(--espaco-2); align-items:center;">
-          <input type="number" id="quantidade" name="quantidade" value="1" min="1" step="1" style="width:5rem;">
-          <button type="submit" class="btn">
+    <div class="produto-compra">
+      <div class="produto-compra__linha">
+        <div>
+          <p class="rotulo" style="margin:0 0 var(--e1);">Preço</p>
+          <p class="preco num" style="margin:0;">R$ {{ produto.preco_online }}</p>
+          <p style="margin:var(--e1) 0 0; font-size:0.875rem; color:var(--cinza-texto);">por {{ produto.get_unidade_medida_display }}</p>
+        </div>
+        {% if produto.ativo %}
+        <form method="post" action="{% url 'sales:adicionar' %}" data-enviar>
+          {% csrf_token %}
+          <input type="hidden" name="produto_id" value="{{ produto.pk }}">
+          <div class="produto-compra__qtd" style="margin-bottom:var(--e2);">
+            <label for="quantidade">Quantidade</label>
+            <input type="number" id="quantidade" name="quantidade" value="1" min="1" step="1" data-quantidade>
+          </div>
+          <button type="submit" class="btn btn--bloco" style="min-height:48px;">
             <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-carrinho"/></svg>
             Adicionar ao carrinho
           </button>
-        </div>
-      </form>
+        </form>
+        {% else %}
+          <span class="badge badge--neutro">Indisponível no momento</span>
+        {% endif %}
+      </div>
+
+      <ul class="lista-beneficios">
+        <li>
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-unidade"/></svg>
+          Retirada nas unidades de Feira de Santana ou Iaçu
+        </li>
+        <li>
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-carrinho"/></svg>
+          Entrega combinada com o vendedor
+        </li>
+        <li>
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-ok"/></svg>
+          Pagamento seguro via Mercado Pago (Pix ou cartão)
+        </li>
+        <li>
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-cliente"/></svg>
+          Dúvidas? WhatsApp (75) 98145-7227
+        </li>
+      </ul>
     </div>
 
-    <ul class="produto-detalhe__beneficios">
-      <li>
-        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-unidade"/></svg>
-        Retirada nas unidades de Feira de Santana ou Iaçu
-      </li>
-      <li>
-        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-carrinho"/></svg>
-        Entrega combinada com o vendedor
-      </li>
-      <li>
-        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-ok"/></svg>
-        Pagamento seguro via Mercado Pago (Pix ou cartão)
-      </li>
-    </ul>
+    <section class="produto-especificacoes" aria-label="Especificações">
+      <h2 style="margin-top:var(--e6);">Especificações</h2>
+      <dl>
+        <div class="linha-dado"><dt>Categoria</dt><dd>{{ produto.categoria.nome }}</dd></div>
+        <div class="linha-dado"><dt>Unidade de venda</dt><dd>{{ produto.get_unidade_medida_display }}</dd></div>
+        <div class="linha-dado"><dt>NCM</dt><dd class="num">{{ produto.ncm|default:"—" }}</dd></div>
+        <div class="linha-dado"><dt>Disponibilidade</dt><dd>Consulte estoque pelo WhatsApp</dd></div>
+      </dl>
+    </section>
 
-    <p style="margin-top:var(--espaco-5);">
+    <p style="margin-top:var(--e5);">
       <a class="btn btn--fantasma" href="{% url 'loja:catalogo' %}">
         <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4.5 6.5 10l5.5 5.5"/></svg>
         Voltar à vitrine

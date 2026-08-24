@@ -1,18 +1,18 @@
-{% extends "base_loja.html" %}
+{% extends "store/base_store.html" %}
 {% block title %}Pagamento do pedido {{ pedido.numero }} — Rei do Feno{% endblock %}
 {% block content %}
-<div class="cartao form-cartao">
+<div style="max-width:30rem;">
   <h1>Pagamento</h1>
-  <p>Pedido <strong>{{ pedido.numero }}</strong> · Total: <strong class="num">R$ {{ pedido.total }}</strong></p>
+  <p>Pedido <strong>{{ pedido.numero }}</strong> · Total: <strong class="preco num" style="font-size:1.2rem;">R$ {{ pedido.total }}</strong></p>
   <div class="alerta alerta--info" role="status">
     <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-info"/></svg>
     <div>Ambiente de desenvolvimento: escolha o resultado para simular o retorno do Mercado Pago.</div>
   </div>
   <form method="post" action="{% url 'sales:simular_resultado' pedido.token_acesso %}">
     {% csrf_token %}
-    <div class="grupo-botoes">
+    <div style="display:flex; gap:var(--e2); flex-wrap:wrap;">
       <button type="submit" name="resultado" value="aprovado" class="btn">Aprovar pagamento</button>
-      <button type="submit" name="resultado" value="recusado" class="btn btn--perigo btn--secundario" style="border-color:var(--erro-borda); color:#701a20;">Recusar pagamento</button>
+      <button type="submit" name="resultado" value="recusado" class="btn btn--perigo">Recusar pagamento</button>
     </div>
   </form>
 </div>

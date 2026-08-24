@@ -54,6 +54,7 @@ Sistema próprio e integrado (vitrine + estoque por unidade + CRM de recompra + 
 
 - Nome: "Rei do Feno" (uso consolidado na interface e documentos).
 - Razão social: N D Comércio de Alimentos para Animais LTDA — deve aparecer em rodapé/documentos legais.
+- Contato oficial de atendimento (informado pelo usuário): WhatsApp **75 98145-7227** (`https://wa.me/5575981457227`) — usar no header/footer da loja.
 - Idioma obrigatório: pt-BR em toda a interface.
 - Direção registrada no código vigente (`static/css/app.css`): sóbrio, operacional, sem ornamentos; cores com propósito (verde = confirmado, amarelo = atenção, vermelho = bloqueio/falha). Tratado como compromisso vigente até decisão explícita em contrário.
 

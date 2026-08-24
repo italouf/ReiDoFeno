@@ -1,0 +1,121 @@
+/* Rei do Feno — Loja · layout: header, container, footer */
+.conteudo-loja {
+  width: 100%;
+  max-width: var(--largura-conteudo);
+  margin: 0 auto;
+  padding: var(--e6) var(--e4) var(--e8);
+}
+
+/* ---------- Faixa superior ---------- */
+.topo-faixa { background: var(--verde-folha); color: var(--branco-quente); font-size: 0.8125rem; }
+.topo-faixa__inner {
+  max-width: var(--largura-conteudo); margin: 0 auto;
+  padding: var(--e1) var(--e4);
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--e1) var(--e5);
+}
+.topo-faixa a { color: var(--branco-quente); text-decoration: none; display: inline-flex; align-items: center; gap: var(--e1); }
+.topo-faixa a:hover { text-decoration: underline; }
+.topo-faixa svg { width: 15px; height: 15px; }
+.topo-faixa__acao { margin-left: auto; display: flex; gap: var(--e4); }
+
+/* ---------- Cabeçalho principal ---------- */
+.topo-loja {
+  position: sticky; top: 0; z-index: 50;
+  background: var(--branco-quente);
+  border-bottom: 1px solid var(--borda);
+  box-shadow: 0 1px 0 rgb(62 52 40 / 0.02);
+}
+.topo-loja__inner {
+  max-width: var(--largura-conteudo); margin: 0 auto;
+  padding: var(--e3) var(--e4);
+  display: flex; align-items: center; gap: var(--e4);
+}
+.marca {
+  display: flex; align-items: center; gap: var(--e2);
+  font-family: var(--fonte-titulo); font-weight: 700; font-size: 1.25rem;
+  color: var(--marrom-terra); text-decoration: none; letter-spacing: -0.01em;
+}
+.marca:hover { color: var(--verde-folha); }
+.marca svg { width: 30px; height: 30px; color: var(--verde-folha); }
+
+.busca-form { flex: 1 1 20rem; display: flex; gap: var(--e2); }
+.busca-campo { position: relative; flex: 1; }
+.busca-campo svg {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  left: var(--e3); width: 18px; height: 18px; color: var(--cinza-quente);
+}
+.busca-campo input {
+  width: 100%; min-height: 44px; padding: var(--e2) var(--e4) var(--e2) 2.6rem;
+  border: 1px solid var(--borda); border-radius: var(--raio-pill);
+  font: inherit; color: var(--marrom-texto); background: var(--creme);
+}
+.busca-campo input:focus { outline: 2px solid var(--verde-folha); outline-offset: 1px; background: var(--branco-quente); }
+
+.topo-acoes { display: flex; align-items: center; gap: var(--e2); }
+.icone-acao {
+  position: relative;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 44px; height: 44px; border-radius: var(--raio);
+  color: var(--marrom-terra); text-decoration: none;
+}
+.icone-acao:hover { background: var(--creme); color: var(--verde-folha); }
+.icone-acao svg { width: 22px; height: 22px; }
+.icone-acao__rotulo { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.contador-carrinho {
+  position: absolute; top: 2px; right: 0;
+  min-width: 18px; height: 18px; padding: 0 4px;
+  border-radius: var(--raio-pill);
+  background: var(--palha); color: var(--verde-folha-escuro);
+  font-size: 0.6875rem; font-weight: 800; line-height: 18px; text-align: center;
+}
+.contador-carrinho[hidden] { display: none; }
+.contador-carrinho.pulsa { animation: pulso 400ms ease-out; }
+@keyframes pulso { 40% { transform: scale(1.35); } }
+
+.btn-menu { display: none; }
+
+/* ---------- Navegação de categorias ---------- */
+.nav-categorias { border-top: 1px solid var(--borda); background: var(--branco-quente); }
+.nav-categorias__inner {
+  max-width: var(--largura-conteudo); margin: 0 auto; padding: 0 var(--e4);
+  display: flex; align-items: center; gap: var(--e1);
+  overflow-x: auto; scrollbar-width: none;
+}
+.nav-categorias__inner::-webkit-scrollbar { display: none; }
+.nav-categorias a {
+  display: inline-flex; align-items: center; min-height: 42px;
+  padding: var(--e1) var(--e4); border-radius: 0 0 var(--raio) var(--raio);
+  color: var(--cinza-texto); text-decoration: none; font-weight: 700; font-size: 0.9rem;
+  white-space: nowrap;
+}
+.nav-categorias a:hover { background: var(--creme); color: var(--marrom-terra); }
+.nav-categorias a[aria-current="page"] { color: var(--verde-folha); box-shadow: inset 0 -2px 0 var(--verde-folha); }
+.nav-categorias__titulo { font-size: 0.75rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.07em; color: var(--cinza-quente); margin-right: var(--e2); }
+
+/* ---------- Rodapé ---------- */
+.rodape { margin-top: var(--e8); background: var(--marrom-terra); color: var(--creme); }
+.rodape__colunas {
+  max-width: var(--largura-conteudo); margin: 0 auto;
+  padding: var(--e7) var(--e4);
+  display: grid; gap: var(--e6); grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+}
+.rodape h2, .rodape h3 {
+  font-size: 0.8125rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em;
+  color: var(--palha); margin: 0 0 var(--e3);
+}
+.rodape p { color: #e9e1d4; font-size: 0.9rem; }
+.rodape ul { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--e2); }
+.rodape a { color: #e9e1d4; text-decoration: none; font-size: 0.9rem; }
+.rodape a:hover { color: var(--branco-quente); text-decoration: underline; }
+.rodape .marca { color: var(--branco-quente); }
+.rodape .marca svg { color: var(--palha); }
+.rodape__linha {
+  border-top: 1px solid rgb(247 243 236 / 0.18);
+}
+.rodape__linha-inner {
+  max-width: var(--largura-conteudo); margin: 0 auto; padding: var(--e4);
+  display: flex; flex-wrap: wrap; gap: var(--e2) var(--e5);
+  align-items: center; justify-content: space-between;
+  font-size: 0.8125rem; color: #cfc4b2;
+}
+.rodape__linha svg { width: 16px; height: 16px; vertical-align: -3px; }

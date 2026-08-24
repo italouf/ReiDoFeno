@@ -1,7 +1,9 @@
-{% extends "base_loja.html" %}
+{% extends "store/base_store.html" %}
 {% block title %}Minha privacidade — Rei do Feno{% endblock %}
 {% block content %}
-{% include "components/cabecalho_pagina.html" with titulo="Minha privacidade" descricao="Seus dados, seus consentimentos e suas solicitações (LGPD)." %}
+<div class="prosa">
+<h1>Minha privacidade</h1>
+<p style="color:var(--cinza-texto);">Seus dados, seus consentimentos e suas solicitações (LGPD).</p>
 
 {% if not cliente %}
 <div class="alerta alerta--info" role="status">
@@ -10,54 +12,43 @@
 </div>
 {% else %}
 
-<section class="cartao">
-  <h2>Consentimentos</h2>
-  <div class="tabela-envolve">
-    <table class="tabela">
-      <thead><tr><th scope="col">Finalidade</th><th scope="col">Situação</th><th scope="col"><span class="visually-hidden">Ações</span></th></tr></thead>
-      <tbody>
-        {% for finalidade, ativo in consentimentos.items %}
-        <tr>
-          <td>{{ finalidade }}</td>
-          <td>{% if ativo %}<span class="badge badge--ok">Ativo</span>{% else %}<span class="badge badge--neutro">Sem consentimento</span>{% endif %}</td>
-          <td style="white-space:nowrap;">
-            {% if ativo %}
-            <form method="post" action="{% url 'privacy:revogar_consentimento' finalidade %}" data-no-busy>
-              {% csrf_token %}
-              <button type="submit" class="btn btn--perigo btn--pequeno">Revogar</button>
-            </form>
-            {% endif %}
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+<section style="background:var(--branco-quente); border:1px solid var(--borda); border-radius:var(--raio); padding:var(--e5); margin-bottom:var(--e5);">
+  <h2 style="margin-top:0;">Consentimentos</h2>
+  {% for finalidade, ativo in consentimentos.items %}
+  <div class="linha-dado">
+    <dt>{{ finalidade }}</dt>
+    <dd style="display:flex; align-items:center; gap:var(--e3);">
+      {% if ativo %}
+        <span class="badge badge--ok">Ativo</span>
+        <form method="post" action="{% url 'privacy:revogar_consentimento' finalidade %}" data-no-busy style="display:inline;">
+          {% csrf_token %}
+          <button type="submit" class="btn btn--secundario btn--pequeno">Revogar</button>
+        </form>
+      {% else %}
+        <span class="badge badge--neutro">Sem consentimento</span>
+      {% endif %}
+    </dd>
   </div>
+  {% endfor %}
   <p class="helptext">Marketing exige consentimento separado e pode ser revogado a qualquer momento.</p>
 </section>
 
-<section class="cartao">
-  <h2>Solicitações do titular</h2>
+<section style="background:var(--branco-quente); border:1px solid var(--borda); border-radius:var(--raio); padding:var(--e5);">
+  <h2 style="margin-top:0;">Solicitações do titular</h2>
   {% if solicitacoes %}
-  <div class="tabela-envolve">
-    <table class="tabela">
-      <thead><tr><th scope="col">Tipo</th><th scope="col">Status</th><th scope="col">Aberta em</th><th scope="col">Prazo</th></tr></thead>
-      <tbody>
-        {% for solicitacao in solicitacoes %}
-        <tr>
-          <td>{{ solicitacao.get_tipo_display }}</td>
-          <td>{{ solicitacao.get_status_display }}</td>
-          <td>{{ solicitacao.aberta_em|date:"d/m/Y" }}</td>
-          <td>{{ solicitacao.prazo_limite|date:"d/m/Y" }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
+    <div class="linha-dado" style="font-weight:700; color:var(--cinza-texto);">
+      <dt>Tipo</dt><dd>Status · abertura · prazo</dd>
+    </div>
+    {% for solicitacao in solicitacoes %}
+    <div class="linha-dado">
+      <dt>{{ solicitacao.get_tipo_display }}</dt>
+      <dd>{{ solicitacao.get_status_display }} · {{ solicitacao.aberta_em|date:"d/m/Y" }} · prazo {{ solicitacao.prazo_limite|date:"d/m/Y" }}</dd>
+    </div>
+    {% endfor %}
   {% else %}
-  {% include "components/estado_vazio.html" with icone="i-escudo" titulo="Nenhuma solicitação registrada." descricao="Você pode solicitar acesso, correção ou exclusão dos seus dados abaixo." %}
+    <p style="color:var(--cinza-texto);">Nenhuma solicitação registrada. Você pode solicitar acesso, correção ou exclusão dos seus dados abaixo.</p>
   {% endif %}
-  <form method="post" action="{% url 'privacy:nova_solicitacao' %}" style="margin-top:var(--espaco-4);" data-enviar>
+  <form method="post" action="{% url 'privacy:nova_solicitacao' %}" style="margin-top:var(--e4);" data-enviar>
     {% csrf_token %}
     {% include "components/form_campos.html" with form=form %}
     <div class="form-acoes">
@@ -67,4 +58,5 @@
 </section>
 
 {% endif %}
+</div>
 {% endblock %}

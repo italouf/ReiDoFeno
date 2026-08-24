@@ -1,0 +1,10 @@
+{% load static %}
+{% comment %} Barra de busca da loja. Envia GET para o catálogo com ?q= {% endcomment %}
+<form class="busca-form" method="get" action="{% url 'loja:catalogo' %}" role="search">
+  <div class="busca-campo">
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><use href="#i-busca"/></svg>
+    <label class="visually-hidden" for="q-topo">Buscar produtos</label>
+    <input type="search" id="q-topo" name="q" value="{{ busca|default:'' }}" placeholder="Buscar feno, ração, suplemento…" autocomplete="off">
+  </div>
+  <button type="submit" class="btn btn--pequeno">Buscar</button>
+</form>

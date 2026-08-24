@@ -1,42 +1,53 @@
-{% extends "base_loja.html" %}
+{% extends "store/base_store.html" %}
 {% block title %}Checkout — Rei do Feno{% endblock %}
 {% block content %}
-<h1>Finalizar pedido</h1>
+<h1>Finalizar compra</h1>
 
-<div class="cartoes" style="grid-template-columns:1fr;">
-  <section class="cartao">
-    <h2>Seus itens</h2>
-    <div class="tabela-envolve">
-      <table class="tabela">
-        <thead><tr><th scope="col">Produto</th><th scope="col" class="num">Qtd.</th><th scope="col" class="num">Subtotal</th></tr></thead>
-        <tbody>
-          {% for item in itens %}
-          <tr>
-            <td>{{ item.produto.nome }}</td>
-            <td class="num">{{ item.quantidade }}</td>
-            <td class="num">R$ {{ item.subtotal }}</td>
-          </tr>
-          {% endfor %}
-          <tfoot>
-            <tr><td colspan="2">Total</td><td class="num">R$ {{ total }}</td></tr>
-          </tfoot>
-        </tbody>
-      </table>
-    </div>
-    <!-- Futuramente: link para editar quantidades antes de pagar -->
-    <p style="margin:var(--espaco-3) 0 0;"><a href="{% url 'sales:carrinho' %}" style="font-size:.9rem;">Editar carrinho</a></p>
-  </section>
+<ol class="passos" aria-label="Etapas da compra">
+  <li aria-current="step">Seus dados e entrega</li>
+  <li>Revisão do pedido</li>
+  <li>Pagamento no Mercado Pago</li>
+</ol>
 
-  <section class="cartao">
-    <h2>Identificação e entrega</h2>
+<div class="checkout-grid">
+  <section class="cartao-checkout" style="background:var(--branco-quente); border:1px solid var(--borda); border-radius:var(--raio); padding:var(--e5);" aria-labelledby="t-dados">
+    <h2 id="t-dados" style="margin-top:0;">Identificação e entrega</h2>
     <form method="post" data-enviar>
       {% csrf_token %}
       {% include "components/form_campos.html" with form=form %}
       <div class="form-acoes">
         <button type="submit" class="btn" style="min-height:48px;">Revisar e pagar</button>
       </div>
-      <p class="helptext">Você será levado ao Mercado Pago (Pix ou cartão) para concluir com segurança.</p>
+      <div class="seguranca-nota">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-escudo"/></svg>
+        <span>Você revisará o pedido antes de pagar. O pagamento é processado pelo Mercado Pago — não guardamos dados de cartão.</span>
+      </div>
     </form>
   </section>
+
+  <aside class="resumo-pedido resumo-fixo" aria-label="Resumo do pedido">
+    <h2 style="margin-top:0;">Seu pedido</h2>
+    {% for item in itens %}
+      <div class="resumo-pedido__linha">
+        <span>{{ item.quantidade }}× {{ item.produto.nome }}</span>
+        <strong class="num">R$ {{ item.subtotal }}</strong>
+      </div>
+    {% endfor %}
+    <div class="resumo-pedido__total">
+      <span class="rotulo">Total</span>
+      <span class="preco num">R$ {{ total }}</span>
+    </div>
+    <ul class="trust" style="margin-top:var(--e4);">
+      <li>
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-documento"/></svg>
+        CNPJ 64.092.879/0001-21
+      </li>
+      <li>
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-cliente"/></svg>
+        Dúvidas? WhatsApp (75) 98145-7227
+      </li>
+    </ul>
+    <p style="margin:var(--e3) 0 0; font-size:0.875rem;"><a href="{% url 'sales:carrinho' %}">Editar carrinho</a></p>
+  </aside>
 </div>
 {% endblock %}

@@ -1,6 +1,6 @@
 ---
 name: Rei do Feno — Gestão e Loja
-description: Sistema de gestão e vitrine de alimentos para animais — papel comercial de balcão agropecuário virou software.
+description: Dois mundos, uma marca — painel de gestão (areia/verde lona, Archivo) e loja pública (creme/verde folha/palha, Nunito Sans + Lexend).
 colors:
   verde-lona-900: "#1d3a24"
   verde-lona-700: "#2f5d3a"
@@ -17,6 +17,9 @@ colors:
   tinta-formulario-700: "#454c41"
   tinta-formulario-500: "#6d7267"
   superficie: "#ffffff"
+  perigo-hover: "#971f29"
+  toast-sucesso: "#5fbf7a"
+  toast-erro: "#e07b84"
   sucesso-borda: "#2e7d43"
   sucesso-fundo: "#e4f0e6"
   alerta-borda: "#975a16"
@@ -25,9 +28,33 @@ colors:
   erro-fundo: "#fbe9ea"
   info-borda: "#3d5a80"
   info-fundo: "#e8eef5"
-  perigo-hover: "#971f29"
-  toast-sucesso: "#5fbf7a"
-  toast-erro: "#e07b84"
+  verde-folha: "#4a6741"
+  verde-folha-hover: "#3e5737"
+  verde-folha-escuro: "#2f4229"
+  palha-dourado: "#c4a95b"
+  palha-dourado-claro: "#f3ebd8"
+  palha-dourado-borda: "#d9c48a"
+  marrom-terra: "#5c4a3a"
+  marrom-texto: "#3e3428"
+  creme: "#f7f3ec"
+  branco-quente: "#fdfcfa"
+  cinza-quente: "#8c8279"
+  cinza-texto: "#6b6258"
+  borda-quente: "#e8e2da"
+  loja-sucesso-texto: "#2a5630"
+  loja-alerta-texto: "#6e4e0a"
+  loja-erro-texto: "#7e2e2e"
+  loja-info-texto: "#355967"
+  loja-perigo-hover: "#963434"
+  rodape-texto: "#cfc4b2"
+  loja-sucesso: "#3d7a45"
+  loja-sucesso-fundo: "#e6f0e7"
+  loja-alerta: "#d4a017"
+  loja-alerta-fundo: "#faf0d4"
+  loja-erro: "#b34040"
+  loja-erro-fundo: "#f9e8e8"
+  loja-info: "#4a7a8c"
+  loja-info-fundo: "#e7eff2"
 typography:
   display:
     fontFamily: "Archivo, system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif"
@@ -55,17 +82,54 @@ typography:
     auxiliar: "0.875rem"
     ajuda: "0.85rem"
     badge: "0.8125rem"
-  label:
-    fontFamily: "Archivo, system-ui, sans-serif"
-    fontSize: "0.75rem"
-    fontWeight: 650
-    lineHeight: 1.5
-    letterSpacing: "0.06em"
+  loja-display:
+    fontFamily: "Lexend, 'Nunito Sans', system-ui, sans-serif"
+    fontSize: "2rem"
+    fontWeight: 700
+    lineHeight: 1.25
+    letterSpacing: "-0.01em"
+  loja-titulo:
+    fontFamily: "Lexend, 'Nunito Sans', system-ui, sans-serif"
+    fontSize: "1.25rem"
+    fontWeight: 600
+    lineHeight: 1.25
+  loja-corpo:
+    fontFamily: "Nunito Sans, system-ui, sans-serif"
+    fontSize: "1rem"
+    fontWeight: 400
+    lineHeight: 1.6
+  scale:
+    numero-destaque: "2rem"
+    total-carrinho: "1.5rem"
+    preco-carrinho: "1.2rem"
+    titulo-card: "1.05rem"
+    tabela-botao: "0.95rem"
+    metadado-card: "0.9rem"
+    auxiliar: "0.875rem"
+    ajuda: "0.85rem"
+    badge: "0.8125rem"
+    loja-preco-destaque: "1.75rem"
+    loja-preco: "1.5rem"
+    loja-preco-carrinho: "1.2rem"
+    loja-hero-display: "2.5rem"
+    loja-hero-mobile: "1.5rem"
+    loja-h2: "1.5rem"
+    loja-h3: "1.25rem"
+    loja-h4: "1.125rem"
+    loja-marca: "1.25rem"
+    loja-corpo-medio: "0.95rem"
+    loja-secundario: "0.925rem"
+    loja-metadado: "0.9rem"
+    loja-auxiliar: "0.875rem"
+    loja-legenda: "0.8125rem"
+    loja-caption: "0.75rem"
+    loja-contador: "0.6875rem"
 rounded:
   sm: "6px"
   md: "8px"
   pill: "999px"
   foco: "2px"
+  loja: "12px"
 spacing:
   1: "0.25rem"
   2: "0.5rem"
@@ -104,11 +168,36 @@ components:
     textColor: "{colors.verde-tinta}"
     rounded: "{rounded.pill}"
     padding: "2px 8px"
+  loja-button-primary:
+    backgroundColor: "{colors.verde-folha}"
+    textColor: "{colors.branco-quente}"
+    rounded: "{rounded.md}"
+    padding: "8px 24px"
+    height: "44px"
+  loja-card:
+    backgroundColor: "{colors.branco-quente}"
+    textColor: "{colors.marrom-texto}"
+    rounded: "{rounded.loja}"
+    padding: "12px"
 ---
 
 # Design System: Rei do Feno
 
 ## Overview
+
+**Dois mundos, uma marca.** O **painel de gestão** (v2) vive no mundo "papel de pedido de balcão": areia quente, verde lona, fio de palha, Archivo. A **loja pública** (v3) vive no mundo "armazém agropecuário de porta aberta": creme de papel, verde folha como única cor de ação, palha dourada como acento raro, marrom terra ancorando, Nunito Sans + Lexend. Os mundos compartilham disciplina (borda 1px vence sombra, numerais tabulares, pt-BR direto, estados desenhados) e o fardo do logo; nunca compartilham CSS.
+
+### Loja (v3) — resumo
+
+**Creative North Star: "Armazém agropecuário de porta aberta."** Loja terrosa e comercial que parece negócio de verdade: creme `#f7f3ec` de fundo, cards branco-quente com borda `#e8e2da`, verde folha `#4a6741` só em ação, palha `#c4a95b` em badge/detalhe (nunca texto pequeno), marrom terra `#5c4a3a` em títulos/preços/footer. Cinza secundário `#6b6258` (AA). Header sticky de 3 faixas (contato/retirada · marca+busca+carrinho · categorias), hero com foto real sob overlay verde-escuro, grid de cards 4:3, footer marrom com CNPJ/WhatsApp reais. Especificação completa: `docs/visual-store-spec.md`.
+
+**Key Characteristics (loja):**
+- Verde folha é a única cor de ação; hover `#3e5737`.
+- Preço 1.5rem/800 tabular em marrom terra; badge palha com texto verde-escuro.
+- Raio 12px em cards, 8px em controles; sombras neutras raras.
+- Nunito Sans (corpo) + Lexend (títulos), auto-hospedadas com swap.
+
+### Painel (v2) — tese histórica
 
 **Creative North Star: "O pedido de balcão da casa agropecuária, virado software."**
 

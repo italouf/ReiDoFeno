@@ -1,37 +1,86 @@
-{% extends "base_loja.html" %}
+{% extends "store/base_store.html" %}
 {% block title %}Pedido {{ pedido.numero }} — Rei do Feno{% endblock %}
 {% block content %}
-<article style="max-width:38rem;">
-  <h1 style="display:flex; flex-wrap:wrap; align-items:center; gap:var(--espaco-3);">
-    Pedido {{ pedido.numero }}
-    {% include "components/status_pedido.html" with status=pedido.status rotulo=pedido.get_status_display %}
-  </h1>
-  <p>Olá, {{ pedido.cliente.nome }}. Modalidade: <strong>{{ pedido.get_modalidade_display }}</strong> · Unidade: {{ pedido.unidade.nome }}</p>
+<article style="max-width:44rem;">
+  {% if pedido.status == 'pago' or pedido.status == 'concluido' %}
+    <div class="alerta alerta--sucesso" role="status">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-ok"/></svg>
+      <div><strong>Pedido confirmado!</strong> Já estamos preparando tudo.</div>
+    </div>
+  {% elif pedido.status == 'cancelado' or pedido.status == 'falhou' %}
+    <div class="alerta alerta--erro" role="alert">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-erro"/></svg>
+      <div>Este pedido foi cancelado. Se pagou por engano, fale com a gente pelo WhatsApp (75) 98145-7227.</div>
+    </div>
+  {% else %}
+    <div class="alerta alerta--info" role="status">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-info"/></svg>
+      <div>Recebemos seu pedido. Falta só o pagamento para começarmos a separação.</div>
+    </div>
+  {% endif %}
 
-  <div class="tabela-envolve" style="margin-top:var(--espaco-5);">
-    <table class="tabela">
-      <thead><tr><th scope="col">Produto</th><th scope="col" class="num">Qtd.</th><th scope="col" class="num">Preço unit.</th><th scope="col" class="num">Subtotal</th></tr></thead>
+  <h1 style="display:flex; flex-wrap:wrap; align-items:center; gap:var(--e3);">
+    Pedido {{ pedido.numero }}
+    {% include "store/includes/order_status_badge.html" with status=pedido.status rotulo=pedido.get_status_display %}
+  </h1>
+  <p style="color:var(--cinza-texto);">Olá, {{ pedido.cliente.nome }}. Modalidade: <strong>{{ pedido.get_modalidade_display }}</strong> · Unidade: {{ pedido.unidade.nome }}</p>
+
+  <ul class="timeline-status" aria-label="Andamento do pedido">
+    <li {% if pedido.status != 'cancelado' and pedido.status != 'rascunho' %}aria-current="true"{% endif %}>Pedido recebido</li>
+    <li {% if pedido.status == 'pago' or pedido.status == 'em_separacao' or pedido.status == 'pronto_para_entrega' or pedido.status == 'enviado' or pedido.status == 'concluido' %}aria-current="true"{% endif %}>Pagamento</li>
+    <li {% if pedido.status in 'em_separacao pronto_para_entrega enviado concluido' %}aria-current="true"{% endif %}>Separação</li>
+    <li {% if pedido.status in 'pronto_para_entrega enviado concluido' %}aria-current="true"{% endif %}>Pronto/Entrega</li>
+    <li {% if pedido.status == 'concluido' %}aria-current="true"{% endif %}>Concluído</li>
+  </ul>
+
+  <div style="margin-top:var(--e6); border:1px solid var(--borda); border-radius:var(--raio); overflow-x:auto;">
+    <table class="tabela-loja">
+      <thead>
+        <tr>
+          <th scope="col">Produto</th>
+          <th scope="col" class="num">Qtd.</th>
+          <th scope="col" class="num">Unitário</th>
+          <th scope="col" class="num">Subtotal</th>
+        </tr>
+      </thead>
       <tbody>
         {% for item in pedido.itens.all %}
         <tr>
           <td>{{ item.produto_nome }}</td>
           <td class="num">{{ item.quantidade }}</td>
           <td class="num">R$ {{ item.preco_unitario }}</td>
-          <td class="num">R$ {{ item.subtotal }}</td>
+          <td class="num" style="font-weight:700;">R$ {{ item.subtotal }}</td>
         </tr>
         {% endfor %}
         <tfoot>
-          <tr><td colspan="3">Total</td><td class="num">R$ {{ pedido.total }}</td></tr>
+          <tr>
+            <td colspan="3">Total</td>
+            <td class="num"><span class="preco num">R$ {{ pedido.total }}</span></td>
+          </tr>
         </tfoot>
       </tbody>
     </table>
   </div>
 
   {% if pedido.status == 'aguardando_pagamento' %}
-  <p style="margin-top:var(--espaco-5);"><a class="btn" href="{% url 'sales:pagamento_iniciar' pedido.token_acesso %}" style="min-height:48px;">
-    Ir para o pagamento
-  </a></p>
+  <p style="margin-top:var(--e5);">
+    <a class="btn" href="{% url 'sales:pagamento_iniciar' pedido.token_acesso %}" style="min-height:48px;">Ir para o pagamento</a>
+  </p>
   {% endif %}
-  <p style="color:var(--tinta-500); font-size:.9rem;">Guarde este link para acompanhar seu pedido.</p>
+
+  <ul class="lista-beneficios" style="margin-top:var(--e5);">
+    <li>
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-cliente"/></svg>
+      Acompanhe pelo WhatsApp: (75) 98145-7227
+    </li>
+    <li>
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-documento"/></svg>
+      Guarde este link para acompanhar seu pedido depois.
+    </li>
+  </ul>
+
+  <p style="margin-top:var(--e5);">
+    <a class="btn btn--fantasma" href="{% url 'loja:catalogo' %}">Continuar comprando</a>
+  </p>
 </article>
 {% endblock %}

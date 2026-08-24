@@ -1,24 +1,40 @@
-{% extends "base_loja.html" %}
+{% extends "store/base_store.html" %}
 {% block title %}Carrinho — Rei do Feno{% endblock %}
 {% block content %}
-{% include "components/cabecalho_pagina.html" with titulo="Carrinho" %}
+<h1>Carrinho</h1>
 
 {% if itens %}
-<div class="cartao">
-  {% for item in itens %}
-    {% include "components/item_carrinho.html" with item=item %}
-  {% endfor %}
-  <div style="display:flex; justify-content:space-between; align-items:center; padding-top:var(--espaco-4);">
-    <span class="rotulo">Total</span>
-    <strong class="num" style="font-size:1.5rem; letter-spacing:-0.01em;">R$ {{ total }}</strong>
+<div class="carrinho-grid">
+  <div class="carrinho-lista">
+    {% for item in itens %}
+      {% include "store/includes/cart_item.html" with item=item %}
+    {% endfor %}
   </div>
+
+  <aside class="resumo-pedido resumo-fixo" aria-label="Resumo do pedido">
+    <h2 style="margin-top:0;">Resumo</h2>
+    <div class="resumo-pedido__linha">
+      <span>Itens</span>
+      <strong class="num">{{ itens|length }}</strong>
+    </div>
+    <div class="resumo-pedido__total">
+      <span class="rotulo">Total</span>
+      <span class="preco num">R$ {{ total }}</span>
+    </div>
+    <p style="margin:var(--e4) 0 0;">
+      <a class="btn btn--bloco" href="{% url 'sales:checkout' %}" style="min-height:48px;">Finalizar compra</a>
+    </p>
+    <p style="margin:var(--e2) 0 0; text-align:center;">
+      <a href="{% url 'loja:catalogo' %}" style="font-size:0.9rem;">Continuar comprando</a>
+    </p>
+    <div class="seguranca-nota">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-escudo"/></svg>
+      <span>Você revisará tudo antes de pagar no Mercado Pago.</span>
+    </div>
+  </aside>
 </div>
-<p style="margin-top:var(--espaco-5); display:flex; gap:var(--espaco-2); flex-wrap:wrap;">
-  <a class="btn" href="{% url 'sales:checkout' %}" style="min-height:48px;">Finalizar pedido</a>
-  <a class="btn btn--fantasma" href="{% url 'loja:catalogo' %}">Continuar comprando</a>
-</p>
 {% else %}
 {% url 'loja:catalogo' as url_vitrine %}
-{% include "components/estado_vazio.html" with icone="i-carrinho" titulo="Seu carrinho está vazio." descricao="Escolha feno, ração ou suplementos na vitrine para começar o pedido." acao_url=url_vitrine acao_texto="Ver a vitrine" %}
+{% include "store/includes/empty_state.html" with icone="i-carrinho" titulo="Seu carrinho está vazio." descricao="Escolha feno, ração ou suplementos na vitrine para começar o pedido." acao_url=url_vitrine acao_texto="Ver produtos" %}
 {% endif %}
 {% endblock %}

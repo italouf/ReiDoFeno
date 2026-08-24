@@ -1,0 +1,19 @@
+{% comment %}
+Paginação preservando os filtros atuais do catálogo (busca, categoria, ordem, faixa de preço).
+Espera page_obj e, opcionalmente, busca/categoria_selecionada/ordenar/preco_min/preco_max.
+{% endcomment %}
+{% if is_paginated and page_obj.paginator.num_pages > 1 %}
+<nav class="paginacao" aria-label="Paginação">
+  {% if page_obj.has_previous %}
+    <a href="?page={{ page_obj.previous_page_number }}{% if busca %}&q={{ busca|urlencode }}{% endif %}{% if categoria_selecionada %}&categoria={{ categoria_selecionada|urlencode }}{% endif %}{% if ordenar %}&ordenar={{ ordenar|urlencode }}{% endif %}{% if preco_min %}&preco_min={{ preco_min|urlencode }}{% endif %}{% if preco_max %}&preco_max={{ preco_max|urlencode }}{% endif %}" rel="prev">Anterior</a>
+  {% else %}
+    <span aria-hidden="true">Anterior</span>
+  {% endif %}
+  <span>Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}</span>
+  {% if page_obj.has_next %}
+    <a href="?page={{ page_obj.next_page_number }}{% if busca %}&q={{ busca|urlencode }}{% endif %}{% if categoria_selecionada %}&categoria={{ categoria_selecionada|urlencode }}{% endif %}{% if ordenar %}&ordenar={{ ordenar|urlencode }}{% endif %}{% if preco_min %}&preco_min={{ preco_min|urlencode }}{% endif %}{% if preco_max %}&preco_max={{ preco_max|urlencode }}{% endif %}" rel="next">Próxima</a>
+  {% else %}
+    <span aria-hidden="true">Próxima</span>
+  {% endif %}
+</nav>
+{% endif %}

@@ -1,52 +1,48 @@
-{% extends "base_loja.html" %}
-{% block title %}Vitrine — Rei do Feno{% endblock %}
+{% extends "store/base_store.html" %}
+{% load static %}
+{% block title %}Feno, ração e suplementos — Rei do Feno{% endblock %}
 {% block content %}
-<div class="cabecalho-pagina">
-  <div class="cabecalho-pagina__texto">
-    <h1>Vitrine</h1>
-    <p>Feno, ração e suplementos com retirada nas unidades ou entrega.</p>
-  </div>
-</div>
 
-<ul class="faixa-beneficios" aria-label="Condições de compra">
-  <li>
-    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-unidade"/></svg>
-    Retirada em Feira de Santana ou Iaçu
-  </li>
-  <li>
-    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-carrinho"/></svg>
-    Entrega combinada com o vendedor
-  </li>
-  <li>
-    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-ok"/></svg>
-    Pagamento via Mercado Pago
-  </li>
+<section class="hero" aria-label="Apresentação da loja">
+  <img class="hero__foto" src="{% static 'img/produtos/feno-graminea.jpg' %}" alt="Fardos de feno no campo ao amanhecer" fetchpriority="high">
+  <div class="hero__overlay">
+    <h1 class="hero__titulo">Feno, ração e suplementos para o seu animal</h1>
+    <p class="hero__sub">Atendimento a haras, fazendas, revendas e produtores. Retirada em Feira de Santana ou Iaçu, ou entrega combinada com o vendedor.</p>
+    <div class="hero__acoes">
+      <a class="btn" href="#produtos">Ver produtos</a>
+      <a class="btn btn--secundario" href="https://wa.me/5575981457227" target="_blank" rel="noopener">Falar no WhatsApp</a>
+    </div>
+  </div>
+</section>
+
+<ul class="chips" aria-label="Categorias">
+  <li><a class="chip" href="{% url 'loja:catalogo' %}" {% if not categoria_selecionada and not busca %}aria-current="true"{% endif %}>Todos</a></li>
+  {% for categoria in categorias %}
+    <li><a class="chip" href="{% url 'loja:catalogo' %}?categoria={{ categoria.pk }}" {% if categoria_selecionada == categoria.pk|stringformat:"s" %}aria-current="true"{% endif %}>{{ categoria.nome }}</a></li>
+  {% endfor %}
 </ul>
 
-<form method="get" class="filtro-barra">
-  <div class="campo" style="min-width:14rem;">
-    <label for="categoria">Categoria</label>
-    <select id="categoria" name="categoria" data-no-busy onchange="this.form.submit()">
-      <option value="">Todas as categorias</option>
-      {% for categoria in categorias %}
-        <option value="{{ categoria.pk }}" {% if categoria.pk|stringformat:"s" == categoria_selecionada %}selected{% endif %}>
-          {{ categoria.nome }}
-        </option>
-      {% endfor %}
-    </select>
-  </div>
-  <noscript><button type="submit" class="btn btn--secundario">Filtrar</button></noscript>
-</form>
+{% include "store/includes/filters.html" %}
 
-{% if produtos %}
-<div class="cartoes">
-  {% for produto in produtos %}
-    {% include "components/produto_cartao.html" with produto=produto %}
-  {% endfor %}
+<div id="produtos" aria-label="Lista de produtos">
+  {% if produtos %}
+    <p style="color:var(--cinza-texto); margin:0 0 var(--e4);" class="num" role="status">
+      {{ page_obj.paginator.count }} produto{{ page_obj.paginator.count|pluralize }}{% if busca %} para “{{ busca }}”{% endif %}
+    </p>
+    <div class="grid-produtos">
+      {% for produto in produtos %}
+        {% include "store/includes/product_card.html" with produto=produto %}
+      {% endfor %}
+    </div>
+    {% include "store/includes/pagination.html" %}
+  {% elif busca or preco_min or preco_max %}
+    {% url 'loja:catalogo' as url_limpar %}
+    {% include "store/includes/empty_state.html" with icone="i-busca" titulo="Nenhum produto encontrado" descricao="Não achamos nada com esses filtros. Tente outro termo ou limpe a busca para ver todo o catálogo." acao_url=url_limpar acao_texto="Limpar busca" %}
+  {% else %}
+    {% include "store/includes/empty_state.html" with icone="i-caixa" titulo="Nenhum produto disponível no momento." descricao="O catálogo é atualizado conforme a entrada de feno e ração nas unidades. Fale com a gente pelo WhatsApp para encomendar." %}
+  {% endif %}
 </div>
-{% include "components/paginacao.html" %}
-{% else %}
-{% url 'loja:catalogo' as url_catalogo %}
-{% include "components/estado_vazio.html" with icone="i-caixa" titulo="Nenhum produto disponível no momento." descricao="Ajuste o filtro de categoria ou volte mais tarde — o estoque é atualizado diariamente." acao_url=url_catalogo acao_texto="Ver todas" %}
-{% endif %}
+
+{% include "store/includes/benefits_bar.html" %}
+
 {% endblock %}

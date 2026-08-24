@@ -1,0 +1,50 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Rei do Feno — Feno, ração e suplementos{% endblock %}</title>
+  <meta name="description" content="{% block descricao %}Feno, ração e suplementos para animais com retirada em Feira de Santana ou Iaçu e entrega combinada. Pagamento via Mercado Pago.{% endblock %}">
+  <link rel="preload" href="{% static 'fonts/store/nunito-sans.woff2' %}" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="{% static 'fonts/store/lexend.woff2' %}" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="{% static 'css/store/tokens.css' %}">
+  <link rel="stylesheet" href="{% static 'css/store/base.css' %}">
+  <link rel="stylesheet" href="{% static 'css/store/layout.css' %}">
+  <link rel="stylesheet" href="{% static 'css/store/components.css' %}">
+  <link rel="stylesheet" href="{% static 'css/store/pages.css' %}">
+  <link rel="stylesheet" href="{% static 'css/store/responsive.css' %}">
+</head>
+<body class="loja">
+<!--
+  CONTRATO DE DIREÇÃO — Loja Rei do Feno v3
+  THESIS: armazém agropecuário de porta aberta — loja terrosa e comercial
+          que parece negócio de verdade, não template.
+  OWN-WORLD: creme #F7F3EC de papel, verde folha #4A6741 como única cor de
+             ação, palha #C4A95B como acento raro, marrom terra #5C4A3A
+             ancorando; Nunito Sans + Lexend auto-hospedadas; borda 1px,
+             sombra neutra rara; preços tabulares.
+  STORY: o visitante encontra o produto, confia (CNPJ, WhatsApp, Mercado
+         Pago) e fecha o pedido em passos curtos.
+  FIRST VIEWPORT: faixa verde com WhatsApp/retirada; topo branco quente com
+                  marca, busca e carrinho com contador; hero com foto real
+                  de feno sob overlay verde-escuro e CTA.
+  FORM: redesign da loja (docs/visual-store-spec.md); painel permanece no
+        mundo v2 e não é tocado.
+  FINISH: unreviewed and undocumented is unfinished; this build ends with
+          the finish review, the verdict, DESIGN.md updated for both
+          worlds, and every shipping raster carrying its provenance.
+-->
+<a class="pulo" href="#conteudo-loja">Pular para o conteúdo principal</a>
+{% include "includes/icones.html" %}
+{% include "store/includes/header.html" %}
+<main id="conteudo-loja" class="conteudo-loja">
+  {% include "includes/messages.html" %}
+  {% block content %}{% endblock %}
+</main>
+{% include "store/includes/footer.html" %}
+<script src="{% static 'js/store/menu.js' %}" defer></script>
+<script src="{% static 'js/store/quantity-selector.js' %}" defer></script>
+<script src="{% static 'js/store/cart-feedback.js' %}" defer></script>
+</body>
+</html>

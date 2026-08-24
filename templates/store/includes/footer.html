@@ -1,0 +1,53 @@
+{% comment %} Rodapé completo da loja com dados reais da empresa. {% endcomment %}
+<footer class="rodape">
+  <div class="rodape__colunas">
+    <div>
+      <a class="marca" href="{% url 'loja:catalogo' %}">
+        <svg viewBox="0 0 20 20" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><use href="#i-marca"/></svg>
+        Rei do Feno
+      </a>
+      <p>Comércio de feno, ração e suplementos para animais — atendimento a haras, fazendas, revendas e produtores.</p>
+      <p style="margin-bottom:0">CNPJ 64.092.879/0001-21<br>N D Comércio de Alimentos para Animais LTDA</p>
+    </div>
+    <nav aria-label="Navegação do rodapé">
+      <h3>Navegação</h3>
+      <ul>
+        <li><a href="{% url 'loja:catalogo' %}">Produtos</a></li>
+        {% for categoria in categorias_loja %}
+          <li><a href="{% url 'loja:catalogo' %}?categoria={{ categoria.pk }}">{{ categoria.nome }}</a></li>
+        {% endfor %}
+        <li><a href="{% url 'sales:carrinho' %}">Carrinho</a></li>
+      </ul>
+    </nav>
+    <div>
+      <h3>Atendimento</h3>
+      <ul>
+        <li><a href="https://wa.me/5575981457227" target="_blank" rel="noopener">WhatsApp (75) 98145-7227</a></li>
+        <li><a href="mailto:dpo@reidofeno.com.br">dpo@reidofeno.com.br</a></li>
+      </ul>
+      <p style="margin-bottom:0">Feira de Santana e Iaçu — BA</p>
+    </div>
+    <div>
+      <h3>Informações</h3>
+      <ul>
+        <li><a href="{% url 'privacy:politica' %}">Política de privacidade</a></li>
+        <li><a href="{% url 'privacy:termos' %}">Termos de uso</a></li>
+        {% if user.is_authenticated %}
+          <li><a href="{% url 'privacy:minha_privacidade' %}">Minha privacidade</a></li>
+          <li><a href="{% url 'sales:meus_pedidos' %}">Meus pedidos</a></li>
+        {% else %}
+          <li><a href="{% url 'accounts:login' %}">Entrar</a></li>
+        {% endif %}
+      </ul>
+    </div>
+  </div>
+  <div class="rodape__linha">
+    <div class="rodape__linha-inner">
+      <span>© {% now "Y" %} Rei do Feno · Todos os direitos reservados</span>
+      <span>
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-escudo"/></svg>
+        Pagamento seguro: Pix ou cartão via Mercado Pago
+      </span>
+    </div>
+  </div>
+</footer>

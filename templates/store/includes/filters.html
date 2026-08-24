@@ -1,0 +1,30 @@
+{% comment %}
+Filtros do catálogo: ordenação + faixa de preço, preservando q/categoria.
+{% endcomment %}
+<form method="get" action="{% url 'loja:catalogo' %}" class="barra-filtros">
+  {% if busca %}<input type="hidden" name="q" value="{{ busca }}">{% endif %}
+  {% if categoria_selecionada %}<input type="hidden" name="categoria" value="{{ categoria_selecionada }}">{% endif %}
+  <div class="campo">
+    <label for="ordenar">Ordenar por</label>
+    <select id="ordenar" name="ordenar" data-no-busy onchange="this.form.submit()">
+      <option value="" {% if not ordenar %}selected{% endif %}>Relevância</option>
+      <option value="preco" {% if ordenar == 'preco' %}selected{% endif %}>Menor preço</option>
+      <option value="preco_desc" {% if ordenar == 'preco_desc' %}selected{% endif %}>Maior preço</option>
+      <option value="nome" {% if ordenar == 'nome' %}selected{% endif %}>Nome (A–Z)</option>
+    </select>
+  </div>
+  <div class="campo">
+    <label for="preco_min">Preço mín. (R$)</label>
+    <input type="number" id="preco_min" name="preco_min" value="{{ preco_min }}" min="0" step="0.01" inputmode="decimal">
+  </div>
+  <div class="campo">
+    <label for="preco_max">Preço máx. (R$)</label>
+    <input type="number" id="preco_max" name="preco_max" value="{{ preco_max }}" min="0" step="0.01" inputmode="decimal">
+  </div>
+  <div class="barra-filtros__acoes">
+    <button type="submit" class="btn btn--pequeno">Aplicar</button>
+    {% if ordenar or preco_min or preco_max or busca %}
+      <a class="btn btn--fantasma btn--pequeno" href="{% url 'loja:catalogo' %}{% if categoria_selecionada %}?categoria={{ categoria_selecionada|urlencode }}{% endif %}">Limpar</a>
+    {% endif %}
+  </div>
+</form>

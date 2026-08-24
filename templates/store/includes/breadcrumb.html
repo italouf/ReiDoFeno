@@ -1,0 +1,8 @@
+{% comment %} Trilha de navegação. Uso: itens = [(rótulo, url|None), ...] via {% with %}. {% endcomment %}
+<nav class="breadcrumb" aria-label="Trilha de navegação">
+  <a href="{% url 'loja:catalogo' %}">Início</a>
+  {% for item in breadcrumb_itens %}
+    <span aria-hidden="true">/</span>
+    {% if item.1 %}<a href="{{ item.1 }}">{{ item.0 }}</a>{% else %}<span>{{ item.0 }}</span>{% endif %}
+  {% endfor %}
+</nav>

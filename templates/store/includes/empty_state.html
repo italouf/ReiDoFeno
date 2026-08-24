@@ -1,0 +1,10 @@
+{% comment %}
+Estado vazio. Uso:
+{% include "store/includes/empty_state.html" with icone="i-carrinho" titulo="..." descricao="..." acao_url=... acao_texto="..." %}
+{% endcomment %}
+<div class="estado-vazio">
+  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#{{ icone|default:'i-caixa' }}"/></svg>
+  <strong>{{ titulo|default:"Sem dados por enquanto" }}</strong>
+  {% if descricao %}<p>{{ descricao }}</p>{% endif %}
+  {% if acao_url %}<a class="btn" href="{{ acao_url }}">{{ acao_texto|default:"Voltar" }}</a>{% endif %}
+</div>

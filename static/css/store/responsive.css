@@ -1,0 +1,35 @@
+/* Rei do Feno — Loja · responsivo (mobile-first; ajustes por breakpoint) */
+
+/* Telefone: header compacto */
+@media (max-width: 63.99rem) {
+  .topo-faixa__inner { justify-content: center; }
+  .topo-faixa__acao { display: none; }
+  .topo-loja__inner { flex-wrap: wrap; gap: var(--e2); }
+  .busca-form { order: 3; flex: 1 1 100%; }
+  .btn-menu {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 44px; height: 44px; margin-left: calc(var(--e2) * -1);
+    border: 0; border-radius: var(--raio); background: transparent; color: var(--marrom-terra); cursor: pointer;
+  }
+  .btn-menu:hover { background: var(--creme); }
+  .nav-categorias { display: none; }
+  .nav-categorias[data-aberta="true"] { display: block; }
+  .nav-categorias__inner { flex-direction: column; align-items: stretch; gap: 0; padding: var(--e2) var(--e4); }
+  .nav-categorias a { border-radius: var(--raio); min-height: 44px; }
+  .nav-categorias a[aria-current="page"] { box-shadow: none; background: var(--palha-claro); }
+  .nav-categorias__titulo { display: none; }
+  .hero__overlay { padding: var(--e4); }
+  .conteudo-loja { padding: var(--e4) var(--e3) var(--e7); }
+  .toast-area { left: var(--e3); right: var(--e3); }
+  .resumo-fixo { position: static; }
+}
+
+/* Tablet e acima */
+@media (min-width: 48rem) {
+  .grid-produtos { grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); }
+}
+
+/* Desktop largo */
+@media (min-width: 80rem) {
+  .conteudo-loja { padding-inline: 0; }
+}
