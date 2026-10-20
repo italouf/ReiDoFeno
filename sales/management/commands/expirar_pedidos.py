@@ -27,6 +27,7 @@ class Command(BaseCommand):
                 Pedido.Status.AGUARDANDO_PAGAMENTO,
                 Pedido.Status.PAGAMENTO_PENDENTE,
             ),
+            status_financeiro=Pedido.StatusFinanceiro.PENDENTE,
             criado_em__lt=limite,
         )
 

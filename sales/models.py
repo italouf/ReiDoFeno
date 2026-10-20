@@ -25,26 +25,30 @@ class Pedido(models.Model):
         CANCELADO = "cancelado", "Cancelado"
         FALHOU = "falhou", "Falhou"
 
+    class StatusFinanceiro(models.TextChoices):
+        PENDENTE = "pendente", "Pendente"
+        PAGO = "pago", "Pago"
+        ESTORNADO = "estornado", "Estornado"
+        CANCELADO = "cancelado", "Cancelado"
+
+    # Estados legados que ainda existem em Pedido.Status para leitura de dados
+    # antigos. Novas transições operacionais não podem gravá-los (ADR-002).
+    STATUS_FINANCEIROS_LEGADOS = frozenset(
+        {Status.PAGO, Status.PAGAMENTO_PENDENTE, Status.FALHOU}
+    )
+
     TRANSICOES_VALIDAS: dict[str, set[str]] = {
         Status.RASCUNHO: {Status.AGUARDANDO_PAGAMENTO, Status.CANCELADO},
-        Status.AGUARDANDO_PAGAMENTO: {
-            Status.PAGAMENTO_PENDENTE,
-            Status.PAGO,
-            Status.CANCELADO,
-            Status.FALHOU,
-        },
-        Status.PAGAMENTO_PENDENTE: {
-            Status.PAGO,
-            Status.CANCELADO,
-            Status.FALHOU,
-        },
+        # Em separação exige status_financeiro=PAGO (validado em transicionar).
+        Status.AGUARDANDO_PAGAMENTO: {Status.EM_SEPARACAO, Status.CANCELADO},
+        Status.PAGAMENTO_PENDENTE: {Status.CANCELADO},
         Status.PAGO: {Status.EM_SEPARACAO, Status.CANCELADO},
         Status.EM_SEPARACAO: {Status.PRONTO_PARA_ENTREGA},
         Status.PRONTO_PARA_ENTREGA: {Status.ENVIADO, Status.CONCLUIDO},
-        Status.ENVIADO: {Status.CONCLUIDO, Status.FALHOU},
+        Status.ENVIADO: {Status.CONCLUIDO},
         Status.CONCLUIDO: set(),
         Status.CANCELADO: set(),
-        Status.FALHOU: {Status.AGUARDANDO_PAGAMENTO},
+        Status.FALHOU: {Status.AGUARDANDO_PAGAMENTO, Status.CANCELADO},
     }
 
     class Modalidade(models.TextChoices):
@@ -105,6 +109,14 @@ class Pedido(models.Model):
         default=Status.AGUARDANDO_PAGAMENTO,
         db_index=True,
     )
+    status_financeiro = models.CharField(
+        "status financeiro",
+        max_length=20,
+        choices=StatusFinanceiro.choices,
+        default=StatusFinanceiro.PENDENTE,
+        db_index=True,
+        help_text="Condição financeira do pedido; independente do andamento.",
+    )
     criado_em = models.DateTimeField("criado em", auto_now_add=True)
     atualizado_em = models.DateTimeField("atualizado em", auto_now=True)
 
@@ -125,16 +137,31 @@ class Pedido(models.Model):
             super().save(update_fields=["numero"])
 
     def transicionar(self, novo_status: str, *, request=None, usuario=None) -> None:
-        """Aplica uma transição de status válida ou levanta ValidationError.
+        """Aplica uma transição operacional válida ou levanta ValidationError.
 
-        SEC-03: a mudança e o ``LogAuditoria`` são persistidos na mesma
-        transação; falha na auditoria reverte a transição.
+        ADR-002: estados financeiros não são gravados por esta via. A
+        aprovação/recusa do provedor usa os serviços de pagamento e
+        ``definir_status_financeiro``.
         """
+        if novo_status in self.STATUS_FINANCEIROS_LEGADOS:
+            raise ValidationError(
+                "Estado financeiro não pode ser alterado por transição "
+                "operacional; use o resultado do provedor de pagamento."
+            )
         permitidos = self.TRANSICOES_VALIDAS.get(self.status, set())
         if novo_status not in permitidos:
             raise ValidationError(
                 f"Transição inválida: '{self.status}' → '{novo_status}'. "
                 f"Permitidas: {sorted(permitidos)}."
+            )
+        if (
+            novo_status == self.Status.EM_SEPARACAO
+            and self.status == self.Status.AGUARDANDO_PAGAMENTO
+            and self.status_financeiro != self.StatusFinanceiro.PAGO
+        ):
+            raise ValidationError(
+                "O pedido só pode ir para separação após confirmação "
+                "financeira do pagamento."
             )
         status_anterior = self.status
         self.status = novo_status
@@ -146,10 +173,43 @@ class Pedido(models.Model):
             instancia=self,
             request=request,
             usuario=usuario,
-            antes={"status": status_anterior},
-            depois={"status": novo_status},
+            antes={
+                "status": status_anterior,
+                "status_financeiro": self.status_financeiro,
+            },
+            depois={
+                "status": novo_status,
+                "status_financeiro": self.status_financeiro,
+            },
             salvar=lambda: self.save(
                 update_fields=["status", "atualizado_em"]
+            ),
+        )
+
+    def definir_status_financeiro(
+        self, novo_status: str, *, request=None, usuario=None, motivo: str = ""
+    ) -> None:
+        """Altera o status financeiro sem tocar no andamento operacional."""
+        if novo_status not in self.StatusFinanceiro.values:
+            raise ValidationError(
+                f"Status financeiro inválido: '{novo_status}'."
+            )
+        if novo_status == self.status_financeiro:
+            return
+        status_anterior = self.status_financeiro
+        self.status_financeiro = novo_status
+
+        from core.auditoria import auditar_atomicamente
+
+        auditar_atomicamente(
+            acao="pedido.status_financeiro_alterado",
+            instancia=self,
+            request=request,
+            usuario=usuario,
+            antes={"status_financeiro": status_anterior},
+            depois={"status_financeiro": novo_status, "motivo": motivo},
+            salvar=lambda: self.save(
+                update_fields=["status_financeiro", "atualizado_em"]
             ),
         )
 

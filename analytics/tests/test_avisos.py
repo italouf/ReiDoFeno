@@ -63,6 +63,20 @@ class AvisosAutomaticosTests(TestCase):
             Aviso.objects.filter(tipo=Aviso.Tipo.PAGAMENTO_PENDENTE).count(), 1
         )
 
+    def test_financeiro_pago_nao_gera_aviso_de_pagamento_pendente(self):
+        pedido = PedidoFactory(
+            status=Pedido.Status.AGUARDANDO_PAGAMENTO,
+            status_financeiro=Pedido.StatusFinanceiro.PAGO,
+        )
+        antigo = timezone.now() - timedelta(hours=5)
+        Pedido.objects.filter(pk=pedido.pk).update(criado_em=antigo)
+
+        call_command("gerar_avisos_comerciais", verbosity=0)
+
+        self.assertFalse(
+            Aviso.objects.filter(tipo=Aviso.Tipo.PAGAMENTO_PENDENTE).exists()
+        )
+
 
 class RecompraTests(TestCase):
     def test_cliente_sem_compra_ha_x_dias_e_sinalizado(self):

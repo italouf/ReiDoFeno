@@ -8,11 +8,7 @@ from django.utils import timezone
 from costs.services import despesas_no_periodo
 from sales.models import ItemPedido, Pedido
 
-STATUS_VENDA = (
-    Pedido.Status.PAGO,
-    Pedido.Status.CONCLUIDO,
-)
-
+STATUS_EXCLUIDOS_VENDA = (Pedido.Status.CANCELADO,)
 STATUS_AGUARDANDO = (
     Pedido.Status.AGUARDANDO_PAGAMENTO,
     Pedido.Status.PAGAMENTO_PENDENTE,
@@ -32,9 +28,12 @@ def metricas_do_periodo(inicio: date, fim: date) -> dict:
     Pedidos cancelados/falhos ficam de fora das vendas.
     """
     começo, término = _janela(inicio, fim)
-    vendas_qs = Pedido.objects.filter(
-        status__in=STATUS_VENDA,
-        criado_em__range=(começo, término),
+    vendas_qs = (
+        Pedido.objects.filter(
+            status_financeiro=Pedido.StatusFinanceiro.PAGO,
+            criado_em__range=(começo, término),
+        )
+        .exclude(status__in=STATUS_EXCLUIDOS_VENDA)
     )
 
     total_vendas: Decimal = (
@@ -43,9 +42,10 @@ def metricas_do_periodo(inicio: date, fim: date) -> dict:
 
     top_produtos = (
         ItemPedido.objects.filter(
-            pedido__status__in=STATUS_VENDA,
+            pedido__status_financeiro=Pedido.StatusFinanceiro.PAGO,
             pedido__criado_em__range=(começo, término),
         )
+        .exclude(pedido__status__in=STATUS_EXCLUIDOS_VENDA)
         .values("produto_nome")
         .annotate(
             quantidade_vendida=Sum("quantidade"),
@@ -59,7 +59,10 @@ def metricas_do_periodo(inicio: date, fim: date) -> dict:
 
     despesas_total = despesas_no_periodo(inicio, fim)
 
-    aguardando = Pedido.objects.filter(status__in=STATUS_AGUARDANDO)
+    aguardando = Pedido.objects.filter(
+        status_financeiro=Pedido.StatusFinanceiro.PENDENTE,
+        status__in=STATUS_AGUARDANDO,
+    )
 
     return {
         "inicio": inicio,
@@ -85,14 +88,18 @@ def clientes_para_recompra(dias: int):
         Cliente.objects.annotate(
             ultima_compra=Max(
                 "pedidos__criado_em",
-                filter=Q(pedidos__status__in=STATUS_VENDA),
+                filter=Q(
+                    pedidos__status_financeiro=Pedido.StatusFinanceiro.PAGO
+                )
+                & ~Q(pedidos__status__in=STATUS_EXCLUIDOS_VENDA),
                 output_field=DateTimeField(),
             )
         )
         .filter(
-            pedidos__status__in=STATUS_VENDA,
+            pedidos__status_financeiro=Pedido.StatusFinanceiro.PAGO,
             pedidos__criado_em__lt=limite,
             ultima_compra__lt=limite,
         )
+        .exclude(pedidos__status__in=STATUS_EXCLUIDOS_VENDA)
         .distinct()
     )

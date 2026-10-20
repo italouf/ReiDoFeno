@@ -54,6 +54,7 @@ def exportar_dados_do_titular(cliente: Cliente) -> dict:
             {
                 "numero": pedido.numero,
                 "status": pedido.status,
+                "status_financeiro": pedido.status_financeiro,
                 "modalidade": pedido.modalidade,
                 "unidade": pedido.unidade.nome,
                 "criado_em": pedido.criado_em.isoformat(),

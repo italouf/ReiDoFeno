@@ -30,13 +30,7 @@ logger = logging.getLogger(__name__)
 # SEC-01: o endpoint operacional nunca pode gravar um estado financeiro.
 # Somente o retorno validado do provedor (services.aplicar_resultado_pagamento)
 # pode alterar o status financeiro do pedido.
-STATUS_FINANCEIROS = frozenset(
-    {
-        Pedido.Status.PAGO,
-        Pedido.Status.PAGAMENTO_PENDENTE,
-        Pedido.Status.FALHOU,
-    }
-)
+STATUS_FINANCEIROS = Pedido.STATUS_FINANCEIROS_LEGADOS
 PERMIS_SO_TRANSICOES_OPERACIONAIS = frozenset(
     set(Pedido.Status.values) - STATUS_FINANCEIROS
 )
@@ -201,10 +195,13 @@ class PagamentoIniciarView(View):
 
     def get(self, request, token):
         pedido = _pedido_por_token(token)
-        if pedido.status not in (
-            Pedido.Status.AGUARDANDO_PAGAMENTO,
-            Pedido.Status.PAGAMENTO_PENDENTE,
-            Pedido.Status.FALHOU,
+        if pedido.status_financeiro != Pedido.StatusFinanceiro.PENDENTE or (
+            pedido.status
+            not in (
+                Pedido.Status.AGUARDANDO_PAGAMENTO,
+                Pedido.Status.PAGAMENTO_PENDENTE,
+                Pedido.Status.FALHOU,
+            )
         ):
             messages.info(request, "Este pedido não está aguardando pagamento.")
             return redirect("sales:pedido_token", pedido.token_acesso)
@@ -345,7 +342,9 @@ class MinhasMetricasView(LoginRequiredMixin, GrupoRequiredMixin, TemplateView):
         hoje = timezone.localdate()
 
         contexto["pedidos_hoje"] = meus.filter(criado_em__date=hoje).count()
-        vendas = meus.filter(status__in=(Pedido.Status.PAGO, Pedido.Status.CONCLUIDO))
+        vendas = meus.filter(
+            status_financeiro=Pedido.StatusFinanceiro.PAGO
+        ).exclude(status=Pedido.Status.CANCELADO)
         contexto["vendas_total"] = (
             vendas.aggregate(soma=Sum("total"))["soma"] or 0
         )
@@ -353,10 +352,11 @@ class MinhasMetricasView(LoginRequiredMixin, GrupoRequiredMixin, TemplateView):
             vendas.values("cliente").distinct().count()
         )
         contexto["pendentes"] = meus.filter(
+            status_financeiro=Pedido.StatusFinanceiro.PENDENTE,
             status__in=(
                 Pedido.Status.AGUARDANDO_PAGAMENTO,
                 Pedido.Status.PAGAMENTO_PENDENTE,
-            )
+            ),
         ).count()
         contexto["interacoes_hoje"] = self.request.user.interacoes.filter(
             criado_em__date=date.today()
@@ -400,12 +400,19 @@ class PedidoInternoDetailView(LoginRequiredMixin, GrupoRequiredMixin, DetailView
 
     def get_context_data(self, **kwargs):
         contexto = super().get_context_data(**kwargs)
-        permitidos = sorted(
+        permitidos = (
             Pedido.TRANSICOES_VALIDAS.get(self.object.status, set())
             & PERMIS_SO_TRANSICOES_OPERACIONAIS
         )
+        if (
+            self.object.status == Pedido.Status.AGUARDANDO_PAGAMENTO
+            and self.object.status_financeiro
+            != Pedido.StatusFinanceiro.PAGO
+        ):
+            permitidos.discard(Pedido.Status.EM_SEPARACAO)
         contexto["proximos_status"] = [
-            (valor, Pedido.Status(valor).label) for valor in permitidos
+            (valor, Pedido.Status(valor).label)
+            for valor in sorted(permitidos)
         ]
         return contexto
 
@@ -436,7 +443,11 @@ class PedidoAtualizarStatusView(LoginRequiredMixin, GrupoRequiredMixin, View):
             )
         if novo_status == Pedido.Status.CANCELADO:
             # cancelar_pedido faz a transição E libera reservas.
-            cancelar_pedido(pedido, request=request)
+            try:
+                cancelar_pedido(pedido, request=request)
+            except ValidationError as erro:
+                messages.error(request, erro.message)
+                return redirect("sales:pedido_interno_detail", pk)
             messages.success(
                 request, f"Pedido {pedido.numero} → Cancelado."
             )

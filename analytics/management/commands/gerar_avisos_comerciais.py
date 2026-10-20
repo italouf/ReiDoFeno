@@ -39,6 +39,7 @@ class Command(BaseCommand):
             minutes=settings.PEDIDO_TIMEOUT_MINUTOS // 2
         )
         pendentes = Pedido.objects.filter(
+            status_financeiro=Pedido.StatusFinanceiro.PENDENTE,
             status__in=(
                 Pedido.Status.AGUARDANDO_PAGAMENTO,
                 Pedido.Status.PAGAMENTO_PENDENTE,

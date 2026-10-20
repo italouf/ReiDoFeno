@@ -70,3 +70,22 @@ class PainelMetricasTests(TestCase):
         )
         texto = resposta.content.decode()
         self.assertIn("R$ 0,00", texto)  # venda de 90 dias atrás fora do filtro
+
+    def test_financeiro_pago_com_andamento_aguardando_entra_nas_vendas(self):
+        produto = ProdutoFactory(preco_online="100.00")
+        pedido = PedidoFactory(
+            status=Pedido.Status.AGUARDANDO_PAGAMENTO,
+            status_financeiro=Pedido.StatusFinanceiro.PAGO,
+        )
+        ItemPedidoFactory(
+            pedido=pedido,
+            produto=produto,
+            quantidade=1,
+            preco_unitario=Decimal("100.00"),
+        )
+        pedido.recalcular_totais()
+
+        self.client.force_login(self.gestor)
+        resposta = self.client.get(reverse("core:painel"))
+
+        self.assertIn("R$ 100,00", resposta.content.decode())

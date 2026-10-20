@@ -159,12 +159,53 @@ def _validar_disponibilidade(itens, unidade) -> None:
 def marcar_pagamento_aprovado(
     pedido: Pedido, *, id_externo: str = "", request=None
 ) -> None:
-    """Idempotente: move o pedido para 'pago' e efetiva a baixa do estoque."""
-    if pedido.status == Pedido.Status.PAGO:
+    """Idempotente: confirma o financeiro e efetiva a baixa do estoque.
+
+    ADR-002: não altera ``Pedido.status`` (andamento operacional).
+    """
+    if pedido.status_financeiro == Pedido.StatusFinanceiro.PAGO:
         logger.info("Pedido %s já estava pago; evento ignorado.", pedido.numero)
         return
 
-    pedido.transicionar(Pedido.Status.PAGO, request=request)
+    if pedido.status == Pedido.Status.CANCELADO:
+        _registrar_pagamento_apos_cancelamento(
+            pedido, id_externo=id_externo, request=request
+        )
+        return
+
+    if pedido.status in (
+        Pedido.Status.RASCUNHO,
+        Pedido.Status.EM_SEPARACAO,
+        Pedido.Status.PRONTO_PARA_ENTREGA,
+        Pedido.Status.ENVIADO,
+        Pedido.Status.CONCLUIDO,
+    ):
+        from core.auditoria import registrar_auditoria
+
+        logger.error(
+            "Pedido %s está em %s sem status financeiro pago; "
+            "aprovação exige conciliação manual.",
+            pedido.numero,
+            pedido.status,
+        )
+        registrar_auditoria(
+            acao="pedido.pagamento_inconsistente",
+            instancia=pedido,
+            request=request,
+            depois={
+                "status": pedido.status,
+                "status_financeiro": pedido.status_financeiro,
+                "id_externo": id_externo,
+            },
+        )
+        _atualizar_pagamento_aprovado(pedido, id_externo=id_externo)
+        return
+
+    pedido.definir_status_financeiro(
+        Pedido.StatusFinanceiro.PAGO,
+        request=request,
+        motivo="pagamento aprovado pelo provedor",
+    )
 
     for item in pedido.itens.select_related("produto"):
         dar_baixa_definitiva(
@@ -175,14 +216,7 @@ def marcar_pagamento_aprovado(
             request=request,
         )
 
-    pagamento = getattr(pedido, "pagamento", None)
-    if pagamento is not None:
-        from django.utils import timezone
-
-        pagamento.status = Pagamento.Status.APROVADO
-        pagamento.id_externo = id_externo or pagamento.id_externo
-        pagamento.aprovado_em = timezone.now()
-        pagamento.save()
+    _atualizar_pagamento_aprovado(pedido, id_externo=id_externo)
 
     from core.auditoria import registrar_auditoria
 
@@ -192,15 +226,59 @@ def marcar_pagamento_aprovado(
         request=request,
         depois={
             "status": pedido.status,
+            "status_financeiro": pedido.status_financeiro,
             "id_externo": id_externo,
-            "pagamento_id": getattr(pagamento, "pk", None),
+            "pagamento_id": getattr(
+                getattr(pedido, "pagamento", None), "pk", None
+            ),
+        },
+    )
+
+
+def _atualizar_pagamento_aprovado(pedido: Pedido, *, id_externo: str) -> None:
+    pagamento = getattr(pedido, "pagamento", None)
+    if pagamento is None:
+        return
+    from django.utils import timezone
+
+    pagamento.status = Pagamento.Status.APROVADO
+    pagamento.id_externo = id_externo or pagamento.id_externo
+    pagamento.aprovado_em = timezone.now()
+    pagamento.save()
+
+
+def _registrar_pagamento_apos_cancelamento(
+    pedido: Pedido, *, id_externo: str, request
+) -> None:
+    """Mantém o pedido cancelado e sinaliza conciliação manual."""
+    from core.auditoria import registrar_auditoria
+
+    logger.error(
+        "Pagamento aprovado para pedido cancelado %s; conciliação manual "
+        "necessária (id externo=%s).",
+        pedido.numero,
+        id_externo,
+    )
+    _atualizar_pagamento_aprovado(pedido, id_externo=id_externo)
+    registrar_auditoria(
+        acao="pedido.pagamento_apos_cancelamento",
+        instancia=pedido,
+        request=request,
+        depois={
+            "status": pedido.status,
+            "status_financeiro": pedido.status_financeiro,
+            "id_externo": id_externo,
         },
     )
 
 
 @transaction.atomic
-def cancelar_pedido(pedido: Pedido, *, request=None) -> None:
-    """Cancela liberando reservas quando aplicável (idempotente)."""
+def cancelar_pedido(pedido: Pedido, *, request=None, usuario=None) -> None:
+    """Cancela liberando reservas quando aplicável (idempotente).
+
+    Pedido com financeiro PAGO permanece com esse status: o cancelamento
+    operacional não presume estorno. O caso é auditado para conciliação.
+    """
     if pedido.status in (Pedido.Status.CANCELADO, Pedido.Status.CONCLUIDO):
         logger.info(
             "Pedido %s não pode ser cancelado a partir de %s.",
@@ -210,11 +288,38 @@ def cancelar_pedido(pedido: Pedido, *, request=None) -> None:
         return
 
     status_anterior = pedido.status
-    pedido.transicionar(Pedido.Status.CANCELADO, request=request)
+    financeiro_anterior = pedido.status_financeiro
+    pedido.transicionar(Pedido.Status.CANCELADO, request=request, usuario=usuario)
 
-    if status_anterior in (
-        Pedido.Status.AGUARDANDO_PAGAMENTO,
-        Pedido.Status.PAGAMENTO_PENDENTE,
+    if financeiro_anterior == Pedido.StatusFinanceiro.PENDENTE:
+        pedido.definir_status_financeiro(
+            Pedido.StatusFinanceiro.CANCELADO,
+            request=request,
+            usuario=usuario,
+            motivo="pedido cancelado antes do pagamento",
+        )
+    elif financeiro_anterior == Pedido.StatusFinanceiro.PAGO:
+        from core.auditoria import registrar_auditoria
+
+        registrar_auditoria(
+            acao="pedido.cancelado_com_pagamento",
+            instancia=pedido,
+            request=request,
+            usuario=usuario,
+            depois={
+                "status": pedido.status,
+                "status_financeiro": pedido.status_financeiro,
+                "motivo": "cancelamento após pagamento exige conciliação",
+            },
+        )
+
+    if (
+        financeiro_anterior == Pedido.StatusFinanceiro.PENDENTE
+        and status_anterior
+        in (
+            Pedido.Status.AGUARDANDO_PAGAMENTO,
+            Pedido.Status.PAGAMENTO_PENDENTE,
+        )
     ):
         for item in pedido.itens.select_related("produto"):
             liberar_reserva(
@@ -233,72 +338,157 @@ STATUS_PROVEDOR_PARA_PAGAMENTO = {
     "refused": Pagamento.Status.RECUSADO,
     "cancelled": Pagamento.Status.CANCELADO,
     "charged_back": Pagamento.Status.CANCELADO,
+    "pending": Pagamento.Status.PENDENTE,
+    "in_process": Pagamento.Status.PENDENTE,
 }
+
+
+def _atualizar_pagamento_resultado(
+    pedido: Pedido, *, status_provedor: str, id_externo: str
+) -> None:
+    pagamento = getattr(pedido, "pagamento", None)
+    novo_status = STATUS_PROVEDOR_PARA_PAGAMENTO.get(status_provedor)
+    if pagamento is None or novo_status is None:
+        return
+    pagamento.status = novo_status
+    pagamento.id_externo = id_externo or pagamento.id_externo
+    pagamento.save(update_fields=["status", "id_externo"])
+
+
+def _registrar_resultado_financeiro(
+    pedido: Pedido, *, acao: str, status_provedor: str,
+    id_externo: str, request,
+) -> None:
+    from core.auditoria import registrar_auditoria
+
+    registrar_auditoria(
+        acao=acao,
+        instancia=pedido,
+        request=request,
+        depois={
+            "status_provedor": status_provedor,
+            "status": pedido.status,
+            "status_financeiro": pedido.status_financeiro,
+            "id_externo": id_externo,
+        },
+    )
 
 
 @transaction.atomic
 def aplicar_resultado_pagamento(dados_consulta: dict, *, request=None) -> Pedido | None:
     """Aplica o resultado consultado no provedor ao pedido correspondente.
 
-    Idempotente: eventos já refletidos não produzem novo efeito.
+    ADR-002/PAY-02: eventos fora de ordem não rebaixam um pagamento já
+    aprovado. A aprovação altera apenas o financeiro; recusa/cancelamento
+    encerram o andamento operacional e liberam reservas.
     """
     numero = str(dados_consulta.get("external_reference") or "")
     status_provedor = str(dados_consulta.get("status") or "")
     id_externo = str(dados_consulta.get("id") or "")
 
-    pedido = Pedido.objects.filter(numero=numero).first()
+    pedido = Pedido.objects.select_for_update().filter(numero=numero).first()
     if pedido is None:
         logger.warning("Notificação sem pedido correspondente: %s", numero)
         return None
 
     if status_provedor == "approved":
-        ja_estava_pago = pedido.status == Pedido.Status.PAGO
+        ja_estava_pago = (
+            pedido.status_financeiro == Pedido.StatusFinanceiro.PAGO
+        )
         marcar_pagamento_aprovado(
             pedido, id_externo=id_externo, request=request
         )
-        if not ja_estava_pago:
+        if (
+            not ja_estava_pago
+            and pedido.status_financeiro == Pedido.StatusFinanceiro.PAGO
+        ):
             from .emails import email_pagamento_aprovado
 
             email_pagamento_aprovado(pedido)
         return pedido
 
-    pagamento = getattr(pedido, "pagamento", None)
-    if pagamento is not None:
-        novo_status = STATUS_PROVEDOR_PARA_PAGAMENTO.get(status_provedor)
-        if novo_status:
-            pagamento.status = novo_status
-            pagamento.id_externo = id_externo or pagamento.id_externo
-            pagamento.save()
+    _atualizar_pagamento_resultado(
+        pedido, status_provedor=status_provedor, id_externo=id_externo
+    )
 
-            from core.auditoria import registrar_auditoria
-
-            registrar_auditoria(
-                acao="pedido.pagamento_resultado",
-                instancia=pedido,
+    if status_provedor == "charged_back":
+        if pedido.status_financeiro != Pedido.StatusFinanceiro.PAGO:
+            logger.warning(
+                "Chargeback sem pagamento aprovado no pedido %s.",
+                pedido.numero,
+            )
+            _registrar_resultado_financeiro(
+                pedido,
+                acao="pedido.pagamento_estorno_inconsistente",
+                status_provedor=status_provedor,
+                id_externo=id_externo,
                 request=request,
-                depois={
-                    "status_provedor": status_provedor,
-                    "pagamento_status": novo_status,
-                    "id_externo": pagamento.id_externo,
-                },
             )
-
-    if status_provedor in ("refused", "cancelled", "charged_back"):
-        if pedido.status in (
-            Pedido.Status.AGUARDANDO_PAGAMENTO,
-            Pedido.Status.PAGAMENTO_PENDENTE,
+            return pedido
+        pedido.definir_status_financeiro(
+            Pedido.StatusFinanceiro.ESTORNADO,
+            request=request,
+            motivo="chargeback do provedor",
+        )
+        if pedido.status not in (
+            Pedido.Status.CANCELADO,
+            Pedido.Status.CONCLUIDO,
         ):
-            pedido.transicionar(Pedido.Status.FALHOU, request=request)
-            # Recusa libera a reserva; o saldo volta a ficar disponível.
-            for item in pedido.itens.select_related("produto"):
-                liberar_reserva(
-                    produto=item.produto,
-                    unidade=pedido.unidade,
-                    quantidade=item.quantidade,
-                )
-    elif status_provedor in ("pending", "in_process"):
-        if pedido.status == Pedido.Status.AGUARDANDO_PAGAMENTO:
-            pedido.transicionar(
-                Pedido.Status.PAGAMENTO_PENDENTE, request=request
+            pedido.transicionar(Pedido.Status.CANCELADO, request=request)
+        _registrar_resultado_financeiro(
+            pedido,
+            acao="pedido.pagamento_estornado",
+            status_provedor=status_provedor,
+            id_externo=id_externo,
+            request=request,
+        )
+        return pedido
+
+    if status_provedor in ("refused", "cancelled"):
+        if pedido.status_financeiro == Pedido.StatusFinanceiro.PAGO:
+            logger.warning(
+                "Evento %s ignorado: pedido %s já está pago.",
+                status_provedor,
+                pedido.numero,
             )
+            _registrar_resultado_financeiro(
+                pedido,
+                acao="pedido.pagamento_evento_ignorado",
+                status_provedor=status_provedor,
+                id_externo=id_externo,
+                request=request,
+            )
+            return pedido
+        cancelar_pedido(pedido, request=request)
+        _registrar_resultado_financeiro(
+            pedido,
+            acao=(
+                "pedido.pagamento_recusado"
+                if status_provedor == "refused"
+                else "pedido.pagamento_cancelado"
+            ),
+            status_provedor=status_provedor,
+            id_externo=id_externo,
+            request=request,
+        )
+        return pedido
+
+    if status_provedor in ("pending", "in_process"):
+        if pedido.status in (
+            Pedido.Status.CANCELADO,
+            Pedido.Status.CONCLUIDO,
+        ):
+            return pedido
+        pedido.definir_status_financeiro(
+            Pedido.StatusFinanceiro.PENDENTE,
+            request=request,
+            motivo=f"provedor informou {status_provedor}",
+        )
+        _registrar_resultado_financeiro(
+            pedido,
+            acao="pedido.pagamento_pendente",
+            status_provedor=status_provedor,
+            id_externo=id_externo,
+            request=request,
+        )
     return pedido

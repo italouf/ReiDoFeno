@@ -33,6 +33,20 @@ class EmissaoFiscalTests(TestCase):
             Aviso.objects.filter(tipo=Aviso.Tipo.PAGO_SEM_NFE).exists()
         )
 
+    def test_financeiro_pago_com_andamento_aguardando_e_emitido(self):
+        pedido = PedidoFactory(
+            status=Pedido.Status.AGUARDANDO_PAGAMENTO,
+            status_financeiro=Pedido.StatusFinanceiro.PAGO,
+            cliente=ClienteFactory(nome="Cliente Financeiro"),
+        )
+        ItemPedidoFactory(pedido=pedido)
+
+        call_command("processar_fiscal", verbosity=0)
+
+        nota = NotaFiscal.objects.get(pedido=pedido)
+        self.assertEqual(nota.status, NotaFiscal.Status.AUTORIZADA)
+        self.assertEqual(pedido.status, Pedido.Status.AGUARDANDO_PAGAMENTO)
+
     def test_documento_invalido_bloqueia_envio_com_aviso(self):
         cliente_ruim = ClienteFactory(nome="Doc Ruim")
         # Simula documento corrompido/legado (a entrada sempre valida).

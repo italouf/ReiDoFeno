@@ -12,6 +12,7 @@
       <p class="pedido-cartao__meta" style="margin:var(--e1) 0 0;">{{ pedido.criado_em|date:"d/m/Y H:i" }}</p>
     </div>
     {% include "store/includes/order_status_badge.html" with status=pedido.status rotulo=pedido.get_status_display %}
+    {% include "store/includes/order_status_badge.html" with status=pedido.status_financeiro rotulo=pedido.get_status_financeiro_display %}
     <div class="pedido-cartao__fim">
       <span class="preco num" style="font-size:1.2rem;">R$ {{ pedido.total }}</span>
       <a class="btn btn--secundario btn--pequeno" href="{% url 'sales:pedido_token' pedido.token_acesso %}">Detalhes</a>

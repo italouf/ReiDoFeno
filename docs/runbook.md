@@ -1,5 +1,10 @@
 # Runbook Operacional — Rei do Feno
 
+> **Nota de fase:** o alvo da Fase 2A é PostgreSQL **local na VPS**
+> (ADR-001). As seções de Render abaixo permanecem como blueprint legado
+> até a migração de infraestrutura da Fase 3; em qualquer host, o contrato é
+> `DATABASE_URL` PostgreSQL com TLS e `createcachetable` no deploy.
+
 ## 1. Visão geral
 
 - **Aplicação**: monólito Django (`config`), Gunicorn + WhiteNoise.
@@ -35,7 +40,7 @@ Migrations destrutivas exigem compatibilidade reversa (estratégia expand/contra
 | Variável | Uso |
 |---|---|
 | DJANGO_SECRET_KEY | Segredo do Django |
-| DATABASE_URL | Postgres gerenciado |
+| DATABASE_URL | PostgreSQL (local na VPS ou gerenciado), TLS obrigatório |
 | DJANGO_ALLOWED_HOSTS / CSRF_TRUSTED_ORIGINS / SITE_URL | Domínios |
 | MERCADOPAGO_ACCESS_TOKEN / MERCADOPAGO_WEBHOOK_SECRET | Pagamento |
 | BLING_API_KEY | NF-e |

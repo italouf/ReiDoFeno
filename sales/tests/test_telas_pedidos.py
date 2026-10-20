@@ -95,7 +95,10 @@ class PedidosInternosTests(TestCase):
 
     def test_transicao_por_gestor_avanca_pedido(self):
         pedido = fluxo_checkout(self.client, quantidade=1)
-        pedido.transicionar(Pedido.Status.PAGO)
+        pedido.definir_status_financeiro(
+            Pedido.StatusFinanceiro.PAGO,
+            motivo="teste",
+        )
         self.client.force_login(self.usuarios["gestor"])
         resposta = self.client.post(
             reverse("sales:pedido_atualizar_status", args=[pedido.pk]),
@@ -117,6 +120,22 @@ class PedidosInternosTests(TestCase):
 
         estoque = Estoque.objects.get(produto=item.produto, unidade=pedido.unidade)
         self.assertEqual(estoque.quantidade_bloqueada, Decimal("0"))
+
+    def test_cancelamento_invalido_nao_gera_500(self):
+        pedido = PedidoFactory(
+            usuario_criador=self.usuarios["vendedor"],
+            status=Pedido.Status.EM_SEPARACAO,
+        )
+        self.client.force_login(self.usuarios["gestor"])
+
+        resposta = self.client.post(
+            reverse("sales:pedido_atualizar_status", args=[pedido.pk]),
+            {"status": Pedido.Status.CANCELADO},
+        )
+
+        self.assertEqual(resposta.status_code, 302)
+        pedido.refresh_from_db()
+        self.assertEqual(pedido.status, Pedido.Status.EM_SEPARACAO)
 
     def test_detalhe_interno_mostra_link_whatsapp_do_cliente(self):
         pedido = fluxo_checkout(self.client, quantidade=1)

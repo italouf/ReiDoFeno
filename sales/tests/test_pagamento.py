@@ -48,7 +48,10 @@ class FluxoPagamentoTests(TestCase):
         )
 
         pedido.refresh_from_db()
-        self.assertEqual(pedido.status, Pedido.Status.PAGO)
+        self.assertEqual(
+            pedido.status_financeiro, Pedido.StatusFinanceiro.PAGO
+        )
+        self.assertEqual(pedido.status, Pedido.Status.AGUARDANDO_PAGAMENTO)
         saldo, bloqueada = _saldo(pedido)
         # 100 - 4 baixados; reserva zerada (virou baixa definitiva).
         self.assertEqual(saldo, Decimal("96.00"))
@@ -68,7 +71,7 @@ class FluxoPagamentoTests(TestCase):
         assuntos = [email.subject for email in mail.outbox]
         self.assertTrue(any("Pagamento aprovado" in a for a in assuntos), assuntos)
 
-    def test_recusa_marca_falhou_e_libera_reserva(self):
+    def test_recusa_cancela_pedido_e_libera_reserva(self):
         pedido = fluxo_checkout(self.client, quantidade=3)
         saldo_antes, _ = _saldo(pedido)
         self._iniciar(pedido)
@@ -78,7 +81,10 @@ class FluxoPagamentoTests(TestCase):
         )
         pedido.refresh_from_db()
         saldo, bloqueada = _saldo(pedido)
-        self.assertEqual(pedido.status, Pedido.Status.FALHOU)
+        self.assertEqual(pedido.status, Pedido.Status.CANCELADO)
+        self.assertEqual(
+            pedido.status_financeiro, Pedido.StatusFinanceiro.CANCELADO
+        )
         self.assertEqual(saldo, saldo_antes)  # reserva devolvida
         self.assertEqual(bloqueada, Decimal("0"))
 
@@ -151,7 +157,9 @@ class WebhookTests(TestCase):
             self.assertEqual(resposta.status_code, 200)
 
         pedido.refresh_from_db()
-        self.assertEqual(pedido.status, Pedido.Status.PAGO)
+        self.assertEqual(
+            pedido.status_financeiro, Pedido.StatusFinanceiro.PAGO
+        )
         saldo, _bloqueada = _saldo(pedido)
         self.assertEqual(saldo, Decimal("94"))
         eventos = PagamentoWebhookEvento.objects.filter(
@@ -176,7 +184,9 @@ class WebhookTests(TestCase):
         )
         self.assertEqual(resposta.status_code, 403)
         pedido.refresh_from_db()
-        self.assertNotEqual(pedido.status, Pedido.Status.PAGO)
+        self.assertNotEqual(
+            pedido.status_financeiro, Pedido.StatusFinanceiro.PAGO
+        )
         self.assertEqual(PagamentoWebhookEvento.objects.count(), 0)
 
     @override_settings(MERCADO_PAGO_WEBHOOK_SECRET="segredo-teste")
@@ -192,7 +202,9 @@ class WebhookTests(TestCase):
         )
         self.assertEqual(resposta.status_code, 200)
         pedido.refresh_from_db()
-        self.assertEqual(pedido.status, Pedido.Status.PAGO)
+        self.assertEqual(
+            pedido.status_financeiro, Pedido.StatusFinanceiro.PAGO
+        )
 
 
 def _saldo(pedido):
