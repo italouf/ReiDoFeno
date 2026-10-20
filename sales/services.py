@@ -8,6 +8,7 @@ from django.db import transaction
 from django.db.models import Sum
 from django.shortcuts import get_object_or_404
 
+from catalog.models import Produto
 from customers.models import Cliente
 from stock.models import Estoque, ReservaEstoque
 from stock.services import (
@@ -61,6 +62,49 @@ def saldo_disponivel(produto, unidade) -> Decimal:
     )
     return (agregado["saldo"] or Decimal("0")) - (
         agregado["bloqueada"] or Decimal("0")
+    )
+
+
+LIMIAR_ATACADO = Decimal("50.00")
+
+
+def calcular_preco_unitario(
+    *, produto, cliente, quantidade, preco_base=None
+) -> Decimal:
+    """Preço do item no checkout, com a regra de atacado (>50 fardos).
+
+    O preço-base do canal é preservado; a regra só troca para ``preco_atacado``
+    quando o cliente é ATACADO, o produto é vendido em fardo, a quantidade
+    supera 50 e existe preço de atacado cadastrado.
+    """
+    base = produto.preco_balcao if preco_base is None else preco_base
+    quantidade = Decimal(str(quantidade))
+    if (
+        cliente is not None
+        and cliente.categoria == Cliente.Categoria.ATACADO
+        and produto.unidade_medida == Produto.UnidadeMedida.FARDO
+        and quantidade > LIMIAR_ATACADO
+        and produto.preco_atacado is not None
+    ):
+        return produto.preco_atacado
+    return base
+
+
+def calcular_item_pedido(
+    *, produto, cliente, quantidade, preco_base=None
+) -> ItemPedido:
+    """Monta um ``ItemPedido`` não persistido com o preço correto."""
+    quantidade = Decimal(str(quantidade))
+    return ItemPedido(
+        produto=produto,
+        produto_nome=produto.nome,
+        quantidade=quantidade,
+        preco_unitario=calcular_preco_unitario(
+            produto=produto,
+            cliente=cliente,
+            quantidade=quantidade,
+            preco_base=preco_base,
+        ),
     )
 
 
@@ -150,15 +194,26 @@ def criar_pedido_do_carrinho(request, formulario) -> Pedido:
     )
 
     for item in itens:
+        produto = item["produto"]
+        preco_base = (
+            produto.preco_balcao
+            if cliente.categoria == Cliente.Categoria.ATACADO
+            else produto.preco_online
+        )
         item_pedido = ItemPedido.objects.create(
             pedido=pedido,
-            produto=item["produto"],
-            produto_nome=item["produto"].nome,
+            produto=produto,
+            produto_nome=produto.nome,
             quantidade=item["quantidade"],
-            preco_unitario=item["produto"].preco_online,
+            preco_unitario=calcular_preco_unitario(
+                produto=produto,
+                cliente=cliente,
+                quantidade=item["quantidade"],
+                preco_base=preco_base,
+            ),
         )
         reservar(
-            produto=item["produto"],
+            produto=produto,
             unidade=unidade,
             quantidade=item["quantidade"],
             pedido=pedido,

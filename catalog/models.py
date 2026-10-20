@@ -53,6 +53,18 @@ class Produto(models.Model):
         "preço online", max_digits=10, decimal_places=2,
         validators=[MinValueValidator(0)],
     )
+    preco_atacado = models.DecimalField(
+        "preço de atacado",
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(0)],
+        help_text=(
+            "Preço para clientes ATACADO com quantidade acima de 50 fardos. "
+            "Vazio significa usar o preço-base do canal."
+        ),
+    )
     ativo = models.BooleanField("ativo", default=True)
     criado_em = models.DateTimeField("criado em", auto_now_add=True)
     atualizado_em = models.DateTimeField("atualizado em", auto_now=True)
