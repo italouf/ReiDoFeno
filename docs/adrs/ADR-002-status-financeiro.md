@@ -102,6 +102,11 @@ um pedido efetivamente separado.
   existente e `financeiro_conciliado`, sem repetir baixa de estoque.
 - **R02/R03:** `identidade_versao` é monotônica sob lock e documento/CPF-CNPJ
   faz parte do contexto comprovado; alteração exige nova comprovação.
+- **D01/D02:** edição própria reautoriza e preserva o estado vigente sob
+  lock; `update_fields` limita a mudança de identidade efetivamente
+  persistida; revogação prevalece sobre formulário em andamento.
+- **D03:** aprovação repetida preserva `aprovado_em`; sincronização de
+  metadados só escreve/audita quando há correção efetiva.
 
 ## Consequências
 

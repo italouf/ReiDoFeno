@@ -344,6 +344,35 @@ class ResultadoPagamentoTests(TestCase):
             1,
         )
 
+    def test_aprovacao_repetida_preserva_aprovado_em(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from sales.factories import PedidoFactory
+
+        pedido = PedidoFactory(
+            status=Pedido.Status.AGUARDANDO_PAGAMENTO,
+            status_financeiro=Pedido.StatusFinanceiro.PAGO,
+            financeiro_conciliado=False,
+            total="10.00",
+        )
+        pagamento = Pagamento.objects.create(
+            pedido=pedido,
+            valor=pedido.total,
+            status=Pagamento.Status.PENDENTE,
+        )
+        self._aplicar(pedido, "approved")
+        data_original = timezone.now() - timedelta(days=1)
+        Pagamento.objects.filter(pk=pagamento.pk).update(
+            aprovado_em=data_original
+        )
+
+        self._aplicar(pedido, "approved")
+
+        pagamento.refresh_from_db()
+        self.assertEqual(pagamento.aprovado_em, data_original)
+
     def test_falha_auditoria_reverte_conciliacao_e_pagamento_legado(self):
         from core import auditoria as modulo_auditoria
         from sales.factories import PedidoFactory

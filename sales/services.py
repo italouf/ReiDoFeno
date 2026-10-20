@@ -238,6 +238,12 @@ def marcar_pagamento_aprovado(
         status_pagamento_anterior = (
             pagamento.status if pagamento is not None else None
         )
+        id_externo_anterior = (
+            pagamento.id_externo if pagamento is not None else None
+        )
+        data_aprovacao_anterior = (
+            pagamento.aprovado_em if pagamento is not None else None
+        )
         _atualizar_pagamento_aprovado(pedido, id_externo=id_externo)
         if (
             pagamento is not None
@@ -255,6 +261,33 @@ def marcar_pagamento_aprovado(
                     "id_externo": id_externo,
                     "pagamento_id": pagamento.pk,
                     "origem": "sincronizacao_legado",
+                },
+            )
+        elif pagamento is not None and (
+            id_externo_anterior != pagamento.id_externo
+            or data_aprovacao_anterior is None
+        ):
+            from core.auditoria import registrar_auditoria
+
+            registrar_auditoria(
+                acao="pedido.pagamento_aprovado_metadados_corrigidos",
+                instancia=pedido,
+                request=request,
+                antes={
+                    "id_externo": id_externo_anterior,
+                    "aprovado_em": (
+                        data_aprovacao_anterior.isoformat()
+                        if data_aprovacao_anterior
+                        else None
+                    ),
+                },
+                depois={
+                    "id_externo": pagamento.id_externo,
+                    "aprovado_em": (
+                        pagamento.aprovado_em.isoformat()
+                        if pagamento.aprovado_em
+                        else None
+                    ),
                 },
             )
         if not pedido.tem_prova_financeira():
@@ -379,10 +412,18 @@ def _atualizar_pagamento_aprovado(pedido: Pedido, *, id_externo: str) -> None:
         return
     from django.utils import timezone
 
-    pagamento.status = Pagamento.Status.APROVADO
-    pagamento.id_externo = id_externo or pagamento.id_externo
-    pagamento.aprovado_em = timezone.now()
-    pagamento.save()
+    campos = []
+    if pagamento.status != Pagamento.Status.APROVADO:
+        pagamento.status = Pagamento.Status.APROVADO
+        campos.append("status")
+    if id_externo and pagamento.id_externo != id_externo:
+        pagamento.id_externo = id_externo
+        campos.append("id_externo")
+    if pagamento.aprovado_em is None:
+        pagamento.aprovado_em = timezone.now()
+        campos.append("aprovado_em")
+    if campos:
+        pagamento.save(update_fields=campos)
 
 
 def _registrar_pagamento_apos_cancelamento(

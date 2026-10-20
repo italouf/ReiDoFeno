@@ -1,8 +1,8 @@
 # Fase 2A — Remediação verificável de segurança
 
-- **Status:** Correções R01–R04 implementadas; suíte local e gates estáticos
-  aprovados. CI do SHA anterior (`0d4cbe8`) confirmada; novo SHA aguarda
-  execução CI após push autorizado.
+- **Status:** Correções R01–R04 e D01–D03 implementadas; suíte local e gates
+  estáticos aprovados. CI do SHA anterior (`cfc3a64`) confirmada; novo SHA
+  aguarda execução CI após push autorizado.
 - **Data:** 2026-10-19
 - **Branch:** `fase-2a-seguranca-critica`
 - **Commit auditado:** `b510978cd5b82638a0b26114fa9506de6478a778`
@@ -192,10 +192,10 @@ enviado → concluido`
 
 ### Evidência local adicional
 
-- Suíte: **338 passed, 4 skipped, 230 subtests**.
+- Suíte: **342 passed, 4 skipped, 230 subtests**.
 - Skips: 3 testes de concorrência nativa PostgreSQL e 1 de Redis real sem
   `REDIS_URL`.
-- Cobertura global: 89,50%; `sales/services.py`: 94,94%;
+- Cobertura global: 89,55%; `sales/services.py`: 94,54%;
   `customers/services.py`: 94,55%.
 - Ruff, Bandit (0 medium/high), pip-audit, `manage.py check`,
   `check --deploy` e `makemigrations --check` passaram.
@@ -221,3 +221,28 @@ enviado → concluido`
   existente para `aprovado`/`id_externo`/`aprovado_em`, marca
   `financeiro_conciliado` e audita, sem baixa duplicada de estoque. Falha
   de auditoria reverte ambos; repetição é idempotente.
+
+## 12. Correções D01–D03 da reauditoria detalhada
+
+- **D01:** `ClienteUpdateView.form_valid` reabre transação, relê o Cliente
+  com `select_for_update` e reautoriza o acesso próprio pelo estado atual.
+  Campos de identidade (`usuario`, `vinculo_verificado`,
+  `identidade_versao`) são substituídos pelo estado vigente antes do save;
+  uma revogação concluída não é restaurada por formulário em andamento.
+  Conflito retorna 403 e a edição legítima continua funcionando.
+- **D02:** `Cliente.save` calcula mudança de identidade apenas nos campos
+  efetivamente persistidos (`update_fields`), trata lista vazia como no-op e
+  aplica `max` monotônico na versão. Save parcial de nome não invalida prova
+  atual; save de e-mail/documento/usuário/verificação continua
+  incrementando a versão.
+- **D03:** `_atualizar_pagamento_aprovado` só grava campos que mudaram;
+  `aprovado_em` é preenchido apenas quando ausente. Repetição de aprovação
+  preserva a primeira data; correções de metadados em pagamento já aprovado
+  são auditadas separadamente. Não há escrita nem baixa de estoque na
+  repetição.
+
+### Evidência adicional
+
+- Testes locais focados: D01 (revogação antes do save), D02 (save parcial e
+  `update_fields=[]`) e D03 (data de aprovação preservada) passaram.
+- Suíte completa e gates finais: ver relatório da entrega.

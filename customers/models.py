@@ -81,6 +81,12 @@ class Cliente(models.Model):
 
     def save(self, *args, **kwargs):
         self.documento = normalizar_documento(self.documento)
+        update_fields = kwargs.get("update_fields")
+        if update_fields is not None:
+            update_fields = set(update_fields)
+            if not update_fields:
+                return
+            kwargs["update_fields"] = update_fields
         if self.pk:
             with transaction.atomic():
                 anterior = (
@@ -97,11 +103,23 @@ class Cliente(models.Model):
                     .first()
                 )
                 if anterior is not None:
+                    campos = update_fields
+
+                    def sera_gravado(*nomes):
+                        return campos is None or bool(campos & set(nomes))
+
                     identidade_mudou = (
-                        anterior["email"] != self.email
-                        or anterior["documento"] != self.documento
-                        or anterior["usuario_id"] != self.usuario_id
-                        or anterior["vinculo_verificado"]
+                        sera_gravado("email")
+                        and anterior["email"] != self.email
+                    ) or (
+                        sera_gravado("documento")
+                        and anterior["documento"] != self.documento
+                    ) or (
+                        sera_gravado("usuario", "usuario_id")
+                        and anterior["usuario_id"] != self.usuario_id
+                    ) or (
+                        sera_gravado("vinculo_verificado")
+                        and anterior["vinculo_verificado"]
                         != self.vinculo_verificado
                     )
                     if identidade_mudou:
@@ -109,15 +127,16 @@ class Cliente(models.Model):
                             anterior["identidade_versao"] + 1
                         )
                     else:
-                        # Instância antiga não pode reduzir a versão.
+                        # Instância antiga não pode reduzir a versão, e campos
+                        # excluídos por update_fields não são mudança real.
                         self.identidade_versao = max(
                             self.identidade_versao or 0,
                             anterior["identidade_versao"],
                         )
-                    if kwargs.get("update_fields") is not None:
-                        kwargs["update_fields"] = set(
-                            kwargs["update_fields"]
-                        ) | {"identidade_versao"}
+                    if campos is not None:
+                        kwargs["update_fields"] = campos | {
+                            "identidade_versao"
+                        }
                 super().save(*args, **kwargs)
         else:
             super().save(*args, **kwargs)

@@ -216,6 +216,47 @@ class IdentidadeVersaoTests(TestCase):
         cliente.refresh_from_db()
         self.assertEqual(cliente.identidade_versao, versao_atual)
 
+    def test_save_parcial_de_nome_nao_invalida_prova_atual(self):
+        cliente = self._cliente()
+        stale = type(cliente).objects.get(pk=cliente.pk)
+        novo_email = "novo-versao@example.com"
+        cliente.email = novo_email
+        cliente.save()
+        cliente.refresh_from_db()
+        versao = cliente.identidade_versao
+
+        nonce = "prova-email-novo"
+        VinculoClienteToken.objects.create(
+            cliente=cliente,
+            usuario=self.usuario,
+            nonce_hash=hashlib.sha256(nonce.encode()).hexdigest(),
+            email_hash=hashlib.sha256(
+                novo_email.casefold().encode()
+            ).hexdigest(),
+            identidade_versao=versao,
+            expira_em=timezone.now() + timedelta(hours=1),
+        )
+        token = signing.dumps({"nonce": nonce}, salt=SALT_VINCULO)
+        self.assertIsNotNone(obter_token_vinculo(token, self.usuario))
+
+        stale.nome = "Nome alterado em instância antiga"
+        stale.save(update_fields=["nome"])
+
+        cliente.refresh_from_db()
+        self.assertEqual(cliente.identidade_versao, versao)
+        self.assertIsNotNone(obter_token_vinculo(token, self.usuario))
+
+    def test_update_fields_vazio_nao_altera_versao(self):
+        cliente = self._cliente()
+        versao = cliente.identidade_versao
+        stale = type(cliente).objects.get(pk=cliente.pk)
+        stale.nome = "Não deve salvar"
+        stale.save(update_fields=[])
+
+        cliente.refresh_from_db()
+        self.assertEqual(cliente.identidade_versao, versao)
+        self.assertNotEqual(cliente.nome, "Não deve salvar")
+
 
 class RevisaoAdministrativaTests(TestCase):
     @classmethod

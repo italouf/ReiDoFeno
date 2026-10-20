@@ -13,6 +13,8 @@ from accounts.models import Usuario
 from core.models import LogAuditoria
 from customers.factories import ClienteFactory
 from customers.models import VinculoClienteToken
+from customers.services import revisar_vinculo_cliente
+from customers.views import ClienteUpdateView
 from sales.factories import PedidoFactory
 
 DOCUMENTO = "52998224725"
@@ -347,3 +349,50 @@ class VinculoClienteTests(TestCase):
         self.assertEqual(self.client.post(link).status_code, 302)
         cliente.refresh_from_db()
         self.assertTrue(cliente.vinculo_verificado)
+
+    def test_revogacao_administrativa_durante_edicao_prevalece(self):
+        cliente = self._criar_cliente(
+            usuario=self.usuario, vinculo_verificado=True
+        )
+        self.client.force_login(self.usuario)
+        original = ClienteUpdateView.form_valid
+
+        def revogar_antes_do_save(view, form):
+            revisar_vinculo_cliente(
+                cliente=cliente,
+                verificado=False,
+                justificativa="Revogação durante edição.",
+                request=view.request,
+            )
+            return original(view, form)
+
+        with mock.patch.object(
+            ClienteUpdateView, "form_valid", revogar_antes_do_save
+        ):
+            resposta = self.client.post(
+                reverse("customers:cliente_editar", args=[cliente.pk]),
+                {
+                    "nome": "Nome Editado",
+                    "tipo_pessoa": cliente.tipo_pessoa,
+                    "documento": cliente.documento,
+                    "categoria": cliente.categoria,
+                    "telefone": cliente.telefone,
+                    "email": cliente.email,
+                    "logradouro": "",
+                    "numero": "",
+                    "bairro": "",
+                    "cidade": "",
+                    "uf": "",
+                    "cep": "",
+                    "preferencia": "",
+                },
+            )
+
+        self.assertEqual(resposta.status_code, 403)
+        cliente.refresh_from_db()
+        self.assertIsNone(cliente.usuario)
+        self.assertFalse(cliente.vinculo_verificado)
+        leitura = self.client.get(
+            reverse("customers:cliente_editar", args=[cliente.pk])
+        )
+        self.assertEqual(leitura.status_code, 403)

@@ -2,6 +2,17 @@
 
 Todas as mudanças relevantes deste projeto são registradas aqui.
 
+## [Fase 2A — correções D01–D03] — 2026-10-20
+
+- **D01:** edição própria relê e reautoriza o vínculo sob lock; revogação
+  administrativa durante formulário em andamento não é desfeita e retorna 403.
+- **D02:** `Cliente.save` considera somente os campos efetivamente escritos
+  por `update_fields`; save parcial de nome não invalida prova atual, lista
+  vazia é no-op e a versão nunca diminui.
+- **D03:** aprovação repetida preserva `aprovado_em`; metadados só são
+  corrigidos/auditados quando realmente ausentes/divergentes, sem baixa de
+  estoque adicional.
+
 ## [Fase 2A — correções R01–R04] — 2026-10-20
 
 - **R01:** criação administrativa verificada exige justificativa e evento de
