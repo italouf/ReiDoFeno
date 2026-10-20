@@ -5,12 +5,37 @@ DATABASE_URL e, quando aplicável, CSRF_TRUSTED_ORIGINS e DJANGO_SECURE_SSL_REDI
 """
 import os
 
+import dj_database_url
+from django.core.exceptions import ImproperlyConfigured
+
 from .base import *  # noqa: F401,F403
 from .base import BASE_DIR
 
 DEBUG = False
 
 SECRET_KEY = os.environ["DJANGO_SECRET_KEY"]
+
+# ADR-001: produção usa exclusivamente PostgreSQL, sem fallback SQLite.
+DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
+if not DATABASE_URL:
+    raise ImproperlyConfigured(
+        "DATABASE_URL é obrigatório em produção (PostgreSQL)."
+    )
+
+DATABASES = {
+    "default": dj_database_url.parse(
+        DATABASE_URL,
+        conn_max_age=600,
+        conn_health_checks=True,
+        ssl_require=True,
+    )
+}
+if "postgresql" not in DATABASES["default"]["ENGINE"]:
+    raise ImproperlyConfigured(
+        "Produção exige PostgreSQL; DATABASE_URL aponta para outro banco."
+    )
+# Garante TLS mesmo se a URL trouxer sslmode=disable.
+DATABASES["default"].setdefault("OPTIONS", {})["sslmode"] = "require"
 
 CSRF_TRUSTED_ORIGINS = [
     origin.strip()

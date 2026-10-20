@@ -14,6 +14,9 @@ Blueprint pronta: `render.yaml` (Web Service + PostgreSQL 15 + crons).
 1. Conectar o repositório GitHub ao Render → "New Blueprint" → selecionar o repo.
 2. Preencher as variáveis `sync: false` (secretos) listadas no blueprint.
 3. Primeiro deploy cria banco e aplica migrations via build command.
+   Em produção o `DATABASE_URL` é obrigatório e a conexão exige TLS
+   (`sslmode=require`, ver ADR-001). O build também deve executar
+   `python manage.py createcachetable` para o rate limiting compartilhado.
 4. Criar usuário administrativo:
    `python manage.py createsuperuser` (via Render Shell) e
    `python manage.py seed_groups`.
@@ -39,6 +42,7 @@ Migrations destrutivas exigem compatibilidade reversa (estratégia expand/contra
 | SENTRY_DSN | Erros |
 | EMAIL_* / DEFAULT_FROM_EMAIL | SMTP transacional |
 | PEDIDO_TIMEOUT_MINUTOS / RECOMPRA_DIAS / FISCAL_ALERTA_HORAS_SEM_NFE | Regras operacionais |
+| RATELIMIT_LOGIN / RATELIMIT_CHECKOUT / RATELIMIT_WEBHOOK | Limites (padrão: 5/m, 10/h, 60/m) |
 
 ## 4. Backups e restore
 
