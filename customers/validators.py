@@ -8,7 +8,6 @@ import re
 
 from django.core.exceptions import ValidationError
 
-SO_DIGITOS = re.compile(r"\D")
 NAO_ALFANUMERICO = re.compile(r"[^0-9A-Za-z]")
 CNPJ_ALFANUMERICO = re.compile(r"^[A-Z0-9]{14}$")
 
@@ -21,10 +20,6 @@ def normalizar_documento(valor: str) -> str:
     if not valor:
         return ""
     return NAO_ALFANUMERICO.sub("", str(valor)).upper()
-
-
-def _apenas_digitos(valor: str) -> str:
-    return SO_DIGITOS.sub("", str(valor))
 
 
 def _calcula_digito(digitos: str, pesos: tuple[int, ...]) -> int:
