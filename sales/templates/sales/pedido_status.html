@@ -2,15 +2,15 @@
 {% block title %}Pedido {{ pedido.numero }} — Rei do Feno{% endblock %}
 {% block content %}
 <article style="max-width:44rem;">
-  {% if pedido.status == 'pago' or pedido.status == 'concluido' %}
-    <div class="alerta alerta--sucesso" role="status">
-      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-ok"/></svg>
-      <div><strong>Pedido confirmado!</strong> Já estamos preparando tudo.</div>
-    </div>
-  {% elif pedido.status == 'cancelado' or pedido.status == 'falhou' %}
+  {% if pedido.status == 'cancelado' or pedido.status == 'falhou' %}
     <div class="alerta alerta--erro" role="alert">
       <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-erro"/></svg>
       <div>Este pedido foi cancelado. Se pagou por engano, fale com a gente pelo WhatsApp (75) 98145-7227.</div>
+    </div>
+  {% elif pedido.status_financeiro == 'pago' %}
+    <div class="alerta alerta--sucesso" role="status">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-ok"/></svg>
+      <div><strong>Pedido confirmado!</strong> Já estamos preparando tudo.</div>
     </div>
   {% else %}
     <div class="alerta alerta--info" role="status">
@@ -22,12 +22,13 @@
   <h1 style="display:flex; flex-wrap:wrap; align-items:center; gap:var(--e3);">
     Pedido {{ pedido.numero }}
     {% include "store/includes/order_status_badge.html" with status=pedido.status rotulo=pedido.get_status_display %}
+    {% include "store/includes/order_status_badge.html" with status=pedido.status_financeiro rotulo=pedido.get_status_financeiro_display %}
   </h1>
-  <p style="color:var(--cinza-texto);">Olá, {{ pedido.cliente.nome }}. Modalidade: <strong>{{ pedido.get_modalidade_display }}</strong> · Unidade: {{ pedido.unidade.nome }}</p>
+  <p style="color:var(--cinza-texto);">Olá, {{ pedido.nome_contato|default:pedido.cliente.nome }}. Modalidade: <strong>{{ pedido.get_modalidade_display }}</strong> · Unidade: {{ pedido.unidade.nome }}</p>
 
   <ul class="timeline-status" aria-label="Andamento do pedido">
     <li {% if pedido.status != 'cancelado' and pedido.status != 'rascunho' %}aria-current="true"{% endif %}>Pedido recebido</li>
-    <li {% if pedido.status == 'pago' or pedido.status == 'em_separacao' or pedido.status == 'pronto_para_entrega' or pedido.status == 'enviado' or pedido.status == 'concluido' %}aria-current="true"{% endif %}>Pagamento</li>
+    <li {% if pedido.status_financeiro == 'pago' %}aria-current="true"{% endif %}>Pagamento</li>
     <li {% if pedido.status in 'em_separacao pronto_para_entrega enviado concluido' %}aria-current="true"{% endif %}>Separação</li>
     <li {% if pedido.status in 'pronto_para_entrega enviado concluido' %}aria-current="true"{% endif %}>Pronto/Entrega</li>
     <li {% if pedido.status == 'concluido' %}aria-current="true"{% endif %}>Concluído</li>
@@ -62,10 +63,11 @@
     </table>
   </div>
 
-  {% if pedido.status == 'aguardando_pagamento' %}
-  <p style="margin-top:var(--e5);">
-    <a class="btn" href="{% url 'sales:pagamento_iniciar' pedido.token_acesso %}" style="min-height:48px;">Ir para o pagamento</a>
-  </p>
+  {% if pedido.status_financeiro == 'pendente' and pedido.status in 'aguardando_pagamento pagamento_pendente' %}
+  <form method="post" action="{% url 'sales:pagamento_iniciar' pedido.token_acesso %}" style="margin-top:var(--e5);">
+    {% csrf_token %}
+    <button type="submit" class="btn" style="min-height:48px;">Ir para o pagamento</button>
+  </form>
   {% endif %}
 
   <ul class="lista-beneficios" style="margin-top:var(--e5);">

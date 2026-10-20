@@ -1,8 +1,12 @@
 from decimal import Decimal
 
+from django.contrib.auth.models import Group
 from django.core.exceptions import ValidationError
+from django.core.management import call_command
 from django.test import TestCase
+from django.urls import reverse
 
+from accounts.models import Usuario
 from catalog.factories import ProdutoFactory
 from core.auditoria import _serializar, registrar_auditoria
 from core.models import LogAuditoria
@@ -54,3 +58,30 @@ class AuditoriaIntegracaoTests(TestCase):
             acao="estoque.ajuste_manual"
         ).latest("id")
         self.assertIn("motivo", (registro.depois or {}))
+
+
+class AuditoriaCrudUnidadeTests(TestCase):
+    def test_criacao_de_unidade_e_auditada(self):
+        call_command("seed_groups", verbosity=0)
+        admin = Usuario.objects.create_user(
+            username="admin-auditoria", password="senha-forte-123"
+        )
+        admin.groups.add(Group.objects.get(name="Administrador"))
+        self.client.force_login(admin)
+
+        resposta = self.client.post(
+            reverse("core:unidade_novo"),
+            {
+                "nome": "Unidade Auditada",
+                "cidade": "Feira de Santana",
+                "tipo": "loja",
+                "ativa": "on",
+            },
+        )
+
+        self.assertEqual(resposta.status_code, 302)
+        self.assertTrue(
+            LogAuditoria.objects.filter(
+                acao="unidade.criado",
+            ).exists()
+        )

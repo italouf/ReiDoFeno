@@ -17,6 +17,30 @@ class PedidoFactory(factory.django.DjangoModelFactory):
     unidade = factory.SubFactory(UnidadeFactory)
     modalidade = Pedido.Modalidade.RETIRADA
     status = Pedido.Status.AGUARDANDO_PAGAMENTO
+    status_financeiro = factory.LazyAttribute(
+        lambda o: (
+            Pedido.StatusFinanceiro.PAGO
+            if o.status
+            in (
+                Pedido.Status.PAGO,
+                Pedido.Status.EM_SEPARACAO,
+                Pedido.Status.PRONTO_PARA_ENTREGA,
+                Pedido.Status.ENVIADO,
+                Pedido.Status.CONCLUIDO,
+            )
+            else (
+                Pedido.StatusFinanceiro.CANCELADO
+                if o.status
+                in (Pedido.Status.CANCELADO, Pedido.Status.FALHOU)
+                else Pedido.StatusFinanceiro.PENDENTE
+            )
+        )
+    )
+    financeiro_conciliado = factory.LazyAttribute(
+        lambda o: (
+            o.status_financeiro == Pedido.StatusFinanceiro.PAGO
+        )
+    )
     canal = Pedido.Canal.LOJA
 
 

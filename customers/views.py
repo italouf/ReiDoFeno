@@ -1,5 +1,7 @@
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.core.exceptions import PermissionDenied
+from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.urls import reverse, reverse_lazy
 from django.views.generic import (
@@ -13,7 +15,7 @@ from core.auditoria import AuditoriaFormValidMixin
 from core.mixins import GRUPOS_INTERNOS, GrupoRequiredMixin
 
 from .forms import ClienteForm, InteracaoForm
-from .models import Cliente
+from .models import Cliente, normalizar_documento
 
 GRUPOS_CADASTROS = ("Administrador", "Gestor")
 GRUPOS_CONSULTA = ("Administrador", "Gestor", "Vendedor")
@@ -115,9 +117,43 @@ class ClienteUpdateView(ClienteBaseView, AuditoriaFormValidMixin, UpdateView):
         return (
             usuario.is_authenticated
             and cliente_vinculado is not None
+            and cliente_vinculado.vinculo_verificado
             and str(cliente_vinculado.pk) == str(alvo)
         )
 
     def form_valid(self, form):
-        messages.success(self.request, "Cliente atualizado com sucesso.")
-        return super().form_valid(form)
+        with transaction.atomic():
+            atual = Cliente.objects.select_for_update().get(
+                pk=self.object.pk
+            )
+            interno = self.request.user.is_superuser or (
+                self.request.user.groups.filter(
+                    name__in=GRUPOS_CADASTROS
+                ).exists()
+            )
+            if not interno and (
+                atual.usuario_id != self.request.user.pk
+                or not atual.vinculo_verificado
+            ):
+                raise PermissionDenied(
+                    "O vínculo deste cadastro não está mais ativo."
+                )
+
+            # O ModelForm não inclui campos de identidade; não permita que a
+            # instância antiga restaure usuário/verificação já revogados.
+            form.instance.usuario_id = atual.usuario_id
+            form.instance.vinculo_verificado = atual.vinculo_verificado
+            form.instance.identidade_versao = atual.identidade_versao
+
+            email_novo = (form.cleaned_data.get("email") or "").strip()
+            documento_novo = normalizar_documento(
+                form.cleaned_data.get("documento") or ""
+            )
+            if (
+                (atual.email or "").casefold() != email_novo.casefold()
+                or atual.documento != documento_novo
+            ):
+                # R3/R5: e-mail e CPF/CNPJ fazem parte do contexto comprovado.
+                form.instance.vinculo_verificado = False
+            messages.success(self.request, "Cliente atualizado com sucesso.")
+            return super().form_valid(form)

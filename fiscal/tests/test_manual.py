@@ -1,3 +1,5 @@
+from unittest import mock
+
 from django.contrib.auth.models import Group
 from django.core.management import call_command
 from django.test import TestCase
@@ -48,3 +50,25 @@ class NotaManualTests(TestCase):
         self.client.force_login(self.usuarios["vendedor"])
         resposta = self.client.get(reverse("fiscal:nota_manual", args=[pedido.pk]))
         self.assertEqual(resposta.status_code, 403)
+
+    def test_falha_na_auditoria_reverte_nota_manual(self):
+        pedido = PedidoFactory(status=Pedido.Status.PAGO)
+        self.client.force_login(self.usuarios["gestor"])
+
+        with mock.patch(
+            "fiscal.views.registrar_auditoria",
+            side_effect=RuntimeError("auditoria indisponível"),
+        ):
+            with self.assertRaises(RuntimeError):
+                self.client.post(
+                    reverse("fiscal:nota_manual", args=[pedido.pk]),
+                    {
+                        "numero": "123456",
+                        "chave_acesso": (
+                            "29260812345678901234567890123456789012345678"
+                        ),
+                        "link_documento": "https://exemplo.com/danfe.pdf",
+                    },
+                )
+
+        self.assertFalse(NotaFiscal.objects.filter(pedido=pedido).exists())

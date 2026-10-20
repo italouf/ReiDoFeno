@@ -19,7 +19,10 @@
         <td>{{ pedido.unidade.nome }}</td>
         <td>{{ pedido.get_modalidade_display }}</td>
         <td class="num">R$ {{ pedido.total }}</td>
-        <td>{% include "components/status_pedido.html" with status=pedido.status rotulo=pedido.get_status_display %}</td>
+        <td>
+          {% include "components/status_pedido.html" with status=pedido.status rotulo=pedido.get_status_display %}
+          {% include "components/status_pedido.html" with status=pedido.status_financeiro rotulo=pedido.get_status_financeiro_display %}
+        </td>
         <td><a class="btn btn--secundario btn--pequeno" href="{% url 'sales:pedido_interno_detail' pedido.pk %}">Abrir</a></td>
       </tr>
       {% endfor %}

@@ -1,5 +1,6 @@
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.db import transaction
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
 from django.views.generic import FormView
@@ -33,24 +34,25 @@ class RegistrarNotaManualView(
         return contexto
 
     def form_valid(self, form):
-        nota, _criada = NotaFiscal.objects.get_or_create(pedido=self.pedido)
-        nota.status = NotaFiscal.Status.AUTORIZADA
-        nota.origem = NotaFiscal.Origem.MANUAL
-        nota.numero = form.cleaned_data["numero"]
-        nota.chave_acesso = form.cleaned_data["chave_acesso"]
-        nota.link_documento = form.cleaned_data.get("link_documento", "")
-        nota.save()
+        with transaction.atomic():
+            nota, _criada = NotaFiscal.objects.get_or_create(pedido=self.pedido)
+            nota.status = NotaFiscal.Status.AUTORIZADA
+            nota.origem = NotaFiscal.Origem.MANUAL
+            nota.numero = form.cleaned_data["numero"]
+            nota.chave_acesso = form.cleaned_data["chave_acesso"]
+            nota.link_documento = form.cleaned_data.get("link_documento", "")
+            nota.save()
 
-        registrar_auditoria(
-            acao="fiscal.nota_manual_registrada",
-            instancia=nota,
-            request=self.request,
-            depois={
-                "numero": nota.numero,
-                "chave": nota.chave_acesso,
-                "origem": nota.origem,
-            },
-        )
+            registrar_auditoria(
+                acao="fiscal.nota_manual_registrada",
+                instancia=nota,
+                request=self.request,
+                depois={
+                    "numero": nota.numero,
+                    "chave": nota.chave_acesso,
+                    "origem": nota.origem,
+                },
+            )
         messages.success(
             self.request,
             f"NF-e manual {nota.numero} vinculada ao pedido {self.pedido.numero}.",

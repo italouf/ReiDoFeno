@@ -1,5 +1,5 @@
 from django.conf import settings
-from django.db import models
+from django.db import models, transaction
 
 from .validators import DocumentoValidator
 
@@ -58,6 +58,17 @@ class Cliente(models.Model):
         related_name="cliente",
         verbose_name="usuário vinculado",
     )
+    vinculo_verificado = models.BooleanField(
+        "vínculo comprovado",
+        default=False,
+        db_index=True,
+        help_text="Vínculo criado pelo fluxo de comprovação ou revisão administrativa.",
+    )
+    identidade_versao = models.PositiveIntegerField(
+        "versão da identidade",
+        default=0,
+        help_text="Incrementada em mudanças de e-mail/documento/usuário/verificação.",
+    )
     criado_em = models.DateTimeField("criado em", auto_now_add=True)
 
     class Meta:
@@ -70,7 +81,65 @@ class Cliente(models.Model):
 
     def save(self, *args, **kwargs):
         self.documento = normalizar_documento(self.documento)
-        super().save(*args, **kwargs)
+        update_fields = kwargs.get("update_fields")
+        if update_fields is not None:
+            update_fields = set(update_fields)
+            if not update_fields:
+                return
+            kwargs["update_fields"] = update_fields
+        if self.pk:
+            with transaction.atomic():
+                anterior = (
+                    type(self)
+                    .objects.select_for_update()
+                    .filter(pk=self.pk)
+                    .values(
+                        "email",
+                        "documento",
+                        "usuario_id",
+                        "vinculo_verificado",
+                        "identidade_versao",
+                    )
+                    .first()
+                )
+                if anterior is not None:
+                    campos = update_fields
+
+                    def sera_gravado(*nomes):
+                        return campos is None or bool(campos & set(nomes))
+
+                    identidade_mudou = (
+                        sera_gravado("email")
+                        and anterior["email"] != self.email
+                    ) or (
+                        sera_gravado("documento")
+                        and anterior["documento"] != self.documento
+                    ) or (
+                        sera_gravado("usuario", "usuario_id")
+                        and anterior["usuario_id"] != self.usuario_id
+                    ) or (
+                        sera_gravado("vinculo_verificado")
+                        and anterior["vinculo_verificado"]
+                        != self.vinculo_verificado
+                    )
+                    if identidade_mudou:
+                        self.identidade_versao = (
+                            anterior["identidade_versao"] + 1
+                        )
+                    else:
+                        # Instância antiga não pode reduzir a versão, e campos
+                        # excluídos por update_fields não são mudança real.
+                        self.identidade_versao = max(
+                            self.identidade_versao or 0,
+                            anterior["identidade_versao"],
+                        )
+                    if campos is not None:
+                        kwargs["update_fields"] = campos | {
+                            "identidade_versao"
+                        }
+                super().save(*args, **kwargs)
+        else:
+            super().save(*args, **kwargs)
 
     @property
     def whatsapp_url(self) -> str:
@@ -123,4 +192,50 @@ class InteracaoVendedor(models.Model):
         return (
             f"{self.get_tipo_display()} — {self.cliente.nome} "
             f"por {self.vendedor.username}"
+        )
+
+
+class VinculoClienteToken(models.Model):
+    """Prova de vínculo de uso único; o token enviado é assinado e opaco."""
+
+    cliente = models.ForeignKey(
+        Cliente,
+        on_delete=models.CASCADE,
+        related_name="tokens_vinculo",
+        verbose_name="cliente",
+    )
+    usuario = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="tokens_vinculo",
+        verbose_name="usuário",
+    )
+    nonce_hash = models.CharField(
+        "hash do nonce", max_length=64, unique=True
+    )
+    email_hash = models.CharField("hash do e-mail", max_length=64)
+    identidade_versao = models.PositiveIntegerField(
+        "versão da identidade", default=0
+    )
+    criado_em = models.DateTimeField("criado em", auto_now_add=True)
+    expira_em = models.DateTimeField("expira em")
+    usado_em = models.DateTimeField("usado em", null=True, blank=True)
+    revogado_em = models.DateTimeField("revogado em", null=True, blank=True)
+
+    class Meta:
+        verbose_name = "prova de vínculo"
+        verbose_name_plural = "provas de vínculo"
+        ordering = ["-criado_em"]
+
+    def __str__(self):
+        return f"vínculo cliente={self.cliente_id} usuário={self.usuario_id}"
+
+    @property
+    def ativo(self) -> bool:
+        from django.utils import timezone
+
+        return (
+            self.usado_em is None
+            and self.revogado_em is None
+            and self.expira_em > timezone.now()
         )

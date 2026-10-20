@@ -9,16 +9,23 @@ from sales.models import ItemPedido, Pagamento, Pedido
 
 
 class MaquinaStatusTests(TestCase):
-    def test_transicao_valida_e_aplicada(self):
-        pedido = PedidoFactory(status=Pedido.Status.AGUARDANDO_PAGAMENTO)
-        pedido.transicionar(Pedido.Status.PAGO)
-        self.assertEqual(pedido.status, Pedido.Status.PAGO)
+    def test_transicao_operacional_valida_e_aplicada(self):
+        pedido = PedidoFactory(
+            status=Pedido.Status.AGUARDANDO_PAGAMENTO,
+            status_financeiro=Pedido.StatusFinanceiro.PAGO,
+        )
+        pedido.transicionar(Pedido.Status.EM_SEPARACAO)
+        self.assertEqual(pedido.status, Pedido.Status.EM_SEPARACAO)
+        self.assertEqual(
+            pedido.status_financeiro, Pedido.StatusFinanceiro.PAGO
+        )
 
     def test_fluxo_completo_ate_concluido(self):
-        pedido = PedidoFactory()
+        pedido = PedidoFactory(
+            status=Pedido.Status.AGUARDANDO_PAGAMENTO,
+            status_financeiro=Pedido.StatusFinanceiro.PAGO,
+        )
         caminho = [
-            Pedido.Status.PAGAMENTO_PENDENTE,
-            Pedido.Status.PAGO,
             Pedido.Status.EM_SEPARACAO,
             Pedido.Status.PRONTO_PARA_ENTREGA,
             Pedido.Status.ENVIADO,
@@ -39,13 +46,12 @@ class MaquinaStatusTests(TestCase):
             with self.subTest(final=final):
                 pedido = PedidoFactory(status=final)
                 with self.assertRaises(ValidationError):
-                    pedido.transicionar(Pedido.Status.PAGO)
+                    pedido.transicionar(Pedido.Status.CONCLUIDO)
 
-    def test_falhou_permite_reiniciar_pagamento(self):
-        pedido = PedidoFactory(status=Pedido.Status.AGUARDANDO_PAGAMENTO)
-        pedido.transicionar(Pedido.Status.FALHOU)
-        pedido.transicionar(Pedido.Status.AGUARDANDO_PAGAMENTO)
-        self.assertEqual(pedido.status, Pedido.Status.AGUARDANDO_PAGAMENTO)
+    def test_falhou_legado_exige_reconciliacao(self):
+        pedido = PedidoFactory(status=Pedido.Status.FALHOU)
+        with self.assertRaises(ValidationError):
+            pedido.transicionar(Pedido.Status.AGUARDANDO_PAGAMENTO)
 
 
 class PedidoModelTests(TestCase):

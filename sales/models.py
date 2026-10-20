@@ -25,26 +25,40 @@ class Pedido(models.Model):
         CANCELADO = "cancelado", "Cancelado"
         FALHOU = "falhou", "Falhou"
 
+    class StatusFinanceiro(models.TextChoices):
+        PENDENTE = "pendente", "Pendente"
+        PAGO = "pago", "Pago"
+        ESTORNADO = "estornado", "Estornado"
+        CANCELADO = "cancelado", "Cancelado"
+
+    # Estados legados que ainda existem em Pedido.Status para leitura de dados
+    # antigos. Novas transições operacionais não podem gravá-los (ADR-002).
+    STATUS_FINANCEIROS_LEGADOS = frozenset(
+        {Status.PAGO, Status.PAGAMENTO_PENDENTE, Status.FALHOU}
+    )
+
+    # Estados que só podem ser atingidos com cobertura financeira paga.
+    EXIGE_FINANCEIRO_PAGO = frozenset(
+        {
+            Status.EM_SEPARACAO,
+            Status.PRONTO_PARA_ENTREGA,
+            Status.ENVIADO,
+            Status.CONCLUIDO,
+        }
+    )
+
     TRANSICOES_VALIDAS: dict[str, set[str]] = {
         Status.RASCUNHO: {Status.AGUARDANDO_PAGAMENTO, Status.CANCELADO},
-        Status.AGUARDANDO_PAGAMENTO: {
-            Status.PAGAMENTO_PENDENTE,
-            Status.PAGO,
-            Status.CANCELADO,
-            Status.FALHOU,
-        },
-        Status.PAGAMENTO_PENDENTE: {
-            Status.PAGO,
-            Status.CANCELADO,
-            Status.FALHOU,
-        },
+        # Em separação exige status_financeiro=PAGO (validado em transicionar).
+        Status.AGUARDANDO_PAGAMENTO: {Status.EM_SEPARACAO, Status.CANCELADO},
+        Status.PAGAMENTO_PENDENTE: {Status.EM_SEPARACAO, Status.CANCELADO},
         Status.PAGO: {Status.EM_SEPARACAO, Status.CANCELADO},
         Status.EM_SEPARACAO: {Status.PRONTO_PARA_ENTREGA},
         Status.PRONTO_PARA_ENTREGA: {Status.ENVIADO, Status.CONCLUIDO},
-        Status.ENVIADO: {Status.CONCLUIDO, Status.FALHOU},
+        Status.ENVIADO: {Status.CONCLUIDO},
         Status.CONCLUIDO: set(),
         Status.CANCELADO: set(),
-        Status.FALHOU: {Status.AGUARDANDO_PAGAMENTO},
+        Status.FALHOU: {Status.CANCELADO},
     }
 
     class Modalidade(models.TextChoices):
@@ -66,6 +80,31 @@ class Pedido(models.Model):
     cliente = models.ForeignKey(
         Cliente, on_delete=models.PROTECT, related_name="pedidos",
         verbose_name="cliente",
+    )
+    nome_contato = models.CharField(
+        "nome de contato", max_length=120, blank=True,
+        help_text="Nome informado no pedido; não é identidade verificada.",
+    )
+    identidade_verificada = models.BooleanField(
+        "identidade verificada",
+        default=False,
+        db_index=True,
+        help_text="Pedido criado pelo usuário já vinculado e comprovado.",
+    )
+    consentimento_compras = models.BooleanField(
+        "consentimento de compras", default=False
+    )
+    consentimento_marketing = models.BooleanField(
+        "consentimento de marketing", default=False
+    )
+    financeiro_conciliado = models.BooleanField(
+        "financeiro conciliado",
+        default=False,
+        db_index=True,
+        help_text=(
+            "Prova/reconciliação explícita; status histórico inferido não "
+            "libera operação."
+        ),
     )
     usuario_criador = models.ForeignKey(
         Usuario, on_delete=models.SET_NULL, null=True, blank=True,
@@ -105,6 +144,14 @@ class Pedido(models.Model):
         default=Status.AGUARDANDO_PAGAMENTO,
         db_index=True,
     )
+    status_financeiro = models.CharField(
+        "status financeiro",
+        max_length=20,
+        choices=StatusFinanceiro.choices,
+        default=StatusFinanceiro.PENDENTE,
+        db_index=True,
+        help_text="Condição financeira do pedido; independente do andamento.",
+    )
     criado_em = models.DateTimeField("criado em", auto_now_add=True)
     atualizado_em = models.DateTimeField("atualizado em", auto_now=True)
 
@@ -124,16 +171,88 @@ class Pedido(models.Model):
             self.numero = f"PF{self.pk:06d}"
             super().save(update_fields=["numero"])
 
-    def transicionar(self, novo_status: str) -> None:
-        """Aplica uma transição de status válida ou levanta ValidationError."""
+    def tem_prova_financeira(self) -> bool:
+        """Prova explícita (provedor validado ou reconciliação autorizada)."""
+        return bool(self.financeiro_conciliado)
+
+    def transicionar(self, novo_status: str, *, request=None, usuario=None) -> None:
+        """Aplica uma transição operacional válida ou levanta ValidationError.
+
+        ADR-002: estados financeiros não são gravados por esta via. A
+        aprovação/recusa do provedor usa os serviços de pagamento e
+        ``definir_status_financeiro``.
+        """
+        if novo_status in self.STATUS_FINANCEIROS_LEGADOS:
+            raise ValidationError(
+                "Estado financeiro não pode ser alterado por transição "
+                "operacional; use o resultado do provedor de pagamento."
+            )
         permitidos = self.TRANSICOES_VALIDAS.get(self.status, set())
         if novo_status not in permitidos:
             raise ValidationError(
                 f"Transição inválida: '{self.status}' → '{novo_status}'. "
                 f"Permitidas: {sorted(permitidos)}."
             )
+        if (
+            novo_status in self.EXIGE_FINANCEIRO_PAGO
+            and (
+                self.status_financeiro != self.StatusFinanceiro.PAGO
+                or not self.tem_prova_financeira()
+            )
+        ):
+            raise ValidationError(
+                "O andamento só pode avançar com pagamento confirmado e "
+                "prova financeira conciliada."
+            )
+        status_anterior = self.status
         self.status = novo_status
-        self.save(update_fields=["status", "atualizado_em"])
+
+        from core.auditoria import auditar_atomicamente
+
+        auditar_atomicamente(
+            acao="pedido.status_alterado",
+            instancia=self,
+            request=request,
+            usuario=usuario,
+            antes={
+                "status": status_anterior,
+                "status_financeiro": self.status_financeiro,
+            },
+            depois={
+                "status": novo_status,
+                "status_financeiro": self.status_financeiro,
+            },
+            salvar=lambda: self.save(
+                update_fields=["status", "atualizado_em"]
+            ),
+        )
+
+    def definir_status_financeiro(
+        self, novo_status: str, *, request=None, usuario=None, motivo: str = ""
+    ) -> None:
+        """Altera o status financeiro sem tocar no andamento operacional."""
+        if novo_status not in self.StatusFinanceiro.values:
+            raise ValidationError(
+                f"Status financeiro inválido: '{novo_status}'."
+            )
+        if novo_status == self.status_financeiro:
+            return
+        status_anterior = self.status_financeiro
+        self.status_financeiro = novo_status
+
+        from core.auditoria import auditar_atomicamente
+
+        auditar_atomicamente(
+            acao="pedido.status_financeiro_alterado",
+            instancia=self,
+            request=request,
+            usuario=usuario,
+            antes={"status_financeiro": status_anterior},
+            depois={"status_financeiro": novo_status, "motivo": motivo},
+            salvar=lambda: self.save(
+                update_fields=["status_financeiro", "atualizado_em"]
+            ),
+        )
 
     def recalcular_totais(self) -> None:
         self.subtotal = sum(
@@ -188,6 +307,17 @@ class Pagamento(models.Model):
     )
     provedor = models.CharField("provedor", max_length=30, default="mercadopago")
     preferencia_id = models.CharField("ID da preferência", max_length=60, blank=True)
+    init_point = models.CharField(
+        "URL de checkout", max_length=500, blank=True,
+        help_text="Reutilizada para idempotência enquanto a tentativa pendente.",
+    )
+    idempotency_key = models.CharField(
+        "chave de idempotência", max_length=64, blank=True, db_index=True
+    )
+    criacao_expira_em = models.DateTimeField(
+        "expiração da criação", null=True, blank=True,
+        help_text="Janela de recuperação de criação externa de preferência.",
+    )
     id_externo = models.CharField(
         "ID externo do pagamento", max_length=60, blank=True, db_index=True
     )

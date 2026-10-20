@@ -27,12 +27,13 @@ class Command(BaseCommand):
                 Pedido.Status.AGUARDANDO_PAGAMENTO,
                 Pedido.Status.PAGAMENTO_PENDENTE,
             ),
+            status_financeiro=Pedido.StatusFinanceiro.PENDENTE,
             criado_em__lt=limite,
         )
 
         total = 0
         for pedido in expiraveis.iterator():
-            cancelar_pedido(pedido)
+            cancelar_pedido(pedido, permitir_pago=False)
             total += 1
             self.stdout.write(f"Pedido {pedido.numero} expirado e cancelado.")
 

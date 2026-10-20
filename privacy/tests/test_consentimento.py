@@ -9,7 +9,7 @@ from privacy.services import (
     registrar_consentimento,
     tem_consentimento_ativo,
 )
-from sales.tests.helpers import criar_produto_com_estoque, fluxo_checkout
+from sales.tests.helpers import fluxo_checkout
 
 
 class PoliticaPublicaTests(TestCase):
@@ -23,37 +23,38 @@ class PoliticaPublicaTests(TestCase):
 
 
 class ConsentimentoTests(TestCase):
-    def test_checkout_registra_consentimento_de_compras_com_ip(self):
-        fluxo_checkout(self.client, quantidade=1)
+    def test_checkout_anonimo_registra_consentimento_no_pedido(self):
+        pedido = fluxo_checkout(self.client, quantidade=1)
         cliente = Cliente.objects.get(documento="52998224725")
-        consentimentos = ConsentimentoLGPD.objects.filter(
-            cliente=cliente,
-            finalidade=ConsentimentoLGPD.Finalidade.COMPRAS,
-        )
-        self.assertEqual(consentimentos.count(), 1)
-        self.assertTrue(consentimentos.first().aceito)
-        self.assertIsNotNone(consentimentos.first().ip)
 
-    def test_marketing_somente_quando_marcado(self):
-        produto, _unidade = criar_produto_com_estoque()
-        self.client.post(
-            reverse("sales:adicionar"),
-            {"produto_id": produto.pk, "quantidade": "1"},
+        self.assertTrue(pedido.consentimento_compras)
+        self.assertFalse(pedido.identidade_verificada)
+        self.assertEqual(
+            ConsentimentoLGPD.objects.filter(
+                cliente=cliente,
+                finalidade=ConsentimentoLGPD.Finalidade.COMPRAS,
+            ).count(),
+            0,
         )
-        from core.models import Unidade
 
-        self.client.post(
-            reverse("sales:checkout"),
-            {
-                "nome": "Ana", "documento": "111.444.777-35",
-                "email": "ana@example.com", "modalidade": "retirada",
-                "unidade": Unidade.objects.get().pk,
+    def test_marketing_anonimo_fica_no_pedido_nao_no_cadastro(self):
+        pedido = fluxo_checkout(
+            self.client,
+            quantidade=1,
+            dados_extra={
+                "nome": "Ana",
+                "documento": "111.444.777-35",
+                "email": "ana@example.com",
                 "aceita_marketing": "on",
             },
         )
         cliente = Cliente.objects.get(documento="11144477735")
-        self.assertTrue(
-            tem_consentimento_ativo(cliente, ConsentimentoLGPD.Finalidade.MARKETING)
+
+        self.assertTrue(pedido.consentimento_marketing)
+        self.assertFalse(
+            tem_consentimento_ativo(
+                cliente, ConsentimentoLGPD.Finalidade.MARKETING
+            )
         )
 
     def test_revogacao_interrompe_uso_da_finalidade(self):

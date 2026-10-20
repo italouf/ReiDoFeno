@@ -40,7 +40,10 @@ class MeusPedidosTests(TestCase):
         cliente = pedido_meu.cliente
         usuario = Usuario.objects.create_user(username="cli", password="senha-forte-123")
         cliente.usuario = usuario
+        cliente.vinculo_verificado = True
         cliente.save()
+        pedido_meu.identidade_verificada = True
+        pedido_meu.save(update_fields=["identidade_verificada"])
 
         self.client.force_login(usuario)
         resposta = self.client.get(reverse("sales:meus_pedidos"))
@@ -95,7 +98,12 @@ class PedidosInternosTests(TestCase):
 
     def test_transicao_por_gestor_avanca_pedido(self):
         pedido = fluxo_checkout(self.client, quantidade=1)
-        pedido.transicionar(Pedido.Status.PAGO)
+        pedido.definir_status_financeiro(
+            Pedido.StatusFinanceiro.PAGO,
+            motivo="teste",
+        )
+        pedido.financeiro_conciliado = True
+        pedido.save(update_fields=["financeiro_conciliado"])
         self.client.force_login(self.usuarios["gestor"])
         resposta = self.client.post(
             reverse("sales:pedido_atualizar_status", args=[pedido.pk]),
@@ -104,6 +112,26 @@ class PedidosInternosTests(TestCase):
         self.assertEqual(resposta.status_code, 302)
         pedido.refresh_from_db()
         self.assertEqual(pedido.status, Pedido.Status.EM_SEPARACAO)
+
+    def test_detalhe_nao_oferece_separacao_sem_pagamento(self):
+        pedido = fluxo_checkout(self.client, quantidade=1)
+        self.client.force_login(self.usuarios["gestor"])
+
+        sem_pagamento = self.client.get(
+            reverse("sales:pedido_interno_detail", args=[pedido.pk])
+        )
+        self.assertNotContains(sem_pagamento, 'value="em_separacao"')
+
+        pedido.definir_status_financeiro(
+            Pedido.StatusFinanceiro.PAGO,
+            motivo="teste",
+        )
+        pedido.financeiro_conciliado = True
+        pedido.save(update_fields=["financeiro_conciliado"])
+        com_pagamento = self.client.get(
+            reverse("sales:pedido_interno_detail", args=[pedido.pk])
+        )
+        self.assertContains(com_pagamento, 'value="em_separacao"')
 
     def test_cancelamento_via_view_libera_reserva(self):
         pedido = fluxo_checkout(self.client, quantidade=3)
@@ -117,6 +145,22 @@ class PedidosInternosTests(TestCase):
 
         estoque = Estoque.objects.get(produto=item.produto, unidade=pedido.unidade)
         self.assertEqual(estoque.quantidade_bloqueada, Decimal("0"))
+
+    def test_cancelamento_invalido_nao_gera_500(self):
+        pedido = PedidoFactory(
+            usuario_criador=self.usuarios["vendedor"],
+            status=Pedido.Status.EM_SEPARACAO,
+        )
+        self.client.force_login(self.usuarios["gestor"])
+
+        resposta = self.client.post(
+            reverse("sales:pedido_atualizar_status", args=[pedido.pk]),
+            {"status": Pedido.Status.CANCELADO},
+        )
+
+        self.assertEqual(resposta.status_code, 302)
+        pedido.refresh_from_db()
+        self.assertEqual(pedido.status, Pedido.Status.EM_SEPARACAO)
 
     def test_detalhe_interno_mostra_link_whatsapp_do_cliente(self):
         pedido = fluxo_checkout(self.client, quantidade=1)

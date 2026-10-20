@@ -8,6 +8,8 @@ import hashlib
 import hmac
 import json
 import logging
+import re
+import time
 import urllib.parse
 import urllib.request
 
@@ -41,18 +43,35 @@ def obter_client():
 class MercadoPagoFake:
     """Determinístico para testes/dev: init_point aponta ao simulador interno."""
 
-    def criar_preferencia(self, pedido) -> tuple[str, str]:
-        preferencia_id = f"fake-pref-{pedido.numero}"
+    def criar_preferencia(self, pedido, idempotency_key=None) -> tuple[str, str]:
+        # O fake reproduz deduplicação por chave: mesma chave, mesmo recurso.
+        chave = idempotency_key or "sem-chave"
+        preferencia_id = f"fake-pref-{pedido.numero}-{chave[:8]}"
         init_point = reverse("sales:simular_pagamento", args=[pedido.token_acesso])
         return preferencia_id, init_point
 
     @staticmethod
     def consultar_pagamento(id_externo: str) -> dict:
+        from sales.models import Pedido
+
+        numero = _numero_do_fake(id_externo)
+        pedido = Pedido.objects.filter(numero=numero).first()
         aprovado = id_externo.endswith("-ok")
         return {
             "id": id_externo,
             "status": "approved" if aprovado else "refused",
-            "external_reference": _numero_do_fake(id_externo),
+            "external_reference": numero,
+            "transaction_amount": (
+                str(pedido.total) if pedido is not None else "0.00"
+            ),
+            "currency_id": "BRL",
+            "collector_id": (
+                getattr(settings, "MERCADO_PAGO_COLLECTOR_ID", "")
+                or "fake-collector"
+            ),
+            "live_mode": bool(
+                getattr(settings, "MERCADO_PAGO_LIVE_MODE", False)
+            ),
         }
 
 
@@ -70,19 +89,29 @@ class MercadoPagoReal:
         self.token = access_token or settings.MERCADO_PAGO_ACCESS_TOKEN
 
     # ------------------------------------------------------------------ #
-    def _requisicao(self, metodo: str, caminho: str, corpo: dict | None = None) -> dict:
+    def _requisicao(
+        self,
+        metodo: str,
+        caminho: str,
+        corpo: dict | None = None,
+        *,
+        idempotency_key: str | None = None,
+    ) -> dict:
         dados = json.dumps(corpo).encode() if corpo is not None else None
         url = f"{API_BASE}{caminho}"
         if not url.startswith("https://api.mercadopago.com/"):
             raise ErroPagamento("Esquema/destino não permitido pela integração.")
+        headers = {
+            "Authorization": f"Bearer {self.token}",
+            "Content-Type": "application/json",
+        }
+        if idempotency_key:
+            headers["X-Idempotency-Key"] = idempotency_key
         requisicao = urllib.request.Request(
             url,
             data=dados,
             method=metodo,
-            headers={
-                "Authorization": f"Bearer {self.token}",
-                "Content-Type": "application/json",
-            },
+            headers=headers,
         )
         try:
             with urllib.request.urlopen(  # nosec B310 - destino https fixo validado acima
@@ -93,7 +122,7 @@ class MercadoPagoReal:
             logger.exception("Erro na API do Mercado Pago (%s %s).", metodo, caminho)
             raise ErroPagamento(f"Falha na API do provedor: {erro}") from erro
 
-    def criar_preferencia(self, pedido) -> tuple[str, str]:
+    def criar_preferencia(self, pedido, idempotency_key=None) -> tuple[str, str]:
         site = settings.SITE_URL.rstrip("/")
         itens = [
             {
@@ -116,7 +145,12 @@ class MercadoPagoReal:
                 f"{site}{reverse('sales:webhook')}" if not settings.DEBUG else ""
             ),
         }
-        resposta = self._requisicao("POST", "/checkout/preferences", corpo)
+        resposta = self._requisicao(
+            "POST",
+            "/checkout/preferences",
+            corpo,
+            idempotency_key=idempotency_key,
+        )
         init_point = resposta.get("init_point") or resposta.get(
             "sandbox_init_point", ""
         )
@@ -134,22 +168,48 @@ class MercadoPagoReal:
 def validar_assinatura_webhook(headers, data_id: str) -> bool:
     """Valida 'x-signature' conforme documentação do Mercado Pago.
 
-    Sem segredo configurado (dev/testes), aceita a chamada.
+    - Em modo fake/dev sem segredo, aceita a chamada.
+    - Em modo real, segredo ausente rejeita (PAY-01).
+    - Aceita o formato oficial ``ts=...,v1=...`` e o legado com ``;``.
+    - Exige ``x-request-id``, timestamp dentro da tolerância e ``data_id``
+      canônico.
     """
     segredo = getattr(settings, "MERCADO_PAGO_WEBHOOK_SECRET", "")
     if not segredo:
-        return True
+        return bool(getattr(settings, "MERCADO_PAGO_FAKE", False))
+
+    data_id = str(data_id or "")
+    if not re.fullmatch(r"[A-Za-z0-9._:-]{1,120}", data_id):
+        return False
 
     assinatura_header = headers.get("x-signature", "")
     request_id = headers.get("x-request-id", "")
-    partes = dict(
-        fragmento.split("=", 1)
-        for fragmento in assinatura_header.split(";")
-        if "=" in fragmento
-    )
+    partes = {}
+    for fragmento in re.split(r"[,;]", assinatura_header):
+        if "=" in fragmento:
+            chave, valor = fragmento.split("=", 1)
+            partes[chave.strip()] = valor.strip()
+
     ts = partes.get("ts", "")
     v1 = partes.get("v1", "")
-    if not (ts and v1 and data_id):
+    if not (ts and v1 and request_id):
+        return False
+
+    try:
+        timestamp = int(ts)
+    except (TypeError, ValueError):
+        return False
+
+    # O contrato do Checkout Pro pode enviar ts em segundos ou milissegundos.
+    # A normalização vale só para a janela; o HMAC abaixo usa o ts original.
+    timestamp_segundos = (
+        timestamp / 1000 if timestamp > 10_000_000_000 else timestamp
+    )
+
+    tolerancia = int(
+        getattr(settings, "MERCADO_PAGO_WEBHOOK_TOLERANCE_SECONDS", 300)
+    )
+    if abs(time.time() - timestamp_segundos) > tolerancia:
         return False
 
     manifest = f"id:{data_id};request-id:{request_id};ts:{ts};"

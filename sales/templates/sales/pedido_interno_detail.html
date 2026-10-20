@@ -4,8 +4,11 @@
 {% include "components/cabecalho_pagina.html" with titulo=pedido.numero %}
 <p style="margin:-1rem 0 var(--espaco-5); display:flex; flex-wrap:wrap; align-items:center; gap:var(--espaco-2);">
   {% include "components/status_pedido.html" with status=pedido.status rotulo=pedido.get_status_display %}
+  {% include "components/status_pedido.html" with status=pedido.status_financeiro rotulo=pedido.get_status_financeiro_display %}
   <span style="color:var(--tinta-700);">
-    Cliente: {{ pedido.cliente.nome }} · {{ pedido.get_modalidade_display }} @ {{ pedido.unidade.nome }} ·
+    Cliente cadastrado: {{ pedido.cliente.nome }}{% if not pedido.identidade_verificada %} (identidade não comprovada){% endif %} ·
+    Contato do pedido: {{ pedido.nome_contato|default:"—" }}{% if pedido.contato_email %} · {{ pedido.contato_email }}{% endif %} ·
+    {{ pedido.get_modalidade_display }} @ {{ pedido.unidade.nome }} ·
     Criado em {{ pedido.criado_em|date:"d/m/Y H:i" }}{% if pedido.usuario_criador %} por {{ pedido.usuario_criador.username }}{% endif %}
     {% if pedido.cliente.whatsapp_url %}
       · <a href="{{ pedido.cliente.whatsapp_url }}" target="_blank" rel="noopener">WhatsApp do cliente</a>
@@ -43,7 +46,7 @@
 </section>
 {% endif %}
 
-{% if pedido.status == 'pago' %}
+{% if pedido.status_financeiro == 'pago' and pedido.status != 'cancelado' %}
   {% if pedido.nota_fiscal %}
   <section class="cartao" style="margin-top:var(--espaco-5);">
     <h2 style="margin-top:0;">Nota fiscal</h2>
@@ -75,7 +78,7 @@
         {% endif %}
       {% endfor %}
     </div>
-    <p class="helptext">O status “Pago” é definido automaticamente pela confirmação do provedor de pagamento.</p>
+    <p class="helptext">O status financeiro “Pago” é definido automaticamente pela confirmação do provedor de pagamento. A separação exige pagamento aprovado.</p>
   </form>
 </section>
 {% else %}

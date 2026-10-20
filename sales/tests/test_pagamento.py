@@ -1,14 +1,20 @@
 import hashlib
 import hmac
 import json
+import time
+from datetime import timedelta
 from decimal import Decimal
+from unittest import mock
 
 from django.core import mail
 from django.test import TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 
+from core.models import LogAuditoria
 from stock.models import Estoque
 
+from ..factories import ItemPedidoFactory, PedidoFactory
 from ..models import Pagamento, PagamentoWebhookEvento, Pedido
 from ..services import (
     aplicar_resultado_pagamento,
@@ -23,7 +29,7 @@ def id_fake_aprovado(pedido) -> str:
 
 class FluxoPagamentoTests(TestCase):
     def _iniciar(self, pedido):
-        resposta = self.client.get(
+        resposta = self.client.post(
             reverse("sales:pagamento_iniciar", args=[pedido.token_acesso])
         )
         self.assertRedirects(
@@ -39,6 +45,164 @@ class FluxoPagamentoTests(TestCase):
         self.assertTrue(pagamento.preferencia_id.startswith("fake-pref-"))
         self.assertEqual(pagamento.valor, pedido.total)
 
+    def test_pedido_falhou_legado_nao_inicia_novo_pagamento(self):
+        pedido = PedidoFactory(status=Pedido.Status.FALHOU)
+
+        resposta = self.client.post(
+            reverse("sales:pagamento_iniciar", args=[pedido.token_acesso])
+        )
+
+        self.assertRedirects(
+            resposta,
+            reverse("sales:pedido_token", args=[pedido.token_acesso]),
+            fetch_redirect_response=False,
+        )
+        self.assertFalse(Pagamento.objects.filter(pedido=pedido).exists())
+
+    def test_iniciar_pagamento_audita_preferencia(self):
+        pedido = fluxo_checkout(self.client, quantidade=1)
+
+        self._iniciar(pedido)
+
+        self.assertTrue(
+            LogAuditoria.objects.filter(
+                acao="pedido.pagamento_preferencia_criada",
+                objeto_id=str(pedido.pk),
+            ).exists()
+        )
+
+    def test_iniciar_pagamento_e_idempotente_e_reusa_init_point(self):
+        pedido = fluxo_checkout(self.client, quantidade=1)
+        chamadas = []
+
+        def criar_preferencia(pedido_arg, **kwargs):
+            chamadas.append(pedido_arg.pk)
+            return "pref-unica", reverse(
+                "sales:simular_pagamento", args=[pedido_arg.token_acesso]
+            )
+
+        from sales.payments import MercadoPagoFake
+
+        with mock.patch.object(
+            MercadoPagoFake,
+            "criar_preferencia",
+            side_effect=criar_preferencia,
+        ):
+            primeira = self.client.post(
+                reverse(
+                    "sales:pagamento_iniciar", args=[pedido.token_acesso]
+                )
+            )
+            segunda = self.client.post(
+                reverse(
+                    "sales:pagamento_iniciar", args=[pedido.token_acesso]
+                )
+            )
+
+        self.assertEqual(primeira.status_code, 302)
+        self.assertEqual(segunda.status_code, 302)
+        self.assertEqual(segunda["Location"], primeira["Location"])
+        self.assertEqual(len(chamadas), 1)
+
+    def test_get_nao_cria_preferencia(self):
+        pedido = fluxo_checkout(self.client, quantidade=1)
+
+        resposta = self.client.get(
+            reverse("sales:pagamento_iniciar", args=[pedido.token_acesso])
+        )
+
+        self.assertEqual(resposta.status_code, 405)
+        self.assertFalse(Pagamento.objects.filter(pedido=pedido).exists())
+
+    def test_criacao_em_andamento_nao_chama_provedor(self):
+        pedido = fluxo_checkout(self.client, quantidade=1)
+        Pagamento.objects.create(
+            pedido=pedido,
+            valor=pedido.total,
+            status=Pagamento.Status.PENDENTE,
+            idempotency_key="chave-em-andamento",
+            criacao_expira_em=timezone.now() + timedelta(minutes=2),
+        )
+        from sales.payments import MercadoPagoFake
+
+        with mock.patch.object(
+            MercadoPagoFake, "criar_preferencia"
+        ) as criar:
+            resposta = self.client.post(
+                reverse(
+                    "sales:pagamento_iniciar", args=[pedido.token_acesso]
+                )
+            )
+
+        criar.assert_not_called()
+        self.assertRedirects(
+            resposta,
+            reverse("sales:pedido_token", args=[pedido.token_acesso]),
+            fetch_redirect_response=False,
+        )
+
+    def test_falha_do_provedor_permite_retry_com_mesma_chave(self):
+        pedido = fluxo_checkout(self.client, quantidade=1)
+        from sales.payments import MercadoPagoFake
+
+        with mock.patch.object(
+            MercadoPagoFake,
+            "criar_preferencia",
+            side_effect=RuntimeError("timeout do provedor"),
+        ):
+            with self.assertRaises(RuntimeError):
+                self.client.post(
+                    reverse(
+                        "sales:pagamento_iniciar",
+                        args=[pedido.token_acesso],
+                    )
+                )
+
+        pagamento = Pagamento.objects.get(pedido=pedido)
+        chave = pagamento.idempotency_key
+        self.assertIsNone(pagamento.criacao_expira_em)
+
+        resposta = self.client.post(
+            reverse("sales:pagamento_iniciar", args=[pedido.token_acesso])
+        )
+
+        self.assertEqual(resposta.status_code, 302)
+        pagamento.refresh_from_db()
+        self.assertEqual(pagamento.idempotency_key, chave)
+        self.assertTrue(pagamento.init_point)
+
+    def test_aprovacao_durante_criacao_de_preferencia_nao_cria_pendente(self):
+        pedido = fluxo_checkout(self.client, quantidade=1)
+
+        def criar_preferencia_e_aprovar(pedido_arg, **kwargs):
+            marcar_pagamento_aprovado(pedido_arg, id_externo="race-pay")
+            return "pref-race", reverse(
+                "sales:simular_pagamento", args=[pedido_arg.token_acesso]
+            )
+
+        from sales.payments import MercadoPagoFake
+
+        with mock.patch.object(
+            MercadoPagoFake,
+            "criar_preferencia",
+            side_effect=criar_preferencia_e_aprovar,
+        ):
+            resposta = self.client.post(
+                reverse("sales:pagamento_iniciar", args=[pedido.token_acesso])
+            )
+
+        self.assertRedirects(
+            resposta,
+            reverse("sales:pedido_token", args=[pedido.token_acesso]),
+            fetch_redirect_response=False,
+        )
+        pedido.refresh_from_db()
+        self.assertEqual(
+            pedido.status_financeiro, Pedido.StatusFinanceiro.PAGO
+        )
+        pagamento = Pagamento.objects.get(pedido=pedido)
+        self.assertEqual(pagamento.status, Pagamento.Status.APROVADO)
+
     def test_aprovado_atualiza_pedido_e_baixa_estoque_definitivamente(self):
         pedido = fluxo_checkout(self.client, quantidade=4)
         self._iniciar(pedido)
@@ -48,7 +212,10 @@ class FluxoPagamentoTests(TestCase):
         )
 
         pedido.refresh_from_db()
-        self.assertEqual(pedido.status, Pedido.Status.PAGO)
+        self.assertEqual(
+            pedido.status_financeiro, Pedido.StatusFinanceiro.PAGO
+        )
+        self.assertEqual(pedido.status, Pedido.Status.AGUARDANDO_PAGAMENTO)
         saldo, bloqueada = _saldo(pedido)
         # 100 - 4 baixados; reserva zerada (virou baixa definitiva).
         self.assertEqual(saldo, Decimal("96.00"))
@@ -68,7 +235,7 @@ class FluxoPagamentoTests(TestCase):
         assuntos = [email.subject for email in mail.outbox]
         self.assertTrue(any("Pagamento aprovado" in a for a in assuntos), assuntos)
 
-    def test_recusa_marca_falhou_e_libera_reserva(self):
+    def test_recusa_cancela_pedido_e_libera_reserva(self):
         pedido = fluxo_checkout(self.client, quantidade=3)
         saldo_antes, _ = _saldo(pedido)
         self._iniciar(pedido)
@@ -78,20 +245,28 @@ class FluxoPagamentoTests(TestCase):
         )
         pedido.refresh_from_db()
         saldo, bloqueada = _saldo(pedido)
-        self.assertEqual(pedido.status, Pedido.Status.FALHOU)
+        self.assertEqual(pedido.status, Pedido.Status.CANCELADO)
+        self.assertEqual(
+            pedido.status_financeiro, Pedido.StatusFinanceiro.CANCELADO
+        )
         self.assertEqual(saldo, saldo_antes)  # reserva devolvida
         self.assertEqual(bloqueada, Decimal("0"))
 
     def test_aprovacao_duplicada_nao_duplica_baixa(self):
         pedido = fluxo_checkout(self.client, quantidade=5)
+        Pagamento.objects.create(pedido=pedido, valor=pedido.total)
         dados = {
             "id": "pay-1",
             "status": "approved",
             "external_reference": pedido.numero,
+            "transaction_amount": str(pedido.total),
+            "currency_id": "BRL",
+            "collector_id": "fake-collector",
+            "live_mode": False,
         }
         marcar_pagamento_aprovado(pedido, id_externo="pay-1")
-        aplicar_resultado_pagamento(dados)
-        aplicar_resultado_pagamento(dados)
+        aplicar_resultado_pagamento(dados, id_consultado="pay-1")
+        aplicar_resultado_pagamento(dados, id_consultado="pay-1")
 
         saldo, _bloqueada = _saldo(pedido)
         self.assertEqual(saldo, Decimal("95"))
@@ -110,6 +285,25 @@ class FluxoPagamentoTests(TestCase):
         self.assertEqual(pedido.status, Pedido.Status.CANCELADO)
         self.assertEqual(saldo, saldo_antes)      # nada baixado
         self.assertEqual(bloqueada, Decimal("0"))  # reserva devolvida
+        self.assertTrue(
+            LogAuditoria.objects.filter(
+                acao="pedido.reservas_liberadas",
+                objeto_id=str(pedido.pk),
+            ).exists()
+        )
+
+    def test_cancelamento_marca_pagamento_pendente_cancelado(self):
+        from ..services import cancelar_pedido
+
+        pedido = fluxo_checkout(self.client, quantidade=1)
+        pagamento = Pagamento.objects.create(
+            pedido=pedido, valor=pedido.total
+        )
+
+        cancelar_pedido(pedido)
+
+        pagamento.refresh_from_db()
+        self.assertEqual(pagamento.status, Pagamento.Status.CANCELADO)
 
     def test_cancelamento_e_idempotente(self):
         from ..services import cancelar_pedido
@@ -123,7 +317,8 @@ class FluxoPagamentoTests(TestCase):
 
 class WebhookTests(TestCase):
     def _post_webhook(self, payload: dict, *, assinatura: str | None = None,
-                      request_id: str = "req-1", ts: str = "1700000000"):
+                      request_id: str = "req-1", ts: str | None = None):
+        ts = ts or str(int(time.time()))
         headers = {}
         if assinatura is not None:
             headers["HTTP_X_SIGNATURE"] = f"ts={ts};v1={assinatura}"
@@ -136,13 +331,15 @@ class WebhookTests(TestCase):
         )
 
     @staticmethod
-    def _v1(data_id: str, segredo: str, request_id="req-1", ts="1700000000"):
+    def _v1(data_id: str, segredo: str, request_id="req-1", ts=None):
+        ts = ts or str(int(time.time()))
         manifest = f"id:{data_id};request-id:{request_id};ts:{ts};"
         return hmac.new(segredo.encode(), manifest.encode(), hashlib.sha256).hexdigest()
 
     @override_settings(MERCADO_PAGO_WEBHOOK_SECRET="")
     def test_webhook_aprovado_atualiza_pedido_e_reenvio_e_idempotente(self):
         pedido = fluxo_checkout(self.client, quantidade=6)
+        Pagamento.objects.create(pedido=pedido, valor=pedido.total)
         data_id = id_fake_aprovado(pedido)
         payload = {"data": {"id": data_id}}
 
@@ -151,7 +348,9 @@ class WebhookTests(TestCase):
             self.assertEqual(resposta.status_code, 200)
 
         pedido.refresh_from_db()
-        self.assertEqual(pedido.status, Pedido.Status.PAGO)
+        self.assertEqual(
+            pedido.status_financeiro, Pedido.StatusFinanceiro.PAGO
+        )
         saldo, _bloqueada = _saldo(pedido)
         self.assertEqual(saldo, Decimal("94"))
         eventos = PagamentoWebhookEvento.objects.filter(
@@ -176,26 +375,59 @@ class WebhookTests(TestCase):
         )
         self.assertEqual(resposta.status_code, 403)
         pedido.refresh_from_db()
-        self.assertNotEqual(pedido.status, Pedido.Status.PAGO)
+        self.assertNotEqual(
+            pedido.status_financeiro, Pedido.StatusFinanceiro.PAGO
+        )
         self.assertEqual(PagamentoWebhookEvento.objects.count(), 0)
 
     @override_settings(MERCADO_PAGO_WEBHOOK_SECRET="segredo-teste")
     def test_assinatura_valida_processa_notificacao(self):
         pedido = fluxo_checkout(self.client, quantidade=2)
+        Pagamento.objects.create(pedido=pedido, valor=pedido.total)
         data_id = id_fake_aprovado(pedido)
         payload = {"data": {"id": data_id}}
+        ts = str(int(time.time()))
 
         resposta = self._post_webhook(
             payload,
-            assinatura=self._v1(data_id, "segredo-teste", request_id="req-9"),
+            assinatura=self._v1(
+                data_id, "segredo-teste", request_id="req-9", ts=ts
+            ),
             request_id="req-9",
+            ts=ts,
         )
         self.assertEqual(resposta.status_code, 200)
         pedido.refresh_from_db()
-        self.assertEqual(pedido.status, Pedido.Status.PAGO)
+        self.assertEqual(
+            pedido.status_financeiro, Pedido.StatusFinanceiro.PAGO
+        )
 
 
 def _saldo(pedido):
     item = pedido.itens.select_related("produto").first()
     estoque = Estoque.objects.get(produto=item.produto, unidade=pedido.unidade)
     return estoque.quantidade, estoque.quantidade_bloqueada
+
+
+class MercadoPagoRealHeaderTests(TestCase):
+    def test_criar_preferencia_envia_idempotency_key(self):
+        from sales.payments import MercadoPagoReal
+
+        pedido = PedidoFactory()
+        ItemPedidoFactory(pedido=pedido)
+        resposta = mock.MagicMock()
+        resposta.__enter__.return_value.read.return_value = (
+            b'{"id": "pref-1", "init_point": "https://checkout.example"}'
+        )
+
+        with mock.patch(
+            "urllib.request.urlopen", return_value=resposta
+        ) as urlopen:
+            preferencia, init_point = MercadoPagoReal(
+                access_token="token-teste"
+            ).criar_preferencia(pedido, idempotency_key="chave-abc")
+
+        self.assertEqual(preferencia, "pref-1")
+        self.assertEqual(init_point, "https://checkout.example")
+        requisicao = urlopen.call_args[0][0]
+        self.assertIn("abc", str(requisicao.headers))

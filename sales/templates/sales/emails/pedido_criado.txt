@@ -1,6 +1,6 @@
 Pedido {{ pedido.numero }} recebido!
 
-Olá, {{ pedido.cliente.nome }}.
+Olá, {{ pedido.nome_contato|default:pedido.cliente.nome }}.
 
 Recebemos seu pedido e ele está aguardando confirmação de pagamento.
 

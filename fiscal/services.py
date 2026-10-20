@@ -15,8 +15,12 @@ logger = logging.getLogger(__name__)
 
 
 def pedido_elegivel(pedido) -> bool:
-    """Pedido pago com documento válido do cliente."""
-    if pedido.status != "pago":
+    """Pedido com pagamento aprovado e documento válido do cliente."""
+    if (
+        pedido.status_financeiro != "pago"
+        or not pedido.financeiro_conciliado
+        or pedido.status == "cancelado"
+    ):
         return False
     documento = _apenas_digitos(pedido.cliente.documento)
     try:
@@ -41,7 +45,11 @@ def _aviso_documento_invalido(pedido) -> None:
 @transaction.atomic
 def enviar_para_emissao(pedido, client=None) -> NotaFiscal | None:
     """Tenta emitir a NF-e do pedido pago; erro gera aviso e permite retry."""
-    if pedido.status != "pago":
+    if (
+        pedido.status_financeiro != "pago"
+        or not pedido.financeiro_conciliado
+        or pedido.status == "cancelado"
+    ):
         return None
 
     if not pedido_elegivel(pedido):
@@ -60,6 +68,17 @@ def enviar_para_emissao(pedido, client=None) -> NotaFiscal | None:
         nota.status = NotaFiscal.Status.ERRO
         nota.ultimo_erro = str(erro)[:500]
         nota.save()
+        from core.auditoria import registrar_auditoria
+
+        registrar_auditoria(
+            acao="fiscal.nota_erro",
+            instancia=nota,
+            depois={
+                "status": nota.status,
+                "tentativas": nota.tentativas,
+                "erro": nota.ultimo_erro,
+            },
+        )
         Aviso.registrar(
             tipo=Aviso.Tipo.FISCAL_ERRO,
             mensagem=f"Falha ao emitir NF-e do pedido {pedido.numero}: {erro}",
@@ -75,6 +94,18 @@ def enviar_para_emissao(pedido, client=None) -> NotaFiscal | None:
     nota.link_documento = resultado.get("link", "")
     nota.ultimo_erro = ""
     nota.save()
+    from core.auditoria import registrar_auditoria
+
+    registrar_auditoria(
+        acao="fiscal.nota_autorizada",
+        instancia=nota,
+        depois={
+            "status": nota.status,
+            "numero": nota.numero,
+            "chave": nota.chave_acesso,
+            "tentativas": nota.tentativas,
+        },
+    )
     return nota
 
 
@@ -83,7 +114,10 @@ def processar_fila_fiscal() -> int:
     from sales.models import Pedido
 
     pedidos = (
-        Pedido.objects.filter(status="pago")
+        Pedido.objects.filter(
+            status_financeiro="pago", financeiro_conciliado=True
+        )
+        .exclude(status="cancelado")
         .exclude(nota_fiscal__status=NotaFiscal.Status.AUTORIZADA)
         .select_related("cliente")
     )
@@ -103,9 +137,12 @@ def avisar_pagos_sem_nfe(horas_limite: int = 24) -> int:
     from sales.models import Pedido
 
     pendentes = Pedido.objects.filter(
-        status="pago",
+        status_financeiro="pago",
+        financeiro_conciliado=True,
         atualizado_em__lt=limite,
-    ).exclude(nota_fiscal__status=NotaFiscal.Status.AUTORIZADA)
+    ).exclude(status="cancelado").exclude(
+        nota_fiscal__status=NotaFiscal.Status.AUTORIZADA
+    )
     total = 0
     for pedido in pendentes.select_related("cliente"):
         Aviso.registrar(

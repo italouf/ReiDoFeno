@@ -47,13 +47,19 @@ class ExpiracaoPedidosTests(TestCase):
 
     def test_pedidos_pagos_nunca_sao_expirados(self):
         pedido = fluxo_checkout(self.client, quantidade=2)
-        pedido.transicionar(Pedido.Status.PAGO)
+        pedido.definir_status_financeiro(
+            Pedido.StatusFinanceiro.PAGO,
+            motivo="teste",
+        )
         self._envelhecer(pedido)
 
         call_command("expirar_pedidos", verbosity=0)
 
         pedido.refresh_from_db()
-        self.assertEqual(pedido.status, Pedido.Status.PAGO)
+        self.assertEqual(pedido.status, Pedido.Status.AGUARDANDO_PAGAMENTO)
+        self.assertEqual(
+            pedido.status_financeiro, Pedido.StatusFinanceiro.PAGO
+        )
 
     def test_idempotente(self):
         pedido = fluxo_checkout(self.client, quantidade=1)

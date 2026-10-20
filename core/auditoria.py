@@ -1,4 +1,5 @@
 """Helper transversal de auditoria para alterações críticas."""
+from django.db import transaction
 from django.forms.models import model_to_dict
 
 from .models import LogAuditoria
@@ -9,9 +10,9 @@ _CAMPOS_JSON = (str, int, float, bool)
 def _ip_da_requisicao(request):
     if request is None:
         return None
-    meta = getattr(request, "META", {})
-    ip = meta.get("HTTP_X_FORWARDED_FOR", "").split(",")[0].strip()
-    return ip or meta.get("REMOTE_ADDR") or None
+    # SEC-03: X-Forwarded-For só é confiável quando um proxy controlado
+    # sobrescreve REMOTE_ADDR. Nunca aceitamos o header diretamente.
+    return getattr(request, "META", {}).get("REMOTE_ADDR") or None
 
 
 def _serializar(instancia, campos=None):
@@ -31,14 +32,20 @@ def registrar_auditoria(
     acao: str,
     instancia,
     request=None,
+    usuario=None,
     antes=None,
     depois=None,
 ):
-    """Registra uma alteração crítica com autor, IP e estado antes/depois."""
-    usuario = None
+    """Registra uma alteração crítica com autor, IP e estado antes/depois.
+
+    ``usuario`` permite identificar o autor em serviços executados sem
+    request (jobs, webhooks internos). Quando há request, o usuário
+    autenticado prevalece.
+    """
     if request is not None:
         candidato = getattr(request, "user", None)
-        usuario = candidato if (candidato and candidato.is_authenticated) else None
+        if candidato and candidato.is_authenticated:
+            usuario = candidato
 
     if antes is None and depois is None and instancia is not None:
         depois = _serializar(instancia)
@@ -52,6 +59,34 @@ def registrar_auditoria(
         depois=depois or None,
         ip=_ip_da_requisicao(request),
     )
+
+
+def auditar_atomicamente(
+    *,
+    acao: str,
+    instancia,
+    request=None,
+    usuario=None,
+    antes=None,
+    depois=None,
+    salvar=None,
+):
+    """Executa a persistência e o log na mesma transação.
+
+    Se ``salvar`` for informado, ele é chamado antes do log. Qualquer
+    exceção (inclusive falha ao gravar ``LogAuditoria``) reverte ambos.
+    """
+    with transaction.atomic():
+        if salvar is not None:
+            salvar()
+        return registrar_auditoria(
+            acao=acao,
+            instancia=instancia,
+            request=request,
+            usuario=usuario,
+            antes=antes,
+            depois=depois,
+        )
 
 
 class AuditoriaFormValidMixin:
@@ -75,17 +110,18 @@ class AuditoriaFormValidMixin:
             )
             antes = _serializar(original, self.campos_auditados)
 
-        resposta = super().form_valid(form)
+        with transaction.atomic():
+            resposta = super().form_valid(form)
 
-        registrar_auditoria(
-            acao=(
-                f"{self.acao_prefixo}.{'criado' if criado else 'alterado'}"
-                if self.acao_prefixo
-                else "objeto.alterado"
-            ),
-            instancia=form.instance,
-            request=self.request,
-            antes=antes,
-            depois=_serializar(form.instance, self.campos_auditados),
-        )
+            registrar_auditoria(
+                acao=(
+                    f"{self.acao_prefixo}.{'criado' if criado else 'alterado'}"
+                    if self.acao_prefixo
+                    else "objeto.alterado"
+                ),
+                instancia=form.instance,
+                request=self.request,
+                antes=antes,
+                depois=_serializar(form.instance, self.campos_auditados),
+            )
         return resposta

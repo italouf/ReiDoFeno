@@ -69,10 +69,10 @@ def test_compra_completa_ate_estoque_baixado(live_server):
         url_pedido = page.url
 
         # Pagamento (simulador em modo fake)
-        page.get_by_role("link", name="Ir para o pagamento").click()
+        page.get_by_role("button", name="Ir para o pagamento").click()
         page.get_by_role("button", name="Aprovar pagamento").click()
 
-        expect(page.locator(".badge")).to_contain_text("Pago")
+        expect(page.locator(".badge").nth(1)).to_contain_text("Pago")
         browser.close()
 
     # Asserções de banco FORA do event loop do Playwright.
@@ -80,7 +80,8 @@ def test_compra_completa_ate_estoque_baixado(live_server):
         re.search(r"/pedido/([0-9a-f-]{36})/", url_pedido).group(1)
     )
     pedido = Pedido.objects.get(token_acesso=token)
-    assert pedido.status == Pedido.Status.PAGO
+    assert pedido.status_financeiro == Pedido.StatusFinanceiro.PAGO
+    assert pedido.status == Pedido.Status.AGUARDANDO_PAGAMENTO
 
     estoque = Estoque.objects.get(produto=produto, unidade=unidade)
     assert str(estoque.quantidade) == "48.00"      # 50 - 2 baixados

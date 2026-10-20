@@ -5,12 +5,37 @@ DATABASE_URL e, quando aplicável, CSRF_TRUSTED_ORIGINS e DJANGO_SECURE_SSL_REDI
 """
 import os
 
+import dj_database_url
+from django.core.exceptions import ImproperlyConfigured
+
 from .base import *  # noqa: F401,F403
 from .base import BASE_DIR
 
 DEBUG = False
 
 SECRET_KEY = os.environ["DJANGO_SECRET_KEY"]
+
+# ADR-001: produção usa exclusivamente PostgreSQL, sem fallback SQLite.
+DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
+if not DATABASE_URL:
+    raise ImproperlyConfigured(
+        "DATABASE_URL é obrigatório em produção (PostgreSQL)."
+    )
+
+DATABASES = {
+    "default": dj_database_url.parse(
+        DATABASE_URL,
+        conn_max_age=600,
+        conn_health_checks=True,
+        ssl_require=True,
+    )
+}
+if "postgresql" not in DATABASES["default"]["ENGINE"]:
+    raise ImproperlyConfigured(
+        "Produção exige PostgreSQL; DATABASE_URL aponta para outro banco."
+    )
+# Garante TLS mesmo se a URL trouxer sslmode=disable.
+DATABASES["default"].setdefault("OPTIONS", {})["sslmode"] = "require"
 
 CSRF_TRUSTED_ORIGINS = [
     origin.strip()
@@ -55,8 +80,48 @@ DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "")
 
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
+# Rate limiting compartilhado e com incremento atômico (R6).
+REDIS_URL = os.environ.get("REDIS_URL", "").strip()
+if not REDIS_URL:
+    raise ImproperlyConfigured(
+        "REDIS_URL é obrigatório em produção para rate limiting atômico."
+    )
+CACHES = {
+    "default": {
+        "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": REDIS_URL,
+        "OPTIONS": {"CLIENT_CLASS": "django_redis.client.DefaultClient"},
+    }
+}
+
 # Em produção o adapter real é obrigatório, salvo override explícito.
 MERCADO_PAGO_FAKE = (
     os.environ.get("MERCADO_PAGO_FAKE", "False").lower() == "true"
 )
 BLING_FAKE = os.environ.get("BLING_FAKE", "False").lower() == "true"
+
+if MERCADO_PAGO_FAKE:
+    raise ImproperlyConfigured(
+        "MERCADO_PAGO_FAKE=True não é permitido em produção; "
+        "o simulador aprova pagamentos sem provedor."
+    )
+if BLING_FAKE:
+    raise ImproperlyConfigured(
+        "BLING_FAKE=True não é permitido em produção."
+    )
+
+MERCADO_PAGO_COLLECTOR_ID = os.environ.get(
+    "MERCADOPAGO_COLLECTOR_ID", ""
+).strip()
+if not MERCADO_PAGO_COLLECTOR_ID:
+    raise ImproperlyConfigured(
+        "MERCADOPAGO_COLLECTOR_ID é obrigatório em produção para "
+        "validar o recebedor do pagamento."
+    )
+MERCADO_PAGO_LIVE_MODE = (
+    os.environ.get("MERCADOPAGO_LIVE_MODE", "True").lower() == "true"
+)
+if not MERCADO_PAGO_LIVE_MODE:
+    raise ImproperlyConfigured(
+        "MERCADOPAGO_LIVE_MODE deve ser True em produção."
+    )

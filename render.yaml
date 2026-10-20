@@ -22,6 +22,11 @@ services:
         fromDatabase:
           name: reidofeno-db
           property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: reidofeno-redis
+          property: connectionString
       - key: DJANGO_ALLOWED_HOSTS
         sync: false
       - key: CSRF_TRUSTED_ORIGINS
@@ -56,6 +61,12 @@ services:
         value: "240"
       - key: RECOMPRA_DIAS
         value: "30"
+
+  - type: redis
+    name: reidofeno-redis
+    plan: free
+    maxmemoryPolicy: noeviction
+    ipAllowList: []
 
 crons:
   - type: cron

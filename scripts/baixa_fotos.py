@@ -17,10 +17,18 @@ PREFERENCIA_LICENCA = ["CC0", "CC BY-SA", "CC BY", "Public domain", "GFDL"]
 UA = {"User-Agent": "ReiDoFenoDev/1.0 (contato@reidofeno.com.br)"}
 
 
+def _url_http(url: str) -> str:
+    """Rejeita esquemas locais (file:) antes de abrir uma URL remota."""
+    partes = urllib.parse.urlparse(url)
+    if partes.scheme not in ("http", "https") or not partes.netloc:
+        raise ValueError(f"URL não permitida: {url!r}")
+    return url
+
+
 def api(params):
     url = "https://commons.wikimedia.org/w/api.php?" + urllib.parse.urlencode(params)
-    req = urllib.request.Request(url, headers=UA)
-    with urllib.request.urlopen(req, timeout=30) as r:
+    req = urllib.request.Request(_url_http(url), headers=UA)
+    with urllib.request.urlopen(req, timeout=30) as r:  # nosec B310
         return json.loads(r.read().decode())
 
 
@@ -58,9 +66,9 @@ for nome_arquivo, termo in BUSCAS.items():
     if not escolhida:
         print("SEM RESULTADO:", nome_arquivo, termo)
         continue
-    url = info.get("thumburl") or info.get("url")
+    url = _url_http(info.get("thumburl") or info.get("url"))
     req = urllib.request.Request(url, headers=UA)
-    with urllib.request.urlopen(req, timeout=60) as r, open(destino, "wb") as f:
+    with urllib.request.urlopen(req, timeout=60) as r, open(destino, "wb") as f:  # nosec B310
         f.write(r.read())
     artista = (info.get("extmetadata", {}).get("Artist", {}) or {}).get("value", "?")
     print(f"OK {nome_arquivo} | {pagina['title']} | {licenca} | {artista[:60]} | {url[:90]}")

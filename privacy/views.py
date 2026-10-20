@@ -25,7 +25,10 @@ class TermosUsoView(TemplateView):
 
 
 def _cliente_do_usuario(usuario):
-    return getattr(usuario, "cliente", None)
+    cliente = getattr(usuario, "cliente", None)
+    if cliente is None or not cliente.vinculo_verificado:
+        return None
+    return cliente
 
 
 class MinhaPrivacidadeView(LoginRequiredMixin, TemplateView):

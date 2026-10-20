@@ -33,6 +33,7 @@ def registrar_movimento(
     usuario=None,
     motivo: str = "",
     quantidade_minima=None,
+    request=None,
 ) -> MovimentoEstoque:
     """Registra entrada/saída/ajuste em uma unidade e atualiza o saldo.
 
@@ -84,14 +85,24 @@ def registrar_movimento(
     )
 
     if tipo == tipo.AJUSTE:
-        from core.auditoria import registrar_auditoria
+        acao = "estoque.ajuste_manual"
+    else:
+        acao = "estoque.movimento"
 
-        registrar_auditoria(
-            acao="estoque.ajuste_manual",
-            instancia=movimento,
-            antes={"saldo_anterior": str(estoque.quantidade - delta)},
-            depois={"saldo_novo": str(estoque.quantidade), "motivo": motivo},
-        )
+    from core.auditoria import registrar_auditoria
+
+    registrar_auditoria(
+        acao=acao,
+        instancia=movimento,
+        request=request,
+        usuario=usuario,
+        antes={"saldo_anterior": str(estoque.quantidade - delta)},
+        depois={
+            "saldo_novo": str(estoque.quantidade),
+            "tipo": tipo,
+            "motivo": motivo,
+        },
+    )
 
     _avisar_estoque_baixo(estoque)
     return movimento
@@ -99,7 +110,8 @@ def registrar_movimento(
 
 @transaction.atomic
 def transferir_estoque(
-    *, produto, unidade_origem, unidade_destino, quantidade, usuario=None
+    *, produto, unidade_origem, unidade_destino, quantidade, usuario=None,
+    request=None,
 ) -> tuple[MovimentoEstoque, MovimentoEstoque]:
     """Transfere estoque gerando saída na origem e entrada no destino vinculadas."""
     quantidade = _quantidade_positiva(quantidade)
@@ -111,6 +123,7 @@ def transferir_estoque(
         quantidade=quantidade,
         usuario=usuario,
         motivo=f"Transferência para {unidade_destino.nome}",
+        request=request,
     )
     entrada = registrar_movimento(
         produto=produto,
@@ -119,6 +132,7 @@ def transferir_estoque(
         quantidade=quantidade,
         usuario=usuario,
         motivo=f"Transferência de {unidade_origem.nome}",
+        request=request,
     )
     saida.movimento_par = entrada
     saida.save(_permitir_edicao=True)
@@ -183,7 +197,9 @@ def liberar_reserva(*, produto, unidade, quantidade) -> None:
     ).update(quantidade_bloqueada=0)
 
 
-def dar_baixa_definitiva(*, produto, unidade, quantidade, pedido=None, usuario=None) -> None:
+def dar_baixa_definitiva(
+    *, produto, unidade, quantidade, pedido=None, usuario=None, request=None
+) -> None:
     """Converte reserva em saída definitiva após pagamento aprovado."""
     liberar_reserva(produto=produto, unidade=unidade, quantidade=quantidade)
     registrar_movimento(
@@ -193,4 +209,5 @@ def dar_baixa_definitiva(*, produto, unidade, quantidade, pedido=None, usuario=N
         quantidade=quantidade,
         usuario=usuario,
         motivo=f"Baixa definitiva por pedido {pedido}",
+        request=request,
     )
