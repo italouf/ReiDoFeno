@@ -460,7 +460,22 @@ def aplicar_resultado_pagamento(dados_consulta: dict, *, request=None) -> Pedido
             Pedido.Status.CANCELADO,
             Pedido.Status.CONCLUIDO,
         ):
-            pedido.transicionar(Pedido.Status.CANCELADO, request=request)
+            try:
+                pedido.transicionar(Pedido.Status.CANCELADO, request=request)
+            except ValidationError:
+                logger.error(
+                    "Chargeback no pedido %s em %s; cancelamento operacional "
+                    "exige revisão manual.",
+                    pedido.numero,
+                    pedido.status,
+                )
+                _registrar_resultado_financeiro(
+                    pedido,
+                    acao="pedido.estorno_com_andamento",
+                    status_provedor=status_provedor,
+                    id_externo=id_externo,
+                    request=request,
+                )
         _registrar_resultado_financeiro(
             pedido,
             acao="pedido.pagamento_estornado",
@@ -476,6 +491,26 @@ def aplicar_resultado_pagamento(dados_consulta: dict, *, request=None) -> Pedido
                 "Evento %s ignorado: pedido %s já está pago.",
                 status_provedor,
                 pedido.numero,
+            )
+            _registrar_resultado_financeiro(
+                pedido,
+                acao="pedido.pagamento_evento_ignorado",
+                status_provedor=status_provedor,
+                id_externo=id_externo,
+                request=request,
+            )
+            return pedido
+        if pedido.status in (
+            Pedido.Status.EM_SEPARACAO,
+            Pedido.Status.PRONTO_PARA_ENTREGA,
+            Pedido.Status.ENVIADO,
+            Pedido.Status.CONCLUIDO,
+        ):
+            logger.warning(
+                "Evento %s ignorado: pedido %s já está em andamento (%s).",
+                status_provedor,
+                pedido.numero,
+                pedido.status,
             )
             _registrar_resultado_financeiro(
                 pedido,

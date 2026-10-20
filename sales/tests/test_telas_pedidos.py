@@ -108,6 +108,24 @@ class PedidosInternosTests(TestCase):
         pedido.refresh_from_db()
         self.assertEqual(pedido.status, Pedido.Status.EM_SEPARACAO)
 
+    def test_detalhe_nao_oferece_separacao_sem_pagamento(self):
+        pedido = fluxo_checkout(self.client, quantidade=1)
+        self.client.force_login(self.usuarios["gestor"])
+
+        sem_pagamento = self.client.get(
+            reverse("sales:pedido_interno_detail", args=[pedido.pk])
+        )
+        self.assertNotContains(sem_pagamento, 'value="em_separacao"')
+
+        pedido.definir_status_financeiro(
+            Pedido.StatusFinanceiro.PAGO,
+            motivo="teste",
+        )
+        com_pagamento = self.client.get(
+            reverse("sales:pedido_interno_detail", args=[pedido.pk])
+        )
+        self.assertContains(com_pagamento, 'value="em_separacao"')
+
     def test_cancelamento_via_view_libera_reserva(self):
         pedido = fluxo_checkout(self.client, quantidade=3)
         self.client.force_login(self.usuarios["gestor"])

@@ -38,7 +38,9 @@ um pedido efetivamente separado.
    - `pending`/`in_process` → financeiro `pendente`, sem mudar o andamento;
    - `refused`/`cancelled` → financeiro `cancelado` e andamento `cancelado`,
      liberando a reserva;
-   - `charged_back` → financeiro `estornado` e andamento `cancelado`.
+   - `charged_back` → financeiro `estornado`; se o andamento já estiver em
+     separação/expedição, o cancelamento operacional é registrado como
+     pendente (`pedido.estorno_com_andamento`) para revisão manual.
 6. Eventos financeiros fora de ordem não rebaixam um pedido já pago. Uma
    aprovação tardia de pedido cancelado é registrada em
    `LogAuditoria` (`pedido.pagamento_apos_cancelamento`) e exige

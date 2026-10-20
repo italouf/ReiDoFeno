@@ -9,6 +9,7 @@ from django.urls import reverse
 
 from stock.models import Estoque
 
+from ..factories import PedidoFactory
 from ..models import Pagamento, PagamentoWebhookEvento, Pedido
 from ..services import (
     aplicar_resultado_pagamento,
@@ -38,6 +39,20 @@ class FluxoPagamentoTests(TestCase):
         pagamento = pedido.pagamento
         self.assertTrue(pagamento.preferencia_id.startswith("fake-pref-"))
         self.assertEqual(pagamento.valor, pedido.total)
+
+    def test_pedido_falhou_legado_nao_inicia_novo_pagamento(self):
+        pedido = PedidoFactory(status=Pedido.Status.FALHOU)
+
+        resposta = self.client.get(
+            reverse("sales:pagamento_iniciar", args=[pedido.token_acesso])
+        )
+
+        self.assertRedirects(
+            resposta,
+            reverse("sales:pedido_token", args=[pedido.token_acesso]),
+            fetch_redirect_response=False,
+        )
+        self.assertFalse(Pagamento.objects.filter(pedido=pedido).exists())
 
     def test_aprovado_atualiza_pedido_e_baixa_estoque_definitivamente(self):
         pedido = fluxo_checkout(self.client, quantidade=4)

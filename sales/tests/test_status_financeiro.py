@@ -267,6 +267,48 @@ class ResultadoPagamentoTests(TestCase):
             pedido.status_financeiro, Pedido.StatusFinanceiro.CANCELADO
         )
 
+    def test_evento_recusado_em_separacao_inconsistente_nao_quebra(self):
+        pedido = PedidoFactory(
+            status=Pedido.Status.EM_SEPARACAO,
+            status_financeiro=Pedido.StatusFinanceiro.PENDENTE,
+        )
+        Pagamento.objects.create(pedido=pedido, valor=pedido.total)
+
+        self._aplicar(pedido, "refused")
+
+        pedido.refresh_from_db()
+        self.assertEqual(pedido.status, Pedido.Status.EM_SEPARACAO)
+        self.assertEqual(
+            pedido.status_financeiro, Pedido.StatusFinanceiro.PENDENTE
+        )
+        self.assertTrue(
+            LogAuditoria.objects.filter(
+                acao="pedido.pagamento_evento_ignorado",
+                objeto_id=str(pedido.pk),
+            ).exists()
+        )
+
+    def test_chargeback_em_separacao_mantem_andamento_para_revisao(self):
+        pedido = PedidoFactory(
+            status=Pedido.Status.EM_SEPARACAO,
+            status_financeiro=Pedido.StatusFinanceiro.PAGO,
+        )
+        Pagamento.objects.create(pedido=pedido, valor=pedido.total)
+
+        self._aplicar(pedido, "charged_back")
+
+        pedido.refresh_from_db()
+        self.assertEqual(pedido.status, Pedido.Status.EM_SEPARACAO)
+        self.assertEqual(
+            pedido.status_financeiro, Pedido.StatusFinanceiro.ESTORNADO
+        )
+        self.assertTrue(
+            LogAuditoria.objects.filter(
+                acao="pedido.estorno_com_andamento",
+                objeto_id=str(pedido.pk),
+            ).exists()
+        )
+
     def test_chargeback_apos_cancelamento_pago_marca_estornado(self):
         pedido = self._pedido_com_pagamento()
         marcar_pagamento_aprovado(pedido, id_externo="pay-status")
