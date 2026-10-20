@@ -64,6 +64,11 @@ class Cliente(models.Model):
         db_index=True,
         help_text="Vínculo criado pelo fluxo de comprovação ou revisão administrativa.",
     )
+    identidade_versao = models.PositiveIntegerField(
+        "versão da identidade",
+        default=0,
+        help_text="Incrementada em mudanças de e-mail/documento/usuário/verificação.",
+    )
     criado_em = models.DateTimeField("criado em", auto_now_add=True)
 
     class Meta:
@@ -76,6 +81,35 @@ class Cliente(models.Model):
 
     def save(self, *args, **kwargs):
         self.documento = normalizar_documento(self.documento)
+        if self.pk:
+            anterior = (
+                type(self)
+                .objects.filter(pk=self.pk)
+                .values(
+                    "email",
+                    "documento",
+                    "usuario_id",
+                    "vinculo_verificado",
+                    "identidade_versao",
+                )
+                .first()
+            )
+            if anterior is not None:
+                identidade_mudou = (
+                    anterior["email"] != self.email
+                    or anterior["documento"] != self.documento
+                    or anterior["usuario_id"] != self.usuario_id
+                    or anterior["vinculo_verificado"]
+                    != self.vinculo_verificado
+                )
+                if identidade_mudou:
+                    self.identidade_versao = (
+                        anterior["identidade_versao"] + 1
+                    )
+                    if kwargs.get("update_fields") is not None:
+                        kwargs["update_fields"] = set(
+                            kwargs["update_fields"]
+                        ) | {"identidade_versao"}
         super().save(*args, **kwargs)
 
     @property
@@ -151,6 +185,9 @@ class VinculoClienteToken(models.Model):
         "hash do nonce", max_length=64, unique=True
     )
     email_hash = models.CharField("hash do e-mail", max_length=64)
+    identidade_versao = models.PositiveIntegerField(
+        "versão da identidade", default=0
+    )
     criado_em = models.DateTimeField("criado em", auto_now_add=True)
     expira_em = models.DateTimeField("expira em")
     usado_em = models.DateTimeField("usado em", null=True, blank=True)

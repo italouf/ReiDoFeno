@@ -234,6 +234,21 @@ def marcar_pagamento_aprovado(
     """
     pedido = _pedido_bloqueado(pedido)
     if pedido.status_financeiro == Pedido.StatusFinanceiro.PAGO:
+        if not pedido.tem_prova_financeira():
+            pedido.financeiro_conciliado = True
+            pedido.save(update_fields=["financeiro_conciliado", "atualizado_em"])
+            from core.auditoria import registrar_auditoria
+
+            registrar_auditoria(
+                acao="pedido.financeiro_reconciliado",
+                instancia=pedido,
+                request=request,
+                depois={
+                    "origem": "provedor",
+                    "id_externo": id_externo,
+                    "financeiro_conciliado": True,
+                },
+            )
         logger.info("Pedido %s já estava pago; evento ignorado.", pedido.numero)
         return pedido
 
@@ -302,6 +317,8 @@ def marcar_pagamento_aprovado(
         request=request,
         motivo="pagamento aprovado pelo provedor",
     )
+    pedido.financeiro_conciliado = True
+    pedido.save(update_fields=["financeiro_conciliado", "atualizado_em"])
 
     for item in pedido.itens.select_related("produto"):
         dar_baixa_definitiva(
@@ -323,6 +340,7 @@ def marcar_pagamento_aprovado(
         depois={
             "status": pedido.status,
             "status_financeiro": pedido.status_financeiro,
+            "financeiro_conciliado": pedido.financeiro_conciliado,
             "id_externo": id_externo,
             "pagamento_id": getattr(
                 getattr(pedido, "pagamento", None), "pk", None
@@ -367,6 +385,37 @@ def _registrar_pagamento_apos_cancelamento(
             "id_externo": id_externo,
         },
     )
+
+
+@transaction.atomic
+def reconciliar_pedido_financeiro(
+    pedido: Pedido, *, justificativa: str, request=None, origem="manual"
+) -> Pedido:
+    """Marca prova financeira legada após conciliação humana explícita."""
+    if not justificativa.strip():
+        raise ValidationError("Justificativa é obrigatória.")
+    pedido = _pedido_bloqueado(pedido)
+    if pedido.status_financeiro != Pedido.StatusFinanceiro.PAGO:
+        raise ValidationError(
+            "Só é possível reconciliar pedido com financeiro pago."
+        )
+    antes = {"financeiro_conciliado": pedido.financeiro_conciliado}
+    pedido.financeiro_conciliado = True
+    pedido.save(update_fields=["financeiro_conciliado", "atualizado_em"])
+    from core.auditoria import registrar_auditoria
+
+    registrar_auditoria(
+        acao="pedido.financeiro_reconciliado",
+        instancia=pedido,
+        request=request,
+        antes=antes,
+        depois={
+            "financeiro_conciliado": True,
+            "justificativa": justificativa.strip()[:500],
+            "origem": origem,
+        },
+    )
+    return pedido
 
 
 @transaction.atomic

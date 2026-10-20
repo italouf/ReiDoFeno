@@ -115,6 +115,7 @@ class ClienteUpdateView(ClienteBaseView, AuditoriaFormValidMixin, UpdateView):
         return (
             usuario.is_authenticated
             and cliente_vinculado is not None
+            and cliente_vinculado.vinculo_verificado
             and str(cliente_vinculado.pk) == str(alvo)
         )
 

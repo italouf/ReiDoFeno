@@ -36,6 +36,11 @@ class PedidoFactory(factory.django.DjangoModelFactory):
             )
         )
     )
+    financeiro_conciliado = factory.LazyAttribute(
+        lambda o: (
+            o.status_financeiro == Pedido.StatusFinanceiro.PAGO
+        )
+    )
     canal = Pedido.Canal.LOJA
 
 

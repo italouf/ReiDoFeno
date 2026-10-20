@@ -1,6 +1,7 @@
 import json
 import logging
 import uuid
+from datetime import timedelta
 
 from django.conf import settings
 from django.contrib import messages
@@ -10,6 +11,7 @@ from django.db import transaction
 from django.http import Http404, HttpResponseNotAllowed, JsonResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse, reverse_lazy
+from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 from django.views.generic import DetailView, FormView, ListView, TemplateView, View
@@ -241,7 +243,9 @@ class PagamentoIniciarView(View):
             messages.info(request, "Este pedido não está aguardando pagamento.")
             return redirect("sales:pedido_token", pedido.token_acesso)
 
-        # Reuso idempotente antes de chamar o provedor.
+        from .payments import obter_client
+
+        client = obter_client()
         with transaction.atomic():
             pedido = Pedido.objects.select_for_update().get(pk=pedido.pk)
             if not self._pode_iniciar(pedido):
@@ -254,20 +258,65 @@ class PagamentoIniciarView(View):
                 .filter(pedido=pedido)
                 .first()
             )
-            if (
-                pagamento
-                and pagamento.status == Pagamento.Status.PENDENTE
-                and pagamento.init_point
-            ):
-                return redirect(pagamento.init_point)
-            if pagamento and pagamento.status == Pagamento.Status.APROVADO:
+            if pagamento is None:
+                pagamento = Pagamento.objects.create(
+                    pedido=pedido,
+                    valor=pedido.total,
+                    status=Pagamento.Status.PENDENTE,
+                    idempotency_key=uuid.uuid4().hex,
+                )
+            elif pagamento.status == Pagamento.Status.APROVADO:
                 messages.info(request, "O pagamento deste pedido já foi aprovado.")
                 return redirect("sales:pedido_token", pedido.token_acesso)
+            elif pagamento.status == Pagamento.Status.PENDENTE:
+                if (
+                    pagamento.init_point
+                    and pagamento.criacao_expira_em is None
+                ):
+                    return redirect(pagamento.init_point)
+                if (
+                    pagamento.criacao_expira_em
+                    and pagamento.criacao_expira_em > timezone.now()
+                ):
+                    messages.info(
+                        request,
+                        "O pagamento está sendo criado. Tente novamente em instantes.",
+                    )
+                    return redirect("sales:pedido_token", pedido.token_acesso)
+            else:
+                pagamento.idempotency_key = uuid.uuid4().hex
 
-        from .payments import obter_client
+            if not pagamento.idempotency_key:
+                pagamento.idempotency_key = uuid.uuid4().hex
+            pagamento.preferencia_id = ""
+            pagamento.init_point = ""
+            pagamento.valor = pedido.total
+            pagamento.status = Pagamento.Status.PENDENTE
+            pagamento.criacao_expira_em = timezone.now() + timedelta(
+                minutes=2
+            )
+            pagamento.save(
+                update_fields=[
+                    "idempotency_key",
+                    "preferencia_id",
+                    "init_point",
+                    "valor",
+                    "status",
+                    "criacao_expira_em",
+                ]
+            )
+            chave_idempotencia = pagamento.idempotency_key
 
-        client = obter_client()
-        preferencia_id, init_point = client.criar_preferencia(pedido)
+        try:
+            preferencia_id, init_point = client.criar_preferencia(
+                pedido, idempotency_key=chave_idempotencia
+            )
+        except Exception:
+            # Permite retry com a MESMA chave; o provedor deduplica o efeito.
+            Pagamento.objects.filter(pk=pagamento.pk).update(
+                criacao_expira_em=None
+            )
+            raise
 
         with transaction.atomic():
             pedido = Pedido.objects.select_for_update().get(pk=pedido.pk)
@@ -290,6 +339,7 @@ class PagamentoIniciarView(View):
                     init_point=init_point,
                     valor=pedido.total,
                     status=Pagamento.Status.PENDENTE,
+                    idempotency_key=chave_idempotencia,
                 )
             elif pagamento.status == Pagamento.Status.APROVADO:
                 registrar_auditoria(
@@ -299,15 +349,14 @@ class PagamentoIniciarView(View):
                     depois={
                         "preferencia_id": preferencia_id,
                         "pagamento_id": pagamento.pk,
+                        "idempotency_key": chave_idempotencia,
                         "motivo": "pagamento já aprovado",
                     },
                 )
                 messages.info(request, "O pagamento deste pedido já foi aprovado.")
                 return redirect("sales:pedido_token", pedido.token_acesso)
-            elif (
-                pagamento.status == Pagamento.Status.PENDENTE
-                and pagamento.init_point
-            ):
+            elif pagamento.init_point:
+                # Outra requisição concluiu a criação; reutiliza o recurso.
                 return redirect(pagamento.init_point)
             else:
                 tentativa_anterior = pagamento.status
@@ -315,24 +364,30 @@ class PagamentoIniciarView(View):
                 pagamento.init_point = init_point
                 pagamento.valor = pedido.total
                 pagamento.status = Pagamento.Status.PENDENTE
+                pagamento.criacao_expira_em = None
+                pagamento.idempotency_key = chave_idempotencia
                 pagamento.save(
                     update_fields=[
                         "preferencia_id",
                         "init_point",
                         "valor",
                         "status",
+                        "criacao_expira_em",
+                        "idempotency_key",
                     ]
                 )
-                registrar_auditoria(
-                    acao="pedido.pagamento_nova_tentativa",
-                    instancia=pedido,
-                    request=request,
-                    antes={"pagamento_status": tentativa_anterior},
-                    depois={
-                        "pagamento_status": pagamento.status,
-                        "preferencia_id": preferencia_id,
-                    },
-                )
+                if tentativa_anterior != Pagamento.Status.PENDENTE:
+                    registrar_auditoria(
+                        acao="pedido.pagamento_nova_tentativa",
+                        instancia=pedido,
+                        request=request,
+                        antes={"pagamento_status": tentativa_anterior},
+                        depois={
+                            "pagamento_status": pagamento.status,
+                            "preferencia_id": preferencia_id,
+                            "idempotency_key": chave_idempotencia,
+                        },
+                    )
 
             registrar_auditoria(
                 acao="pedido.pagamento_preferencia_criada",
@@ -342,6 +397,7 @@ class PagamentoIniciarView(View):
                     "preferencia_id": preferencia_id,
                     "pagamento_id": pagamento.pk,
                     "valor": str(pedido.total),
+                    "idempotency_key": chave_idempotencia,
                 },
             )
         return redirect(init_point)
@@ -556,7 +612,7 @@ class PedidoInternoDetailView(LoginRequiredMixin, GrupoRequiredMixin, DetailView
             Pedido.TRANSICOES_VALIDAS.get(self.object.status, set())
             & PERMIS_SO_TRANSICOES_OPERACIONAIS
         )
-        if self.object.status_financeiro != Pedido.StatusFinanceiro.PAGO:
+        if not self.object.tem_prova_financeira():
             permitidos -= Pedido.EXIGE_FINANCEIRO_PAGO
         contexto["proximos_status"] = [
             (valor, Pedido.Status(valor).label)

@@ -91,6 +91,13 @@ um pedido efetivamente separado.
 - **R8:** criação de pedido/reserva é auditada atomicamente; liberação de
   reserva também; `inventariar_legado` lista dados sem prova sem reescrever
   histórico.
+- **N02:** `Pedido.financeiro_conciliado` distingue status histórico de prova;
+  legado pago sem evidência fica bloqueado até `reconciliar_pedido_financeiro`
+  com justificativa/auditoria.
+- **N05:** `Cliente.identidade_versao` invalida provas antigas de forma
+  durável mesmo se o e-mail for restaurado.
+- **N06:** `Pagamento.idempotency_key` e `criacao_expira_em` são persistidos
+  antes do efeito externo; a preferência usa `X-Idempotency-Key`.
 
 ## Consequências
 

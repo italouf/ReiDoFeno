@@ -16,7 +16,11 @@ logger = logging.getLogger(__name__)
 
 def pedido_elegivel(pedido) -> bool:
     """Pedido com pagamento aprovado e documento válido do cliente."""
-    if pedido.status_financeiro != "pago" or pedido.status == "cancelado":
+    if (
+        pedido.status_financeiro != "pago"
+        or not pedido.financeiro_conciliado
+        or pedido.status == "cancelado"
+    ):
         return False
     documento = _apenas_digitos(pedido.cliente.documento)
     try:
@@ -41,7 +45,11 @@ def _aviso_documento_invalido(pedido) -> None:
 @transaction.atomic
 def enviar_para_emissao(pedido, client=None) -> NotaFiscal | None:
     """Tenta emitir a NF-e do pedido pago; erro gera aviso e permite retry."""
-    if pedido.status_financeiro != "pago" or pedido.status == "cancelado":
+    if (
+        pedido.status_financeiro != "pago"
+        or not pedido.financeiro_conciliado
+        or pedido.status == "cancelado"
+    ):
         return None
 
     if not pedido_elegivel(pedido):
@@ -106,7 +114,9 @@ def processar_fila_fiscal() -> int:
     from sales.models import Pedido
 
     pedidos = (
-        Pedido.objects.filter(status_financeiro="pago")
+        Pedido.objects.filter(
+            status_financeiro="pago", financeiro_conciliado=True
+        )
         .exclude(status="cancelado")
         .exclude(nota_fiscal__status=NotaFiscal.Status.AUTORIZADA)
         .select_related("cliente")
@@ -128,6 +138,7 @@ def avisar_pagos_sem_nfe(horas_limite: int = 24) -> int:
 
     pendentes = Pedido.objects.filter(
         status_financeiro="pago",
+        financeiro_conciliado=True,
         atualizado_em__lt=limite,
     ).exclude(status="cancelado").exclude(
         nota_fiscal__status=NotaFiscal.Status.AUTORIZADA

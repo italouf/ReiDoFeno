@@ -1,6 +1,7 @@
 # Fase 2A — Remediação verificável de segurança
 
-- **Status:** Implementado; validação local concluída; CI PostgreSQL/Redis configurada
+- **Status:** Remediação residual N01–N07 implementada; validação local concluída;
+  CI PostgreSQL/Redis configurada, aguardando execução no SHA final.
 - **Data:** 2026-10-19
 - **Branch:** `fase-2a-seguranca-critica`
 - **Commit auditado:** `b510978cd5b82638a0b26114fa9506de6478a778`
@@ -157,3 +158,41 @@ enviado → concluido`
 - Redis real: teste local é skip sem `REDIS_URL`; CI executa.
 - Proxy/IP real, SMTP real, Mercado Pago/Bling reais e restore de backup:
   exigem ambiente externo e não foram executados.
+
+## 10. Remediação residual da reauditoria (N01–N07)
+
+- **N01:** `ClienteUpdateView` exige `vinculo_verificado` para acesso
+  próprio; vínculo pendente recebe 403 em leitura/escrita. Titular
+  comprovado que troca e-mail perde a verificação, mas recupera por nova
+  prova enviada ao novo e-mail (o destinatário não pode ser escolhido por
+  vínculo pendente).
+- **N02:** novo `Pedido.financeiro_conciliado`; avanço operacional e
+  elegibilidade fiscal exigem prova conciliada, não apenas
+  `status_financeiro`. Migração deixa legado como pendente;
+  `reconciliar_pedido_financeiro` exige justificativa, audita e não cria
+  `Pagamento` fictício. `inventariar_legado` lista pendentes e emite JSON
+  puro.
+- **N03/N04:** admin trata usuário, e-mail, documento e booleano como
+  mudança de identidade; exige justificativa, captura o estado anterior
+  antes do save, revoga provas, desmarca histórico e audita antes/depois
+  corretos. Troca de titular não herda verificação.
+- **N05:** `Cliente.identidade_versao` incrementa em mudanças de
+  e-mail/documento/usuário/verificação; a prova guarda a versão. Restaurar
+  o e-mail não ressuscita link antigo. Rejeição por hash/versão não grava
+  revogação dentro de transação que será revertida.
+- **N06:** `Pagamento.idempotency_key` é persistida antes do efeito externo;
+  `criacao_expira_em` define janela de recuperação; requisição concorrente
+  reutiliza a tentativa e o provedor real recebe `X-Idempotency-Key`.
+  Falha/timeout permite retry com a mesma chave.
+- **N07:** workflow inclui a branch e `workflow_dispatch`; testes
+  `PostgresConcurrencyTests` cobrem cancelamento vs aprovação, avanço vs
+  estorno e duas criações de pagamento com conexões/threads independentes,
+  executados somente em PostgreSQL.
+
+### Evidência local adicional
+
+- Suíte: **329 passed, 4 skipped, 230 subtests**.
+- Skips: 3 testes de concorrência nativa PostgreSQL e 1 de Redis real sem
+  `REDIS_URL`.
+- Cobertura e ferramentas: ver relatório final.
+- A CI não foi executada neste ambiente porque não houve push remoto.

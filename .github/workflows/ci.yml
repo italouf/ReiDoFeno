@@ -2,8 +2,11 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+      - fase-2a-seguranca-critica
   pull_request:
+  workflow_dispatch:
 
 jobs:
   lint:

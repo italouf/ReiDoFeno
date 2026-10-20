@@ -69,7 +69,10 @@ def solicitar_vinculo_cliente(*, usuario, documento: str, request) -> bool:
         return False
     if cliente.usuario_id not in (None, usuario.pk):
         return False
-    if _email_normalizado(cliente.email) != _email_normalizado(usuario.email):
+    if cliente.usuario_id is None and (
+        _email_normalizado(cliente.email)
+        != _email_normalizado(usuario.email)
+    ):
         return False
     outro_cliente = (
         Cliente.objects.filter(usuario=usuario)
@@ -87,6 +90,7 @@ def solicitar_vinculo_cliente(*, usuario, documento: str, request) -> bool:
         usuario=usuario,
         nonce_hash=_hash(nonce),
         email_hash=_hash(cliente.email),
+        identidade_versao=cliente.identidade_versao,
         expira_em=timezone.now() + timedelta(
             seconds=VALIDADE_VINCULO_SEGUNDOS
         ),
@@ -140,15 +144,21 @@ def obter_token_vinculo(token: str, usuario):
         raise PermissionDenied("Esta prova não pertence ao usuário autenticado.")
 
     cliente = prova.cliente
+    if prova.identidade_versao != cliente.identidade_versao:
+        raise PermissionDenied(
+            "A identidade do cadastro mudou; solicite uma nova prova."
+        )
     email_atual = _email_normalizado(cliente.email)
-    if (
-        _hash(email_atual) != prova.email_hash
-        or _hash(usuario.email) != prova.email_hash
-    ):
-        prova.revogado_em = timezone.now()
-        prova.save(update_fields=["revogado_em"])
+    if _hash(email_atual) != prova.email_hash:
         raise PermissionDenied(
             "O e-mail do cadastro mudou; solicite uma nova prova."
+        )
+    if (
+        cliente.usuario_id != usuario.pk
+        and _hash(usuario.email) != prova.email_hash
+    ):
+        raise PermissionDenied(
+            "O e-mail do cadastro não pertence ao usuário autenticado."
         )
 
     if cliente.usuario_id not in (None, usuario.pk):
@@ -202,16 +212,22 @@ def confirmar_vinculo_cliente(*, token: str, usuario, request):
 
 @transaction.atomic
 def revisar_vinculo_cliente(
-    *, cliente: Cliente, verificado: bool, justificativa: str, request
+    *,
+    cliente: Cliente,
+    verificado: bool,
+    justificativa: str,
+    request,
+    antes=None,
 ) -> Cliente:
     """Revisão administrativa explícita com justificativa e auditoria."""
     if not justificativa.strip():
         raise ValidationError("Justificativa é obrigatória.")
     cliente = Cliente.objects.select_for_update().get(pk=cliente.pk)
-    antes = {
-        "usuario_id": cliente.usuario_id,
-        "vinculo_verificado": cliente.vinculo_verificado,
-    }
+    if antes is None:
+        antes = {
+            "usuario_id": cliente.usuario_id,
+            "vinculo_verificado": cliente.vinculo_verificado,
+        }
     if verificado and cliente.usuario_id is None:
         raise ValidationError("Não há usuário vinculado para verificar.")
     cliente.vinculo_verificado = verificado

@@ -197,6 +197,23 @@ class VinculoClienteTests(TestCase):
         cliente.refresh_from_db()
         self.assertIsNone(cliente.usuario)
 
+    def test_email_alterado_e_restaurado_nao_ressuscita_prova(self):
+        cliente = self._criar_cliente()
+        email_original = cliente.email
+        self.client.force_login(self.usuario)
+        self._solicitar()
+        link = self._link_do_email()
+        cliente.email = "intermediario@example.com"
+        cliente.save(update_fields=["email"])
+        cliente.email = email_original
+        cliente.save(update_fields=["email"])
+
+        resposta = self.client.get(link)
+
+        self.assertEqual(resposta.status_code, 403)
+        cliente.refresh_from_db()
+        self.assertIsNone(cliente.usuario)
+
     def test_falha_na_auditoria_reverte_vinculo(self):
         cliente = self._criar_cliente()
         self.client.force_login(self.usuario)
@@ -219,3 +236,74 @@ class VinculoClienteTests(TestCase):
         resposta = self.client.get(reverse("accounts:vincular_cliente"))
         self.assertEqual(resposta.status_code, 302)
         self.assertIn(reverse("accounts:login"), resposta["Location"])
+
+    def test_vinculo_pendente_nao_le_nem_edita_cadastro(self):
+        cliente = self._criar_cliente(
+            usuario=self.usuario, vinculo_verificado=False
+        )
+        self.client.force_login(self.usuario)
+
+        leitura = self.client.get(
+            reverse("customers:cliente_editar", args=[cliente.pk])
+        )
+        escrita = self.client.post(
+            reverse("customers:cliente_editar", args=[cliente.pk]),
+            {
+                "nome": cliente.nome,
+                "tipo_pessoa": cliente.tipo_pessoa,
+                "documento": cliente.documento,
+                "categoria": cliente.categoria,
+                "telefone": cliente.telefone,
+                "email": "atacante@example.com",
+                "logradouro": "",
+                "numero": "",
+                "bairro": "",
+                "cidade": "",
+                "uf": "",
+                "cep": "",
+                "preferencia": "",
+            },
+        )
+
+        self.assertEqual(leitura.status_code, 403)
+        self.assertEqual(escrita.status_code, 403)
+        cliente.refresh_from_db()
+        self.assertEqual(cliente.email, self.usuario.email)
+
+    def test_titular_verificado_troca_email_e_recupera_por_nova_prova(self):
+        cliente = self._criar_cliente(
+            usuario=self.usuario, vinculo_verificado=True
+        )
+        self.client.force_login(self.usuario)
+        novo_email = "novo-titular@example.com"
+
+        resposta = self.client.post(
+            reverse("customers:cliente_editar", args=[cliente.pk]),
+            {
+                "nome": cliente.nome,
+                "tipo_pessoa": cliente.tipo_pessoa,
+                "documento": cliente.documento,
+                "categoria": cliente.categoria,
+                "telefone": cliente.telefone,
+                "email": novo_email,
+                "logradouro": "",
+                "numero": "",
+                "bairro": "",
+                "cidade": "",
+                "uf": "",
+                "cep": "",
+                "preferencia": "",
+            },
+        )
+
+        self.assertEqual(resposta.status_code, 302)
+        cliente.refresh_from_db()
+        self.assertFalse(cliente.vinculo_verificado)
+        self.assertEqual(cliente.email, novo_email)
+
+        self._solicitar()
+        self.assertEqual(mail.outbox[-1].to, [novo_email])
+        link = self._link_do_email()
+        self.assertEqual(self.client.post(link).status_code, 302)
+        cliente.refresh_from_db()
+        self.assertTrue(cliente.vinculo_verificado)

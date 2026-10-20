@@ -30,7 +30,9 @@
 5. Configurar os jobs da seção 6 em systemd timers (ou cron) e o webhook do
    Mercado Pago em `https://SEU-DOMINIO/webhook/pagamentos/`.
 6. Executar `python manage.py inventariar_legado --json` e conciliar os
-   vínculos/pagamentos apontados antes de liberar histórico/fiscal.
+   vínculos/pagamentos apontados antes de liberar histórico/fiscal. Pedidos
+   legados só avançam após
+   `python manage.py reconciliar_pedido_financeiro <numero> --justificativa "..."`.
 
 ### Render (blueprint legado)
 

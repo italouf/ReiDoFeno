@@ -2,6 +2,22 @@
 
 Todas as mudanças relevantes deste projeto são registradas aqui.
 
+## [Fase 2A — remediação residual N01–N07] — 2026-10-20
+
+- **N01:** vínculo pendente não lê/edita cadastro; e-mail só muda após
+  comprovação e recuperação por nova prova no novo endereço.
+- **N02:** `Pedido.financeiro_conciliado`; legado pago sem prova não avança
+  operacionalmente nem entra na fila fiscal até reconciliação auditada.
+- **N03/N04:** admin unifica mudança de usuário/e-mail/documento/verificação,
+  exige justificativa, captura o “antes” correto e não herda histórico.
+- **N05:** `identidade_versao` persistente invalida provas após mudança e
+  restauração de e-mail; revogação não é revertida por erro de validação.
+- **N06:** tentativa de pagamento persistida antes do efeito externo, com
+  `idempotency_key`, janela de recuperação e header `X-Idempotency-Key`.
+- **N07:** CI inclui a branch/workflow_dispatch e testes de concorrência
+  PostgreSQL para cancelamento/aprovação, avanço/estorno e criação dupla de
+  pagamento. `inventariar_legado --json` emite JSON puro.
+
 ## [Fase 2A — remediação da auditoria independente] — 2026-10-20
 
 - **R1/PAY-02:** contrato financeiro completo (tentativa local, ID

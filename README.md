@@ -92,6 +92,11 @@ pip-audit -r requirements.txt
   `Retry-After`.
 - **ADR-002:** `Pedido.status_financeiro` é independente do andamento
   operacional.
+- **Legado:** `Pedido.financeiro_conciliado` bloqueia avanço/fiscal de pedido
+  pago sem prova; use `python manage.py inventariar_legado --json` e
+  `python manage.py reconciliar_pedido_financeiro <numero> --justificativa`.
+- **Pagamento:** criação de preferência é POST, limitada e idempotente por
+  `Pagamento.idempotency_key`; o provedor recebe `X-Idempotency-Key`.
 
 ## Documentação
 

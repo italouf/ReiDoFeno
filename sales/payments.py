@@ -43,8 +43,10 @@ def obter_client():
 class MercadoPagoFake:
     """Determinístico para testes/dev: init_point aponta ao simulador interno."""
 
-    def criar_preferencia(self, pedido) -> tuple[str, str]:
-        preferencia_id = f"fake-pref-{pedido.numero}"
+    def criar_preferencia(self, pedido, idempotency_key=None) -> tuple[str, str]:
+        # O fake reproduz deduplicação por chave: mesma chave, mesmo recurso.
+        chave = idempotency_key or "sem-chave"
+        preferencia_id = f"fake-pref-{pedido.numero}-{chave[:8]}"
         init_point = reverse("sales:simular_pagamento", args=[pedido.token_acesso])
         return preferencia_id, init_point
 
@@ -87,19 +89,29 @@ class MercadoPagoReal:
         self.token = access_token or settings.MERCADO_PAGO_ACCESS_TOKEN
 
     # ------------------------------------------------------------------ #
-    def _requisicao(self, metodo: str, caminho: str, corpo: dict | None = None) -> dict:
+    def _requisicao(
+        self,
+        metodo: str,
+        caminho: str,
+        corpo: dict | None = None,
+        *,
+        idempotency_key: str | None = None,
+    ) -> dict:
         dados = json.dumps(corpo).encode() if corpo is not None else None
         url = f"{API_BASE}{caminho}"
         if not url.startswith("https://api.mercadopago.com/"):
             raise ErroPagamento("Esquema/destino não permitido pela integração.")
+        headers = {
+            "Authorization": f"Bearer {self.token}",
+            "Content-Type": "application/json",
+        }
+        if idempotency_key:
+            headers["X-Idempotency-Key"] = idempotency_key
         requisicao = urllib.request.Request(
             url,
             data=dados,
             method=metodo,
-            headers={
-                "Authorization": f"Bearer {self.token}",
-                "Content-Type": "application/json",
-            },
+            headers=headers,
         )
         try:
             with urllib.request.urlopen(  # nosec B310 - destino https fixo validado acima
@@ -110,7 +122,7 @@ class MercadoPagoReal:
             logger.exception("Erro na API do Mercado Pago (%s %s).", metodo, caminho)
             raise ErroPagamento(f"Falha na API do provedor: {erro}") from erro
 
-    def criar_preferencia(self, pedido) -> tuple[str, str]:
+    def criar_preferencia(self, pedido, idempotency_key=None) -> tuple[str, str]:
         site = settings.SITE_URL.rstrip("/")
         itens = [
             {
@@ -133,7 +145,12 @@ class MercadoPagoReal:
                 f"{site}{reverse('sales:webhook')}" if not settings.DEBUG else ""
             ),
         }
-        resposta = self._requisicao("POST", "/checkout/preferences", corpo)
+        resposta = self._requisicao(
+            "POST",
+            "/checkout/preferences",
+            corpo,
+            idempotency_key=idempotency_key,
+        )
         init_point = resposta.get("init_point") or resposta.get(
             "sandbox_init_point", ""
         )

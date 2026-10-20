@@ -16,6 +16,7 @@ from sales.services import (
     aplicar_resultado_pagamento,
     cancelar_pedido,
     marcar_pagamento_aprovado,
+    reconciliar_pedido_financeiro,
 )
 from stock.factories import EstoqueFactory
 from stock.models import Estoque
@@ -67,6 +68,26 @@ class StatusFinanceiroModelTests(TestCase):
         pedido.transicionar(Pedido.Status.EM_SEPARACAO)
 
         self.assertEqual(pedido.status, Pedido.Status.EM_SEPARACAO)
+
+    def test_legado_pago_sem_prova_nao_avanca_ate_reconciliar(self):
+        pedido = PedidoFactory(
+            status=Pedido.Status.AGUARDANDO_PAGAMENTO,
+            status_financeiro=Pedido.StatusFinanceiro.PAGO,
+            financeiro_conciliado=False,
+        )
+
+        with self.assertRaises(ValidationError):
+            pedido.transicionar(Pedido.Status.EM_SEPARACAO)
+
+        reconciliar_pedido_financeiro(
+            pedido,
+            justificativa="Conferido no extrato do provedor em 20/10/2026.",
+        )
+        pedido.refresh_from_db()
+        pedido.transicionar(Pedido.Status.EM_SEPARACAO)
+
+        self.assertEqual(pedido.status, Pedido.Status.EM_SEPARACAO)
+        self.assertTrue(pedido.financeiro_conciliado)
 
     def test_estornado_nao_avanca_para_concluido(self):
         pedido = PedidoFactory(

@@ -22,6 +22,11 @@ class AdminVinculoTests(TestCase):
             email="titular-admin@example.com",
             password="senha-forte-123",
         )
+        cls.outro_titular = Usuario.objects.create_user(
+            username="outro-admin",
+            email="outro-admin@example.com",
+            password="senha-forte-123",
+        )
         cls.cliente = ClienteFactory(
             usuario=cls.titular,
             vinculo_verificado=False,
@@ -73,6 +78,7 @@ class AdminVinculoTests(TestCase):
             objeto_id=str(self.cliente.pk),
         )
         self.assertIn("Documento conferido", log.depois["justificativa"])
+        self.assertFalse(log.antes["vinculo_verificado"])
 
     def test_admin_nao_altera_vinculo_sem_justificativa(self):
         self.client.force_login(self.admin)
@@ -110,3 +116,78 @@ class AdminVinculoTests(TestCase):
         self.assertFalse(self.cliente.vinculo_verificado)
         self.assertIsNone(self.cliente.usuario)
         self.assertFalse(pedido.identidade_verificada)
+
+    def test_admin_troca_usuario_nao_herda_verificacao_nem_historico(self):
+        self.cliente.vinculo_verificado = True
+        self.cliente.save(update_fields=["vinculo_verificado"])
+        pedido = PedidoFactory(
+            cliente=self.cliente,
+            usuario_criador=self.titular,
+            identidade_verificada=True,
+        )
+        self.client.force_login(self.admin)
+
+        resposta = self.client.post(
+            reverse("admin:customers_cliente_change", args=[self.cliente.pk]),
+            self._dados(
+                usuario=self.outro_titular.pk,
+                vinculo_verificado="on",
+                justificativa_vinculo="Troca de titular autorizada.",
+            ),
+        )
+
+        self.assertEqual(resposta.status_code, 302)
+        self.cliente.refresh_from_db()
+        pedido.refresh_from_db()
+        self.assertEqual(self.cliente.usuario, self.outro_titular)
+        self.assertFalse(self.cliente.vinculo_verificado)
+        self.assertFalse(pedido.identidade_verificada)
+        log = LogAuditoria.objects.get(
+            acao="cliente.identidade_alterada_admin",
+            objeto_id=str(self.cliente.pk),
+        )
+        self.assertEqual(log.antes["usuario_id"], self.titular.pk)
+
+    def test_admin_troca_email_reseta_verificacao_e_historico(self):
+        self.cliente.vinculo_verificado = True
+        self.cliente.save(update_fields=["vinculo_verificado"])
+        pedido = PedidoFactory(
+            cliente=self.cliente,
+            usuario_criador=self.titular,
+            identidade_verificada=True,
+        )
+        self.client.force_login(self.admin)
+
+        resposta = self.client.post(
+            reverse("admin:customers_cliente_change", args=[self.cliente.pk]),
+            self._dados(
+                email="novo-email-admin@example.com",
+                vinculo_verificado="on",
+                justificativa_vinculo="Atualização de contato.",
+            ),
+        )
+
+        self.assertEqual(resposta.status_code, 302)
+        self.cliente.refresh_from_db()
+        pedido.refresh_from_db()
+        self.assertEqual(self.cliente.email, "novo-email-admin@example.com")
+        self.assertFalse(self.cliente.vinculo_verificado)
+        self.assertFalse(pedido.identidade_verificada)
+
+    def test_admin_troca_usuario_sem_justificativa_e_rejeitada(self):
+        self.cliente.vinculo_verificado = True
+        self.cliente.save(update_fields=["vinculo_verificado"])
+        self.client.force_login(self.admin)
+
+        resposta = self.client.post(
+            reverse("admin:customers_cliente_change", args=[self.cliente.pk]),
+            self._dados(
+                usuario=self.outro_titular.pk,
+                vinculo_verificado="on",
+                justificativa_vinculo="",
+            ),
+        )
+
+        self.assertEqual(resposta.status_code, 200)
+        self.cliente.refresh_from_db()
+        self.assertEqual(self.cliente.usuario, self.titular)

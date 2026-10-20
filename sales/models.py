@@ -97,6 +97,15 @@ class Pedido(models.Model):
     consentimento_marketing = models.BooleanField(
         "consentimento de marketing", default=False
     )
+    financeiro_conciliado = models.BooleanField(
+        "financeiro conciliado",
+        default=False,
+        db_index=True,
+        help_text=(
+            "Prova/reconciliação explícita; status histórico inferido não "
+            "libera operação."
+        ),
+    )
     usuario_criador = models.ForeignKey(
         Usuario, on_delete=models.SET_NULL, null=True, blank=True,
         related_name="pedidos_criados", verbose_name="criado por",
@@ -162,6 +171,10 @@ class Pedido(models.Model):
             self.numero = f"PF{self.pk:06d}"
             super().save(update_fields=["numero"])
 
+    def tem_prova_financeira(self) -> bool:
+        """Prova explícita (provedor validado ou reconciliação autorizada)."""
+        return bool(self.financeiro_conciliado)
+
     def transicionar(self, novo_status: str, *, request=None, usuario=None) -> None:
         """Aplica uma transição operacional válida ou levanta ValidationError.
 
@@ -182,11 +195,14 @@ class Pedido(models.Model):
             )
         if (
             novo_status in self.EXIGE_FINANCEIRO_PAGO
-            and self.status_financeiro != self.StatusFinanceiro.PAGO
+            and (
+                self.status_financeiro != self.StatusFinanceiro.PAGO
+                or not self.tem_prova_financeira()
+            )
         ):
             raise ValidationError(
-                "O andamento só pode avançar com pagamento confirmado "
-                "(status_financeiro=pago)."
+                "O andamento só pode avançar com pagamento confirmado e "
+                "prova financeira conciliada."
             )
         status_anterior = self.status
         self.status = novo_status
@@ -294,6 +310,13 @@ class Pagamento(models.Model):
     init_point = models.CharField(
         "URL de checkout", max_length=500, blank=True,
         help_text="Reutilizada para idempotência enquanto a tentativa pendente.",
+    )
+    idempotency_key = models.CharField(
+        "chave de idempotência", max_length=64, blank=True, db_index=True
+    )
+    criacao_expira_em = models.DateTimeField(
+        "expiração da criação", null=True, blank=True,
+        help_text="Janela de recuperação de criação externa de preferência.",
     )
     id_externo = models.CharField(
         "ID externo do pagamento", max_length=60, blank=True, db_index=True

@@ -102,6 +102,8 @@ class PedidosInternosTests(TestCase):
             Pedido.StatusFinanceiro.PAGO,
             motivo="teste",
         )
+        pedido.financeiro_conciliado = True
+        pedido.save(update_fields=["financeiro_conciliado"])
         self.client.force_login(self.usuarios["gestor"])
         resposta = self.client.post(
             reverse("sales:pedido_atualizar_status", args=[pedido.pk]),
@@ -124,6 +126,8 @@ class PedidosInternosTests(TestCase):
             Pedido.StatusFinanceiro.PAGO,
             motivo="teste",
         )
+        pedido.financeiro_conciliado = True
+        pedido.save(update_fields=["financeiro_conciliado"])
         com_pagamento = self.client.get(
             reverse("sales:pedido_interno_detail", args=[pedido.pk])
         )
