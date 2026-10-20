@@ -5,7 +5,7 @@ import uuid
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db.models import Q
 from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect
@@ -15,6 +15,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.generic import DetailView, FormView, ListView, TemplateView, View
 
 from catalog.models import Produto
+from core.auditoria import registrar_auditoria
 from core.mixins import GRUPOS_INTERNOS, GrupoRequiredMixin
 
 from .cart import Carrinho
@@ -24,6 +25,20 @@ from .models import Pagamento, Pedido
 from .services import cancelar_pedido, criar_pedido_do_carrinho
 
 logger = logging.getLogger(__name__)
+
+# SEC-01: o endpoint operacional nunca pode gravar um estado financeiro.
+# Somente o retorno validado do provedor (services.aplicar_resultado_pagamento)
+# pode alterar o status financeiro do pedido.
+STATUS_FINANCEIROS = frozenset(
+    {
+        Pedido.Status.PAGO,
+        Pedido.Status.PAGAMENTO_PENDENTE,
+        Pedido.Status.FALHOU,
+    }
+)
+PERMIS_SO_TRANSICOES_OPERACIONAIS = frozenset(
+    set(Pedido.Status.values) - STATUS_FINANCEIROS
+)
 
 
 class CarrinhoView(TemplateView):
@@ -368,7 +383,10 @@ class PedidoInternoDetailView(LoginRequiredMixin, GrupoRequiredMixin, DetailView
 
     def get_context_data(self, **kwargs):
         contexto = super().get_context_data(**kwargs)
-        permitidos = sorted(Pedido.TRANSICOES_VALIDAS.get(self.object.status, set()))
+        permitidos = sorted(
+            Pedido.TRANSICOES_VALIDAS.get(self.object.status, set())
+            & PERMIS_SO_TRANSICOES_OPERACIONAIS
+        )
         contexto["proximos_status"] = [
             (valor, Pedido.Status(valor).label) for valor in permitidos
         ]
@@ -384,6 +402,21 @@ class PedidoAtualizarStatusView(LoginRequiredMixin, GrupoRequiredMixin, View):
             pk=pk,
         )
         novo_status = request.POST.get("status", "")
+        if novo_status in STATUS_FINANCEIROS:
+            registrar_auditoria(
+                acao="tentativa_bloqueada_transicao_financeira",
+                instancia=pedido,
+                request=request,
+                antes={"status": pedido.status},
+                depois={
+                    "status_solicitado": novo_status,
+                    "status_atual": pedido.status,
+                },
+            )
+            raise PermissionDenied(
+                "Transições financeiras só podem ser alteradas pelo provedor "
+                "de pagamento."
+            )
         if novo_status == Pedido.Status.CANCELADO:
             # cancelar_pedido faz a transição E libera reservas.
             cancelar_pedido(pedido)
