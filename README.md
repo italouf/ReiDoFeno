@@ -42,6 +42,7 @@ pip-audit -r requirements.txt
 | `SITE_URL` | recomendada | URL pública usada em e-mails/links |
 | `MERCADOPAGO_ACCESS_TOKEN` | sim (modo real) | Credencial do Mercado Pago |
 | `MERCADOPAGO_WEBHOOK_SECRET` | sim (modo real) | Segredo de assinatura do webhook |
+| `MERCADOPAGO_WEBHOOK_TOLERANCE_SECONDS` | não | Tolerância do timestamp (padrão 300) |
 | `MERCADO_PAGO_FAKE` | não | `True` apenas em desenvolvimento/testes |
 | `BLING_API_KEY` | sim (modo real) | Integração fiscal Bling |
 | `BLING_FAKE` | não | `True` apenas em desenvolvimento/testes |
@@ -51,7 +52,9 @@ pip-audit -r requirements.txt
 | `RECOMPRA_DIAS` | não | Janela de recompra (padrão 30) |
 | `FISCAL_ALERTA_HORAS_SEM_NFE` | não | Alerta fiscal (padrão 24) |
 | `RATELIMIT_LOGIN` | não | Limite de login (padrão `5/m`) |
-| `RATELIMIT_CHECKOUT` | não | Limite de checkout (padrão `10/h`) |
+| `RATELIMIT_CHECKOUT` | não | Limite de checkout por sessão (padrão `10/h`) |
+| `RATELIMIT_CHECKOUT_IP` | não | Limite de checkout por IP (padrão `30/h`) |
+| `RATELIMIT_PAGAMENTO` | não | Limite de início de pagamento (padrão `10/m`) |
 | `RATELIMIT_WEBHOOK` | não | Limite do webhook (padrão `60/m`) |
 
 ## Produção
@@ -60,6 +63,10 @@ pip-audit -r requirements.txt
   `sslmode=require`; não há fallback para SQLite (ADR-001).
 - O rate limiting usa `DatabaseCache` em produção. Execute
   `python manage.py createcachetable` no deploy.
+- Produção rejeita `MERCADO_PAGO_FAKE=True` e `BLING_FAKE=True`; o simulador
+  só existe em desenvolvimento/testes.
+- O webhook exige `MERCADOPAGO_WEBHOOK_SECRET` no modo real e aceita o
+  formato oficial `ts=...,v1=...`.
 - Se houver proxy reverso, configure-o para preservar o IP real em
   `REMOTE_ADDR`. Não aceite `X-Forwarded-For` de origem não controlada
   (SEC-03); ajuste o proxy, não o código, para que login/webhook tenham

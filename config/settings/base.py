@@ -124,6 +124,8 @@ AXES_VERBOSE = 0
 # Rate limiting dos endpoints críticos (SEC-04).
 RATELIMIT_LOGIN = os.environ.get("RATELIMIT_LOGIN", "5/m")
 RATELIMIT_CHECKOUT = os.environ.get("RATELIMIT_CHECKOUT", "10/h")
+RATELIMIT_CHECKOUT_IP = os.environ.get("RATELIMIT_CHECKOUT_IP", "30/h")
+RATELIMIT_PAGAMENTO = os.environ.get("RATELIMIT_PAGAMENTO", "10/m")
 RATELIMIT_WEBHOOK = os.environ.get("RATELIMIT_WEBHOOK", "60/m")
 
 LOGIN_URL = "/accounts/login/"
@@ -162,6 +164,9 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # --------------------------------------------------------------------------- #
 MERCADO_PAGO_ACCESS_TOKEN = os.environ.get("MERCADOPAGO_ACCESS_TOKEN", "")
 MERCADO_PAGO_WEBHOOK_SECRET = os.environ.get("MERCADOPAGO_WEBHOOK_SECRET", "")
+MERCADO_PAGO_WEBHOOK_TOLERANCE_SECONDS = int(
+    os.environ.get("MERCADOPAGO_WEBHOOK_TOLERANCE_SECONDS", "300")
+)
 MERCADO_PAGO_FAKE = (
     os.environ.get("MERCADO_PAGO_FAKE", "True").lower() == "true"
 )

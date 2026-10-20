@@ -145,6 +145,22 @@ class VinculoClienteTests(TestCase):
         cliente.refresh_from_db()
         self.assertIsNone(cliente.usuario)
 
+    def test_falha_na_auditoria_reverte_vinculo(self):
+        cliente = self._criar_cliente()
+        self.client.force_login(self.usuario)
+        self._solicitar()
+        link = self._link_do_email()
+
+        with mock.patch(
+            "customers.services.registrar_auditoria",
+            side_effect=RuntimeError("auditoria indisponível"),
+        ):
+            with self.assertRaises(RuntimeError):
+                self.client.get(link)
+
+        cliente.refresh_from_db()
+        self.assertIsNone(cliente.usuario)
+
     def test_anonimo_e_redirecionado_para_login(self):
         resposta = self.client.get(reverse("accounts:vincular_cliente"))
         self.assertEqual(resposta.status_code, 302)

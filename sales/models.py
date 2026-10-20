@@ -41,14 +41,14 @@ class Pedido(models.Model):
         Status.RASCUNHO: {Status.AGUARDANDO_PAGAMENTO, Status.CANCELADO},
         # Em separação exige status_financeiro=PAGO (validado em transicionar).
         Status.AGUARDANDO_PAGAMENTO: {Status.EM_SEPARACAO, Status.CANCELADO},
-        Status.PAGAMENTO_PENDENTE: {Status.CANCELADO},
+        Status.PAGAMENTO_PENDENTE: {Status.EM_SEPARACAO, Status.CANCELADO},
         Status.PAGO: {Status.EM_SEPARACAO, Status.CANCELADO},
         Status.EM_SEPARACAO: {Status.PRONTO_PARA_ENTREGA},
         Status.PRONTO_PARA_ENTREGA: {Status.ENVIADO, Status.CONCLUIDO},
         Status.ENVIADO: {Status.CONCLUIDO},
         Status.CONCLUIDO: set(),
         Status.CANCELADO: set(),
-        Status.FALHOU: {Status.AGUARDANDO_PAGAMENTO, Status.CANCELADO},
+        Status.FALHOU: {Status.CANCELADO},
     }
 
     class Modalidade(models.TextChoices):

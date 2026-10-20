@@ -17,13 +17,28 @@ Todas as mudanças relevantes deste projeto são registradas aqui.
   alteração e o `LogAuditoria` na mesma transação. Transições de pedido,
   pagamentos, movimentos de estoque e notas fiscais foram cobertos. O IP é
   capturado de `REMOTE_ADDR`; `X-Forwarded-For` não é aceito diretamente.
-- **Rate limiting:** login (`5/m` por IP), checkout (`10/h` por sessão) e
-  webhook (`60/m` por IP) retornam HTTP 429 com `Retry-After`.
+- **Rate limiting:** login (`5/m` por IP), checkout (`10/h` por sessão e
+  `30/h` por IP), início de pagamento (`10/m` por IP) e webhook (`60/m` por
+  IP) retornam HTTP 429 com `Retry-After`.
   `django-ratelimit==4.1.0` adicionado. Em produção o cache é compartilhado
   via `DatabaseCache`.
+- **PAY-01:** webhook aceita o formato oficial `ts=...,v1=...` (e o legado
+  com `;`), exige `MERCADOPAGO_WEBHOOK_SECRET` no modo real, valida
+  `x-request-id`, `data_id` canônico e timestamp dentro de
+  `MERCADOPAGO_WEBHOOK_TOLERANCE_SECONDS` (padrão 300s).
 - `AXES_FAILURE_LIMIT` ajustado para 6 para que o limite efetivo de 5
   tentativas/minuto seja aplicado pelo rate limiting, mantendo o bloqueio
   temporário do django-axes.
+- Produção rejeita `MERCADO_PAGO_FAKE=True` e `BLING_FAKE=True`.
+- Serviços de pagamento/cancelamento re-leem o pedido com
+  `select_for_update()`; a expiração nunca cancela pedido pago concorrente.
+- Eventos oficiais `rejected` e `refunded` são mapeados; eventos fora de
+  ordem não rebaixam `Pagamento` aprovado. `in_mediation` e status
+  desconhecidos são auditados.
+- Migration prioriza estados cumpridos sobre pagamentos recusados antigos.
+- Checkout ganhou limite secundário por IP (`30/h`); início de pagamento é
+  limitado (`10/m`) e auditado.
+- CRUD de `Unidade` passou a ser auditado atomicamente.
 
 ### Banco de dados e infraestrutura
 

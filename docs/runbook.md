@@ -45,11 +45,13 @@ Migrations destrutivas exigem compatibilidade reversa (estratégia expand/contra
 | DATABASE_URL | PostgreSQL (local na VPS ou gerenciado), TLS obrigatório |
 | DJANGO_ALLOWED_HOSTS / CSRF_TRUSTED_ORIGINS / SITE_URL | Domínios |
 | MERCADOPAGO_ACCESS_TOKEN / MERCADOPAGO_WEBHOOK_SECRET | Pagamento |
+| MERCADOPAGO_WEBHOOK_TOLERANCE_SECONDS | Tolerância do timestamp (padrão 300) |
 | BLING_API_KEY | NF-e |
 | SENTRY_DSN | Erros |
 | EMAIL_* / DEFAULT_FROM_EMAIL | SMTP transacional |
 | PEDIDO_TIMEOUT_MINUTOS / RECOMPRA_DIAS / FISCAL_ALERTA_HORAS_SEM_NFE | Regras operacionais |
 | RATELIMIT_LOGIN / RATELIMIT_CHECKOUT / RATELIMIT_WEBHOOK | Limites (padrão: 5/m, 10/h, 60/m) |
+| RATELIMIT_CHECKOUT_IP / RATELIMIT_PAGAMENTO | Limites por IP (padrão: 30/h, 10/m) |
 
 ## 4. Backups e restore
 

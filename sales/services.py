@@ -22,6 +22,11 @@ logger = logging.getLogger(__name__)
 GRUPOS_INTERNOS = ("Administrador", "Gestor", "Vendedor")
 
 
+def _pedido_bloqueado(pedido: Pedido) -> Pedido:
+    """Re-lê o pedido sob row lock para evitar decisões com instância stale."""
+    return Pedido.objects.select_for_update().get(pk=pedido.pk)
+
+
 def saldo_disponivel(produto, unidade) -> Decimal:
     """Saldo livre (descontada reserva) do produto na unidade."""
     agregado = Estoque.objects.filter(produto=produto, unidade=unidade).aggregate(
@@ -163,15 +168,16 @@ def marcar_pagamento_aprovado(
 
     ADR-002: não altera ``Pedido.status`` (andamento operacional).
     """
+    pedido = _pedido_bloqueado(pedido)
     if pedido.status_financeiro == Pedido.StatusFinanceiro.PAGO:
         logger.info("Pedido %s já estava pago; evento ignorado.", pedido.numero)
-        return
+        return pedido
 
     if pedido.status == Pedido.Status.CANCELADO:
         _registrar_pagamento_apos_cancelamento(
             pedido, id_externo=id_externo, request=request
         )
-        return
+        return pedido
 
     if pedido.status_financeiro in (
         Pedido.StatusFinanceiro.CANCELADO,
@@ -196,7 +202,7 @@ def marcar_pagamento_aprovado(
             },
         )
         _atualizar_pagamento_aprovado(pedido, id_externo=id_externo)
-        return
+        return pedido
 
     if pedido.status in (
         Pedido.Status.RASCUNHO,
@@ -225,7 +231,7 @@ def marcar_pagamento_aprovado(
             },
         )
         _atualizar_pagamento_aprovado(pedido, id_externo=id_externo)
-        return
+        return pedido
 
     pedido.definir_status_financeiro(
         Pedido.StatusFinanceiro.PAGO,
@@ -259,6 +265,7 @@ def marcar_pagamento_aprovado(
             ),
         },
     )
+    return pedido
 
 
 def _atualizar_pagamento_aprovado(pedido: Pedido, *, id_externo: str) -> None:
@@ -299,19 +306,32 @@ def _registrar_pagamento_apos_cancelamento(
 
 
 @transaction.atomic
-def cancelar_pedido(pedido: Pedido, *, request=None, usuario=None) -> None:
+def cancelar_pedido(
+    pedido: Pedido, *, request=None, usuario=None, permitir_pago: bool = True
+) -> Pedido:
     """Cancela liberando reservas quando aplicável (idempotente).
 
+    Re-lê o pedido sob lock; ``permitir_pago=False`` é usado pela expiração
+    para nunca cancelar um pedido que foi pago concorrentemente.
     Pedido com financeiro PAGO permanece com esse status: o cancelamento
     operacional não presume estorno. O caso é auditado para conciliação.
     """
+    pedido = _pedido_bloqueado(pedido)
+    if not permitir_pago and pedido.status_financeiro == (
+        Pedido.StatusFinanceiro.PAGO
+    ):
+        logger.info(
+            "Pedido %s está pago; expiração/cancelamento automático ignorado.",
+            pedido.numero,
+        )
+        return pedido
     if pedido.status in (Pedido.Status.CANCELADO, Pedido.Status.CONCLUIDO):
         logger.info(
             "Pedido %s não pode ser cancelado a partir de %s.",
             pedido.numero,
             pedido.status,
         )
-        return
+        return pedido
 
     status_anterior = pedido.status
     financeiro_anterior = pedido.status_financeiro
@@ -324,6 +344,19 @@ def cancelar_pedido(pedido: Pedido, *, request=None, usuario=None) -> None:
             usuario=usuario,
             motivo="pedido cancelado antes do pagamento",
         )
+        pagamento = getattr(pedido, "pagamento", None)
+        if pagamento and pagamento.status == Pagamento.Status.PENDENTE:
+            pagamento.status = Pagamento.Status.CANCELADO
+            pagamento.save(update_fields=["status"])
+            from core.auditoria import registrar_auditoria
+
+            registrar_auditoria(
+                acao="pedido.pagamento_cancelado",
+                instancia=pedido,
+                request=request,
+                usuario=usuario,
+                depois={"pagamento_id": pagamento.pk, "status": pagamento.status},
+            )
     elif financeiro_anterior == Pedido.StatusFinanceiro.PAGO:
         from core.auditoria import registrar_auditoria
 
@@ -357,13 +390,16 @@ def cancelar_pedido(pedido: Pedido, *, request=None, usuario=None) -> None:
     from .emails import email_pedido_cancelado
 
     email_pedido_cancelado(pedido)
+    return pedido
 
 
 STATUS_PROVEDOR_PARA_PAGAMENTO = {
     "approved": Pagamento.Status.APROVADO,
     "refused": Pagamento.Status.RECUSADO,
+    "rejected": Pagamento.Status.RECUSADO,
     "cancelled": Pagamento.Status.CANCELADO,
     "charged_back": Pagamento.Status.CANCELADO,
+    "refunded": Pagamento.Status.CANCELADO,
     "pending": Pagamento.Status.PENDENTE,
     "in_process": Pagamento.Status.PENDENTE,
 }
@@ -375,6 +411,11 @@ def _atualizar_pagamento_resultado(
     pagamento = getattr(pedido, "pagamento", None)
     novo_status = STATUS_PROVEDOR_PARA_PAGAMENTO.get(status_provedor)
     if pagamento is None or novo_status is None:
+        return
+    if (
+        pagamento.status == Pagamento.Status.APROVADO
+        and status_provedor not in ("charged_back", "refunded")
+    ):
         return
     pagamento.status = novo_status
     pagamento.id_externo = id_externo or pagamento.id_externo
@@ -421,7 +462,7 @@ def aplicar_resultado_pagamento(dados_consulta: dict, *, request=None) -> Pedido
         ja_estava_pago = (
             pedido.status_financeiro == Pedido.StatusFinanceiro.PAGO
         )
-        marcar_pagamento_aprovado(
+        pedido = marcar_pagamento_aprovado(
             pedido, id_externo=id_externo, request=request
         )
         if (
@@ -437,7 +478,7 @@ def aplicar_resultado_pagamento(dados_consulta: dict, *, request=None) -> Pedido
         pedido, status_provedor=status_provedor, id_externo=id_externo
     )
 
-    if status_provedor == "charged_back":
+    if status_provedor in ("charged_back", "refunded"):
         if pedido.status_financeiro != Pedido.StatusFinanceiro.PAGO:
             logger.warning(
                 "Chargeback sem pagamento aprovado no pedido %s.",
@@ -485,7 +526,7 @@ def aplicar_resultado_pagamento(dados_consulta: dict, *, request=None) -> Pedido
         )
         return pedido
 
-    if status_provedor in ("refused", "cancelled"):
+    if status_provedor in ("refused", "rejected", "cancelled"):
         if pedido.status_financeiro == Pedido.StatusFinanceiro.PAGO:
             logger.warning(
                 "Evento %s ignorado: pedido %s já está pago.",
@@ -520,12 +561,12 @@ def aplicar_resultado_pagamento(dados_consulta: dict, *, request=None) -> Pedido
                 request=request,
             )
             return pedido
-        cancelar_pedido(pedido, request=request)
+        pedido = cancelar_pedido(pedido, request=request)
         _registrar_resultado_financeiro(
             pedido,
             acao=(
                 "pedido.pagamento_recusado"
-                if status_provedor == "refused"
+                if status_provedor in ("refused", "rejected")
                 else "pedido.pagamento_cancelado"
             ),
             status_provedor=status_provedor,
@@ -570,4 +611,23 @@ def aplicar_resultado_pagamento(dados_consulta: dict, *, request=None) -> Pedido
             id_externo=id_externo,
             request=request,
         )
+        return pedido
+
+    if status_provedor == "in_mediation":
+        _registrar_resultado_financeiro(
+            pedido,
+            acao="pedido.pagamento_em_mediacao",
+            status_provedor=status_provedor,
+            id_externo=id_externo,
+            request=request,
+        )
+        return pedido
+
+    _registrar_resultado_financeiro(
+        pedido,
+        acao="pedido.pagamento_status_desconhecido",
+        status_provedor=status_provedor,
+        id_externo=id_externo,
+        request=request,
+    )
     return pedido

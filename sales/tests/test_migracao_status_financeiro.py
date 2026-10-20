@@ -61,3 +61,21 @@ class MigracaoStatusFinanceiroTests(TestCase):
         self.assertEqual(
             aguardando.status_financeiro, Pedido.StatusFinanceiro.PENDENTE
         )
+
+    def test_estado_cumprido_com_pagamento_recusado_permanece_pago(self):
+        concluido = PedidoFactory(status=Pedido.Status.CONCLUIDO)
+        Pagamento.objects.create(
+            pedido=concluido,
+            valor=concluido.total,
+            status=Pagamento.Status.RECUSADO,
+        )
+        Pedido.objects.filter(pk=concluido.pk).update(
+            status_financeiro=Pedido.StatusFinanceiro.PENDENTE
+        )
+
+        migracao.preencher_status_financeiro(apps, None)
+
+        concluido.refresh_from_db()
+        self.assertEqual(
+            concluido.status_financeiro, Pedido.StatusFinanceiro.PAGO
+        )

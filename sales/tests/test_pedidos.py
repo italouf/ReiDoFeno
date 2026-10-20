@@ -48,10 +48,10 @@ class MaquinaStatusTests(TestCase):
                 with self.assertRaises(ValidationError):
                     pedido.transicionar(Pedido.Status.CONCLUIDO)
 
-    def test_falhou_permite_reiniciar_pagamento(self):
+    def test_falhou_legado_exige_reconciliacao(self):
         pedido = PedidoFactory(status=Pedido.Status.FALHOU)
-        pedido.transicionar(Pedido.Status.AGUARDANDO_PAGAMENTO)
-        self.assertEqual(pedido.status, Pedido.Status.AGUARDANDO_PAGAMENTO)
+        with self.assertRaises(ValidationError):
+            pedido.transicionar(Pedido.Status.AGUARDANDO_PAGAMENTO)
 
 
 class PedidoModelTests(TestCase):

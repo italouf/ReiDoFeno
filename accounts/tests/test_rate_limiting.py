@@ -62,6 +62,17 @@ class CheckoutRateLimitTests(TestCase):
         outra_sessao = Client()
         self.assertEqual(outra_sessao.post(self.url, {}).status_code, 200)
 
+    def test_limite_por_ip_entre_sessoes(self):
+        from django.test import Client
+
+        for _ in range(3):
+            sessao = Client()
+            for _ in range(10):
+                self.assertEqual(sessao.post(self.url, {}).status_code, 200)
+
+        nova_sessao = Client()
+        self.assertEqual(nova_sessao.post(self.url, {}).status_code, 429)
+
 
 class WebhookRateLimitTests(TestCase):
     def setUp(self):

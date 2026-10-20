@@ -8,18 +8,19 @@ def preencher_status_financeiro(apps, schema_editor):
     Pedido = apps.get_model("sales", "Pedido")
     Pagamento = apps.get_model("sales", "Pagamento")
 
+    cumpridos = (
+        "pago",
+        "em_separacao",
+        "pronto_para_entrega",
+        "enviado",
+        "concluido",
+    )
     pagos_ids = Pagamento.objects.filter(
         status="aprovado"
     ).values_list("pedido_id", flat=True)
-    Pedido.objects.filter(
-        status__in=(
-            "pago",
-            "em_separacao",
-            "pronto_para_entrega",
-            "enviado",
-            "concluido",
-        )
-    ).update(status_financeiro="pago")
+    Pedido.objects.filter(status__in=cumpridos).update(
+        status_financeiro="pago"
+    )
     Pedido.objects.filter(pk__in=pagos_ids).update(status_financeiro="pago")
 
     cancelados_ids = Pagamento.objects.filter(
@@ -30,7 +31,7 @@ def preencher_status_financeiro(apps, schema_editor):
     ).exclude(pk__in=pagos_ids).update(status_financeiro="cancelado")
     Pedido.objects.filter(pk__in=cancelados_ids).exclude(
         pk__in=pagos_ids
-    ).update(status_financeiro="cancelado")
+    ).exclude(status__in=cumpridos).update(status_financeiro="cancelado")
 
 
 class Migration(migrations.Migration):

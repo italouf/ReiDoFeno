@@ -63,7 +63,7 @@
     </table>
   </div>
 
-  {% if pedido.status_financeiro == 'pendente' and pedido.status == 'aguardando_pagamento' %}
+  {% if pedido.status_financeiro == 'pendente' and pedido.status in 'aguardando_pagamento pagamento_pendente' %}
   <p style="margin-top:var(--e5);">
     <a class="btn" href="{% url 'sales:pagamento_iniciar' pedido.token_acesso %}" style="min-height:48px;">Ir para o pagamento</a>
   </p>

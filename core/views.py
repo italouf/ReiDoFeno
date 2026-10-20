@@ -17,6 +17,7 @@ from core.mixins import GRUPOS_INTERNOS, GrupoRequiredMixin
 from costs.models import Despesa
 from stock.models import Estoque, MovimentoEstoque
 
+from .auditoria import AuditoriaFormValidMixin
 from .forms import UnidadeForm
 from .models import Unidade
 
@@ -78,7 +79,10 @@ class UnidadeListView(CadastroBaseView, ListView):
     context_object_name = "unidades"
 
 
-class UnidadeCreateView(CadastroBaseView, CreateView):
+class UnidadeCreateView(
+    CadastroBaseView, AuditoriaFormValidMixin, CreateView
+):
+    acao_prefixo = "unidade"
     model = Unidade
     form_class = UnidadeForm
     template_name = "core/unidade_form.html"
@@ -89,7 +93,10 @@ class UnidadeCreateView(CadastroBaseView, CreateView):
         return super().form_valid(form)
 
 
-class UnidadeUpdateView(CadastroBaseView, UpdateView):
+class UnidadeUpdateView(
+    CadastroBaseView, AuditoriaFormValidMixin, UpdateView
+):
+    acao_prefixo = "unidade"
     model = Unidade
     form_class = UnidadeForm
     template_name = "core/unidade_form.html"

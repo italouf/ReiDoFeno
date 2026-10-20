@@ -33,7 +33,7 @@ class Command(BaseCommand):
 
         total = 0
         for pedido in expiraveis.iterator():
-            cancelar_pedido(pedido)
+            cancelar_pedido(pedido, permitir_pago=False)
             total += 1
             self.stdout.write(f"Pedido {pedido.numero} expirado e cancelado.")
 

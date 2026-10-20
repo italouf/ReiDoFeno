@@ -94,3 +94,13 @@ MERCADO_PAGO_FAKE = (
     os.environ.get("MERCADO_PAGO_FAKE", "False").lower() == "true"
 )
 BLING_FAKE = os.environ.get("BLING_FAKE", "False").lower() == "true"
+
+if MERCADO_PAGO_FAKE:
+    raise ImproperlyConfigured(
+        "MERCADO_PAGO_FAKE=True não é permitido em produção; "
+        "o simulador aprova pagamentos sem provedor."
+    )
+if BLING_FAKE:
+    raise ImproperlyConfigured(
+        "BLING_FAKE=True não é permitido em produção."
+    )

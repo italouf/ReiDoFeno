@@ -36,22 +36,29 @@ um pedido efetivamente separado.
 5. Resultados do provedor:
    - `approved` → financeiro `pago`;
    - `pending`/`in_process` → financeiro `pendente`, sem mudar o andamento;
-   - `refused`/`cancelled` → financeiro `cancelado` e andamento `cancelado`,
-     liberando a reserva;
-   - `charged_back` → financeiro `estornado`; se o andamento já estiver em
-     separação/expedição, o cancelamento operacional é registrado como
-     pendente (`pedido.estorno_com_andamento`) para revisão manual.
-6. Eventos financeiros fora de ordem não rebaixam um pedido já pago. Uma
-   aprovação tardia de pedido cancelado é registrada em
-   `LogAuditoria` (`pedido.pagamento_apos_cancelamento`) e exige
-   conciliação manual; o pedido não é reaberto. Eventos `pending`,
-   `refused` ou `cancelled` posteriores a um pagamento aprovado são
-   ignorados e auditados (`pedido.pagamento_evento_ignorado`).
-7. A aprovação de um pedido em `rascunho`, com financeiro
+   - `refused`/`rejected`/`cancelled` → financeiro `cancelado` e andamento
+     `cancelado`, liberando a reserva;
+   - `charged_back`/`refunded` → financeiro `estornado`; se o andamento já
+     estiver em separação/expedição, o cancelamento operacional é registrado
+     como pendente (`pedido.estorno_com_andamento`) para revisão manual.
+6. Serviços de pagamento/cancelamento re-leem o pedido com
+   `select_for_update()` antes de decidir; a expiração usa
+   `permitir_pago=False` para nunca cancelar um pedido pago concorrentemente.
+7. Eventos financeiros fora de ordem não rebaixam um pedido já pago nem o
+   `Pagamento` aprovado. Uma aprovação tardia de pedido cancelado é
+   registrada em `LogAuditoria` (`pedido.pagamento_apos_cancelamento`) e
+   exige conciliação manual; o pedido não é reaberto. Eventos `pending`,
+   `refused`, `rejected` ou `cancelled` posteriores a um pagamento aprovado
+   são ignorados e auditados (`pedido.pagamento_evento_ignorado`).
+8. Status oficiais `rejected` e `refunded` são mapeados; `refunded` e
+   `charged_back` marcam `estornado`; status desconhecidos são auditados
+   (`pedido.pagamento_status_desconhecido`) e `in_mediation` gera
+   `pedido.pagamento_em_mediacao`.
+9. A aprovação de um pedido em `rascunho`, com financeiro
    `cancelado`/`estornado` ou já em andamento pós-pagamento sem financeiro
    `pago` não altera o pedido; gera
    `pedido.pagamento_inconsistente` para conciliação.
-8. A migration `0002_pedido_status_financeiro` popula o novo campo usando
+10. A migration `0002_pedido_status_financeiro` popula o novo campo usando
    `Pedido.status` e `Pagamento.status`:
    - estados operacionais de pedido pago → `pago`;
    - pagamento aprovado → `pago`;

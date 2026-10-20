@@ -12,7 +12,7 @@ from core.models import LogAuditoria
 from sales.factories import PedidoFactory
 from sales.models import Pagamento, Pedido
 from sales.services import marcar_pagamento_aprovado
-from stock.models import Estoque
+from stock.models import Estoque, MovimentoEstoque
 
 from .helpers import fluxo_checkout
 
@@ -84,23 +84,47 @@ class AuditoriaPagamentoTests(TestCase):
 
     def test_falha_na_auditoria_reverte_pagamento_e_estoque(self):
         pedido = fluxo_checkout(self.client, quantidade=2)
+        pagamento = Pagamento.objects.create(
+            pedido=pedido, valor=pedido.total
+        )
         item = pedido.itens.first()
         estoque = Estoque.objects.get(
             produto=item.produto, unidade=pedido.unidade
         )
-        saldo_antes = estoque.quantidade
-        reservado_antes = estoque.quantidade_bloqueada
+
+        from core import auditoria as modulo_auditoria
+
+        registrar_real = modulo_auditoria.registrar_auditoria
+
+        def falhar_apenas_na_aprovacao(*args, **kwargs):
+            if kwargs.get("acao") == "pedido.pagamento_aprovado":
+                raise RuntimeError("auditoria indisponível")
+            return registrar_real(*args, **kwargs)
 
         with mock.patch(
-            "core.auditoria.LogAuditoria.objects.create",
-            side_effect=RuntimeError("auditoria indisponível"),
+            "core.auditoria.registrar_auditoria",
+            side_effect=falhar_apenas_na_aprovacao,
         ):
             with self.assertRaises(RuntimeError):
                 marcar_pagamento_aprovado(pedido, id_externo="pay-sec03")
 
         pedido.refresh_from_db()
+        pagamento.refresh_from_db()
         estoque.refresh_from_db()
+        self.assertEqual(
+            pedido.status_financeiro, Pedido.StatusFinanceiro.PENDENTE
+        )
         self.assertEqual(pedido.status, Pedido.Status.AGUARDANDO_PAGAMENTO)
-        self.assertEqual(estoque.quantidade, saldo_antes)
-        self.assertEqual(estoque.quantidade_bloqueada, reservado_antes)
-        self.assertFalse(Pagamento.objects.filter(pedido=pedido).exists())
+        self.assertEqual(pagamento.status, Pagamento.Status.PENDENTE)
+        self.assertEqual(estoque.quantidade, 100)
+        self.assertEqual(estoque.quantidade_bloqueada, 2)
+        self.assertFalse(
+            MovimentoEstoque.objects.filter(
+                produto=item.produto, unidade=pedido.unidade
+            ).exists()
+        )
+        self.assertFalse(
+            LogAuditoria.objects.filter(
+                objeto_id=str(pedido.pk)
+            ).exists()
+        )

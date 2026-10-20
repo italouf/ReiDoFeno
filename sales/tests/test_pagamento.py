@@ -1,12 +1,15 @@
 import hashlib
 import hmac
 import json
+import time
 from decimal import Decimal
+from unittest import mock
 
 from django.core import mail
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
+from core.models import LogAuditoria
 from stock.models import Estoque
 
 from ..factories import PedidoFactory
@@ -51,6 +54,49 @@ class FluxoPagamentoTests(TestCase):
             resposta,
             reverse("sales:pedido_token", args=[pedido.token_acesso]),
             fetch_redirect_response=False,
+        )
+        self.assertFalse(Pagamento.objects.filter(pedido=pedido).exists())
+
+    def test_iniciar_pagamento_audita_preferencia(self):
+        pedido = fluxo_checkout(self.client, quantidade=1)
+
+        self._iniciar(pedido)
+
+        self.assertTrue(
+            LogAuditoria.objects.filter(
+                acao="pedido.pagamento_preferencia_criada",
+                objeto_id=str(pedido.pk),
+            ).exists()
+        )
+
+    def test_aprovacao_durante_criacao_de_preferencia_nao_cria_pendente(self):
+        pedido = fluxo_checkout(self.client, quantidade=1)
+
+        def criar_preferencia_e_aprovar(pedido_arg):
+            marcar_pagamento_aprovado(pedido_arg, id_externo="race-pay")
+            return "pref-race", reverse(
+                "sales:simular_pagamento", args=[pedido_arg.token_acesso]
+            )
+
+        from sales.payments import MercadoPagoFake
+
+        with mock.patch.object(
+            MercadoPagoFake,
+            "criar_preferencia",
+            side_effect=criar_preferencia_e_aprovar,
+        ):
+            resposta = self.client.get(
+                reverse("sales:pagamento_iniciar", args=[pedido.token_acesso])
+            )
+
+        self.assertRedirects(
+            resposta,
+            reverse("sales:pedido_token", args=[pedido.token_acesso]),
+            fetch_redirect_response=False,
+        )
+        pedido.refresh_from_db()
+        self.assertEqual(
+            pedido.status_financeiro, Pedido.StatusFinanceiro.PAGO
         )
         self.assertFalse(Pagamento.objects.filter(pedido=pedido).exists())
 
@@ -132,6 +178,19 @@ class FluxoPagamentoTests(TestCase):
         self.assertEqual(saldo, saldo_antes)      # nada baixado
         self.assertEqual(bloqueada, Decimal("0"))  # reserva devolvida
 
+    def test_cancelamento_marca_pagamento_pendente_cancelado(self):
+        from ..services import cancelar_pedido
+
+        pedido = fluxo_checkout(self.client, quantidade=1)
+        pagamento = Pagamento.objects.create(
+            pedido=pedido, valor=pedido.total
+        )
+
+        cancelar_pedido(pedido)
+
+        pagamento.refresh_from_db()
+        self.assertEqual(pagamento.status, Pagamento.Status.CANCELADO)
+
     def test_cancelamento_e_idempotente(self):
         from ..services import cancelar_pedido
 
@@ -144,7 +203,8 @@ class FluxoPagamentoTests(TestCase):
 
 class WebhookTests(TestCase):
     def _post_webhook(self, payload: dict, *, assinatura: str | None = None,
-                      request_id: str = "req-1", ts: str = "1700000000"):
+                      request_id: str = "req-1", ts: str | None = None):
+        ts = ts or str(int(time.time()))
         headers = {}
         if assinatura is not None:
             headers["HTTP_X_SIGNATURE"] = f"ts={ts};v1={assinatura}"
@@ -157,7 +217,8 @@ class WebhookTests(TestCase):
         )
 
     @staticmethod
-    def _v1(data_id: str, segredo: str, request_id="req-1", ts="1700000000"):
+    def _v1(data_id: str, segredo: str, request_id="req-1", ts=None):
+        ts = ts or str(int(time.time()))
         manifest = f"id:{data_id};request-id:{request_id};ts:{ts};"
         return hmac.new(segredo.encode(), manifest.encode(), hashlib.sha256).hexdigest()
 
@@ -209,11 +270,15 @@ class WebhookTests(TestCase):
         pedido = fluxo_checkout(self.client, quantidade=2)
         data_id = id_fake_aprovado(pedido)
         payload = {"data": {"id": data_id}}
+        ts = str(int(time.time()))
 
         resposta = self._post_webhook(
             payload,
-            assinatura=self._v1(data_id, "segredo-teste", request_id="req-9"),
+            assinatura=self._v1(
+                data_id, "segredo-teste", request_id="req-9", ts=ts
+            ),
             request_id="req-9",
+            ts=ts,
         )
         self.assertEqual(resposta.status_code, 200)
         pedido.refresh_from_db()

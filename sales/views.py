@@ -6,6 +6,7 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.db import transaction
 from django.db.models import Q
 from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect
@@ -29,10 +30,19 @@ logger = logging.getLogger(__name__)
 
 # SEC-01: o endpoint operacional nunca pode gravar um estado financeiro.
 # Somente o retorno validado do provedor (services.aplicar_resultado_pagamento)
-# pode alterar o status financeiro do pedido.
-STATUS_FINANCEIROS = Pedido.STATUS_FINANCEIROS_LEGADOS
+# pode alterar o status financeiro do pedido. `cancelado` é permitido porque
+# também é uma ação operacional legítima.
+STATUS_FINANCEIROS = frozenset(
+    {
+        Pedido.Status.PAGO,
+        Pedido.Status.PAGAMENTO_PENDENTE,
+        Pedido.Status.FALHOU,
+        Pedido.StatusFinanceiro.PENDENTE,
+        Pedido.StatusFinanceiro.ESTORNADO,
+    }
+)
 PERMIS_SO_TRANSICOES_OPERACIONAIS = frozenset(
-    set(Pedido.Status.values) - STATUS_FINANCEIROS
+    set(Pedido.Status.values) - Pedido.STATUS_FINANCEIROS_LEGADOS
 )
 
 
@@ -116,6 +126,14 @@ class RemoverItemCarrinhoView(View):
 
 @method_decorator(
     limitar_com_429(
+        key="ip",
+        rate=settings.RATELIMIT_CHECKOUT_IP,
+        retry_after=3600,
+    ),
+    name="dispatch",
+)
+@method_decorator(
+    limitar_com_429(
         key=chave_sessao,
         rate=settings.RATELIMIT_CHECKOUT,
         retry_after=3600,
@@ -190,18 +208,29 @@ def _pedido_por_token(token) -> Pedido:
     return get_object_or_404(Pedido, token_acesso=pedido_uuid)
 
 
+@method_decorator(
+    limitar_com_429(
+        key="ip",
+        rate=settings.RATELIMIT_PAGAMENTO,
+        retry_after=60,
+    ),
+    name="dispatch",
+)
 class PagamentoIniciarView(View):
     """Cria a preferência no provedor e redireciona ao Checkout Pro."""
 
+    @staticmethod
+    def _pode_iniciar(pedido: Pedido) -> bool:
+        return pedido.status_financeiro == (
+            Pedido.StatusFinanceiro.PENDENTE
+        ) and pedido.status in (
+            Pedido.Status.AGUARDANDO_PAGAMENTO,
+            Pedido.Status.PAGAMENTO_PENDENTE,
+        )
+
     def get(self, request, token):
         pedido = _pedido_por_token(token)
-        if pedido.status_financeiro != Pedido.StatusFinanceiro.PENDENTE or (
-            pedido.status
-            not in (
-                Pedido.Status.AGUARDANDO_PAGAMENTO,
-                Pedido.Status.PAGAMENTO_PENDENTE,
-            )
-        ):
+        if not self._pode_iniciar(pedido):
             messages.info(request, "Este pedido não está aguardando pagamento.")
             return redirect("sales:pedido_token", pedido.token_acesso)
 
@@ -210,14 +239,61 @@ class PagamentoIniciarView(View):
         client = obter_client()
         preferencia_id, init_point = client.criar_preferencia(pedido)
 
-        pagamento, _criado = Pagamento.objects.update_or_create(
-            pedido=pedido,
-            defaults={
-                "preferencia_id": preferencia_id,
-                "valor": pedido.total,
-                "status": Pagamento.Status.PENDENTE,
-            },
-        )
+        with transaction.atomic():
+            pedido = Pedido.objects.select_for_update().get(pk=pedido.pk)
+            if not self._pode_iniciar(pedido):
+                messages.info(
+                    request,
+                    "O pedido foi atualizado durante a criação do pagamento.",
+                )
+                return redirect("sales:pedido_token", pedido.token_acesso)
+
+            pagamento = (
+                Pagamento.objects.select_for_update()
+                .filter(pedido=pedido)
+                .first()
+            )
+            if pagamento is None:
+                pagamento = Pagamento.objects.create(
+                    pedido=pedido,
+                    preferencia_id=preferencia_id,
+                    valor=pedido.total,
+                    status=Pagamento.Status.PENDENTE,
+                )
+            elif pagamento.status == Pagamento.Status.APROVADO:
+                registrar_auditoria(
+                    acao="pedido.pagamento_preferencia_ignorada",
+                    instancia=pedido,
+                    request=request,
+                    depois={
+                        "preferencia_id": preferencia_id,
+                        "pagamento_id": pagamento.pk,
+                        "motivo": "pagamento já aprovado",
+                    },
+                )
+                messages.info(
+                    request,
+                    "O pagamento deste pedido já foi aprovado.",
+                )
+                return redirect("sales:pedido_token", pedido.token_acesso)
+            else:
+                pagamento.preferencia_id = preferencia_id
+                pagamento.valor = pedido.total
+                pagamento.status = Pagamento.Status.PENDENTE
+                pagamento.save(
+                    update_fields=["preferencia_id", "valor", "status"]
+                )
+
+            registrar_auditoria(
+                acao="pedido.pagamento_preferencia_criada",
+                instancia=pedido,
+                request=request,
+                depois={
+                    "preferencia_id": preferencia_id,
+                    "pagamento_id": pagamento.pk,
+                    "valor": str(pedido.total),
+                },
+            )
         return redirect(init_point)
 
 

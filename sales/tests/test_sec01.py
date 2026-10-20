@@ -62,6 +62,8 @@ class StatusFinanceiroBloqueadoTests(TestCase):
             Pedido.Status.PAGO,
             Pedido.Status.PAGAMENTO_PENDENTE,
             Pedido.Status.FALHOU,
+            Pedido.StatusFinanceiro.PENDENTE,
+            Pedido.StatusFinanceiro.ESTORNADO,
         ):
             with self.subTest(status=status):
                 pedido = self._pedido_aguardando()

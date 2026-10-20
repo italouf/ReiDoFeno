@@ -57,6 +57,16 @@ class StatusFinanceiroModelTests(TestCase):
         with self.assertRaises(ValidationError):
             pedido.transicionar(Pedido.Status.EM_SEPARACAO)
 
+    def test_pagamento_pendente_legado_pago_pode_separar(self):
+        pedido = PedidoFactory(
+            status=Pedido.Status.PAGAMENTO_PENDENTE,
+            status_financeiro=Pedido.StatusFinanceiro.PAGO,
+        )
+
+        pedido.transicionar(Pedido.Status.EM_SEPARACAO)
+
+        self.assertEqual(pedido.status, Pedido.Status.EM_SEPARACAO)
+
     def test_transicao_para_estado_financeiro_e_bloqueada_no_modelo(self):
         pedido = PedidoFactory(status=Pedido.Status.AGUARDANDO_PAGAMENTO)
 
@@ -74,6 +84,52 @@ class StatusFinanceiroModelTests(TestCase):
         )
         self.assertEqual(estoque.quantidade, Decimal("98"))
         self.assertEqual(estoque.quantidade_bloqueada, Decimal("0"))
+
+    def test_aprovacao_com_instancia_stale_nao_duplica_baixa(self):
+        pedido = fluxo_checkout(self.client, quantidade=2)
+        stale = Pedido.objects.get(pk=pedido.pk)
+
+        marcar_pagamento_aprovado(pedido, id_externo="123")
+        marcar_pagamento_aprovado(stale, id_externo="123")
+
+        item = pedido.itens.first()
+        estoque = Estoque.objects.get(
+            produto=item.produto, unidade=pedido.unidade
+        )
+        self.assertEqual(estoque.quantidade, Decimal("98"))
+        self.assertEqual(estoque.quantidade_bloqueada, Decimal("0"))
+
+    def test_cancelamento_com_instancia_stale_apos_pagamento_nao_libera_reserva(self):
+        pedido = fluxo_checkout(self.client, quantidade=2)
+        stale = Pedido.objects.get(pk=pedido.pk)
+        marcar_pagamento_aprovado(pedido, id_externo="123")
+
+        cancelar_pedido(stale)
+
+        item = pedido.itens.first()
+        estoque = Estoque.objects.get(
+            produto=item.produto, unidade=pedido.unidade
+        )
+        pedido.refresh_from_db()
+        self.assertEqual(estoque.quantidade, Decimal("98"))
+        self.assertEqual(estoque.quantidade_bloqueada, Decimal("0"))
+        self.assertEqual(pedido.status, Pedido.Status.CANCELADO)
+        self.assertEqual(
+            pedido.status_financeiro, Pedido.StatusFinanceiro.PAGO
+        )
+
+    def test_expiracao_ignora_pedido_pago_por_instancia_stale(self):
+        pedido = fluxo_checkout(self.client, quantidade=2)
+        stale = Pedido.objects.get(pk=pedido.pk)
+        marcar_pagamento_aprovado(pedido, id_externo="123")
+
+        cancelar_pedido(stale, permitir_pago=False)
+
+        pedido.refresh_from_db()
+        self.assertEqual(pedido.status, Pedido.Status.AGUARDANDO_PAGAMENTO)
+        self.assertEqual(
+            pedido.status_financeiro, Pedido.StatusFinanceiro.PAGO
+        )
 
     def test_cancelamento_de_pedido_pago_preserva_financeiro(self):
         pedido = fluxo_checkout(self.client, quantidade=1)
@@ -222,9 +278,75 @@ class ResultadoPagamentoTests(TestCase):
         self.assertEqual(
             pedido.status_financeiro, Pedido.StatusFinanceiro.PAGO
         )
+        self.assertEqual(
+            pedido.pagamento.status, Pagamento.Status.APROVADO
+        )
         self.assertTrue(
             LogAuditoria.objects.filter(
                 acao="pedido.pagamento_evento_ignorado",
+                objeto_id=str(pedido.pk),
+            ).exists()
+        )
+
+    def test_evento_pendente_apos_pagamento_nao_altera_pagamento(self):
+        pedido = self._pedido_com_pagamento()
+        marcar_pagamento_aprovado(pedido, id_externo="pay-status")
+
+        self._aplicar(pedido, "pending")
+
+        pedido.refresh_from_db()
+        self.assertEqual(
+            pedido.status_financeiro, Pedido.StatusFinanceiro.PAGO
+        )
+        self.assertEqual(
+            pedido.pagamento.status, Pagamento.Status.APROVADO
+        )
+
+    def test_rejected_cancela_como_recusa(self):
+        pedido = self._pedido_com_pagamento()
+
+        self._aplicar(pedido, "rejected")
+
+        pedido.refresh_from_db()
+        self.assertEqual(
+            pedido.status_financeiro, Pedido.StatusFinanceiro.CANCELADO
+        )
+        self.assertEqual(pedido.status, Pedido.Status.CANCELADO)
+        self.assertEqual(
+            pedido.pagamento.status, Pagamento.Status.RECUSADO
+        )
+
+    def test_refunded_marca_estornado(self):
+        pedido = self._pedido_com_pagamento()
+        marcar_pagamento_aprovado(pedido, id_externo="pay-status")
+
+        self._aplicar(pedido, "refunded")
+
+        pedido.refresh_from_db()
+        self.assertEqual(
+            pedido.status_financeiro, Pedido.StatusFinanceiro.ESTORNADO
+        )
+        self.assertEqual(pedido.status, Pedido.Status.CANCELADO)
+        self.assertEqual(
+            pedido.pagamento.status, Pagamento.Status.CANCELADO
+        )
+
+    def test_status_desconhecido_e_auditado(self):
+        pedido = self._pedido_com_pagamento()
+
+        self._aplicar(pedido, "in_mediation")
+        self._aplicar(pedido, "status_inexistente")
+
+        pedido.refresh_from_db()
+        self.assertTrue(
+            LogAuditoria.objects.filter(
+                acao="pedido.pagamento_em_mediacao",
+                objeto_id=str(pedido.pk),
+            ).exists()
+        )
+        self.assertTrue(
+            LogAuditoria.objects.filter(
+                acao="pedido.pagamento_status_desconhecido",
                 objeto_id=str(pedido.pk),
             ).exists()
         )

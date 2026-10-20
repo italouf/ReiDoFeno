@@ -8,6 +8,8 @@ import hashlib
 import hmac
 import json
 import logging
+import re
+import time
 import urllib.parse
 import urllib.request
 
@@ -134,22 +136,42 @@ class MercadoPagoReal:
 def validar_assinatura_webhook(headers, data_id: str) -> bool:
     """Valida 'x-signature' conforme documentação do Mercado Pago.
 
-    Sem segredo configurado (dev/testes), aceita a chamada.
+    - Em modo fake/dev sem segredo, aceita a chamada.
+    - Em modo real, segredo ausente rejeita (PAY-01).
+    - Aceita o formato oficial ``ts=...,v1=...`` e o legado com ``;``.
+    - Exige ``x-request-id``, timestamp dentro da tolerância e ``data_id``
+      canônico.
     """
     segredo = getattr(settings, "MERCADO_PAGO_WEBHOOK_SECRET", "")
     if not segredo:
-        return True
+        return bool(getattr(settings, "MERCADO_PAGO_FAKE", False))
+
+    data_id = str(data_id or "")
+    if not re.fullmatch(r"[A-Za-z0-9._:-]{1,120}", data_id):
+        return False
 
     assinatura_header = headers.get("x-signature", "")
     request_id = headers.get("x-request-id", "")
-    partes = dict(
-        fragmento.split("=", 1)
-        for fragmento in assinatura_header.split(";")
-        if "=" in fragmento
-    )
+    partes = {}
+    for fragmento in re.split(r"[,;]", assinatura_header):
+        if "=" in fragmento:
+            chave, valor = fragmento.split("=", 1)
+            partes[chave.strip()] = valor.strip()
+
     ts = partes.get("ts", "")
     v1 = partes.get("v1", "")
-    if not (ts and v1 and data_id):
+    if not (ts and v1 and request_id):
+        return False
+
+    try:
+        timestamp = int(ts)
+    except (TypeError, ValueError):
+        return False
+
+    tolerancia = int(
+        getattr(settings, "MERCADO_PAGO_WEBHOOK_TOLERANCE_SECONDS", 300)
+    )
+    if abs(time.time() - timestamp) > tolerancia:
         return False
 
     manifest = f"id:{data_id};request-id:{request_id};ts:{ts};"
