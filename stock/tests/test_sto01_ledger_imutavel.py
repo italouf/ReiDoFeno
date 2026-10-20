@@ -100,6 +100,29 @@ class LedgerImutavelTests(TransactionTestCase):
             MovimentoEstoque.objects.filter(pk=movimento.pk).delete()
         assert MovimentoEstoque.objects.filter(pk=movimento.pk).exists()
 
+    def test_bulk_create_e_bulk_update_sao_bloqueados(self):
+        movimento = registrar_movimento(
+            produto=self.produto,
+            unidade=self.unidade,
+            tipo=MovimentoEstoque.Tipo.ENTRADA,
+            delta=Decimal("5.00"),
+        )
+        with pytest.raises(ImutabilidadeViolation):
+            MovimentoEstoque.objects.bulk_create(
+                [
+                    MovimentoEstoque(
+                        produto=self.produto,
+                        unidade=self.unidade,
+                        tipo=MovimentoEstoque.Tipo.ENTRADA,
+                        delta=Decimal("1.00"),
+                        quantidade=Decimal("1.00"),
+                    )
+                ]
+            )
+        movimento.quantidade = Decimal("999.00")
+        with pytest.raises(ImutabilidadeViolation):
+            MovimentoEstoque.objects.bulk_update([movimento], ["quantidade"])
+
     def test_transferencia_usa_tipos_especificos_e_par_reciproco(self):
         EstoqueFactory(
             produto=self.produto,

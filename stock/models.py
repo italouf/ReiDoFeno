@@ -36,6 +36,18 @@ class MovimentoEstoqueQuerySet(models.QuerySet):
             "crie um movimento de compensação."
         )
 
+    def bulk_create(self, objs, *args, **kwargs):
+        raise ImutabilidadeViolation(
+            "Movimentos de estoque devem ser criados individualmente para "
+            "validar delta, tipo e saldo."
+        )
+
+    def bulk_update(self, objs, fields, *args, **kwargs):
+        raise ImutabilidadeViolation(
+            "Movimentos de estoque não podem ser alterados em massa; "
+            "crie um movimento de compensação."
+        )
+
     def _update_permitido(self, **kwargs):
         """Operação interna restrita ao vínculo recíproco de transferência."""
         return super().update(**kwargs)

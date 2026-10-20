@@ -16,7 +16,7 @@ from core.models import Unidade  # noqa: E402
 # Limpa dados de debug
 # (cadeia: pedidos/pagamentos → itens → movimentos → estoque → produto → unidade)
 from sales.models import ItemPedido, Pagamento, Pedido  # noqa: E402
-from stock.models import Estoque, MovimentoEstoque  # noqa: E402
+from stock.models import Estoque  # noqa: E402
 
 debug_prods = Produto.objects.filter(nome__startswith="Debug")
 pedido_ids = list(
@@ -25,9 +25,15 @@ pedido_ids = list(
 Pagamento.objects.filter(pedido_id__in=pedido_ids).delete()
 ItemPedido.objects.filter(pedido_id__in=pedido_ids).delete()
 Pedido.objects.filter(id__in=pedido_ids).delete()
-MovimentoEstoque.objects.filter(produto__in=debug_prods).delete()
-Estoque.objects.filter(produto__in=debug_prods).delete()
-removidos, _ = debug_prods.delete()
+# O ledger é imutável (STO-01): não excluímos movimentos. Produtos de debug
+# com movimentos são apenas desativados; os sem movimentos podem ser apagados.
+com_movimentos = debug_prods.filter(movimentos__isnull=False).distinct()
+sem_movimentos = debug_prods.exclude(pk__in=com_movimentos.values("pk"))
+Estoque.objects.filter(produto__in=sem_movimentos).delete()
+removidos, _ = sem_movimentos.delete()
+if com_movimentos.exists():
+    com_movimentos.update(ativo=False)
+    print("debug com movimentos desativado:", list(com_movimentos.values_list("nome", flat=True)))
 Categoria.objects.filter(nome__startswith="Categoria").delete()
 Unidade.objects.filter(nome__startswith="Debug").delete()
 print("debug removido:", removidos)
