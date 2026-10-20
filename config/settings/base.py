@@ -43,6 +43,7 @@ INSTALLED_APPS = [
     "analytics.apps.AnalyticsConfig",
     # Terceiros
     "axes",
+    "django_ratelimit",
 ]
 
 MIDDLEWARE = [
@@ -126,6 +127,12 @@ RATELIMIT_LOGIN = os.environ.get("RATELIMIT_LOGIN", "5/m")
 RATELIMIT_CHECKOUT = os.environ.get("RATELIMIT_CHECKOUT", "10/h")
 RATELIMIT_CHECKOUT_IP = os.environ.get("RATELIMIT_CHECKOUT_IP", "30/h")
 RATELIMIT_PAGAMENTO = os.environ.get("RATELIMIT_PAGAMENTO", "10/m")
+RATELIMIT_VINCULO_EMISSAO = os.environ.get(
+    "RATELIMIT_VINCULO_EMISSAO", "3/h"
+)
+RATELIMIT_VINCULO_CONSUMO = os.environ.get(
+    "RATELIMIT_VINCULO_CONSUMO", "10/h"
+)
 RATELIMIT_WEBHOOK = os.environ.get("RATELIMIT_WEBHOOK", "60/m")
 
 LOGIN_URL = "/accounts/login/"
@@ -164,6 +171,10 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # --------------------------------------------------------------------------- #
 MERCADO_PAGO_ACCESS_TOKEN = os.environ.get("MERCADOPAGO_ACCESS_TOKEN", "")
 MERCADO_PAGO_WEBHOOK_SECRET = os.environ.get("MERCADOPAGO_WEBHOOK_SECRET", "")
+MERCADO_PAGO_COLLECTOR_ID = os.environ.get("MERCADOPAGO_COLLECTOR_ID", "")
+MERCADO_PAGO_LIVE_MODE = (
+    os.environ.get("MERCADOPAGO_LIVE_MODE", "False").lower() == "true"
+)
 MERCADO_PAGO_WEBHOOK_TOLERANCE_SECONDS = int(
     os.environ.get("MERCADOPAGO_WEBHOOK_TOLERANCE_SECONDS", "300")
 )

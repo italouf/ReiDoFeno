@@ -7,8 +7,7 @@ from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
-from django.db.models import Q
-from django.http import Http404, JsonResponse
+from django.http import Http404, HttpResponseNotAllowed, JsonResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse, reverse_lazy
 from django.utils.decorators import method_decorator
@@ -24,7 +23,12 @@ from .cart import Carrinho
 from .emails import email_pedido_criado
 from .forms import CheckoutForm
 from .models import Pagamento, Pedido
-from .services import cancelar_pedido, criar_pedido_do_carrinho
+from .services import (
+    ResultadoPagamentoInvalido,
+    alterar_status_operacional,
+    criar_pedido_do_carrinho,
+    pedidos_visiveis_para,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -217,7 +221,7 @@ def _pedido_por_token(token) -> Pedido:
     name="dispatch",
 )
 class PagamentoIniciarView(View):
-    """Cria a preferência no provedor e redireciona ao Checkout Pro."""
+    """Cria/reutiliza preferência de pagamento via POST idempotente."""
 
     @staticmethod
     def _pode_iniciar(pedido: Pedido) -> bool:
@@ -229,10 +233,36 @@ class PagamentoIniciarView(View):
         )
 
     def get(self, request, token):
+        return HttpResponseNotAllowed(["POST"])
+
+    def post(self, request, token):
         pedido = _pedido_por_token(token)
         if not self._pode_iniciar(pedido):
             messages.info(request, "Este pedido não está aguardando pagamento.")
             return redirect("sales:pedido_token", pedido.token_acesso)
+
+        # Reuso idempotente antes de chamar o provedor.
+        with transaction.atomic():
+            pedido = Pedido.objects.select_for_update().get(pk=pedido.pk)
+            if not self._pode_iniciar(pedido):
+                messages.info(
+                    request, "Este pedido não está aguardando pagamento."
+                )
+                return redirect("sales:pedido_token", pedido.token_acesso)
+            pagamento = (
+                Pagamento.objects.select_for_update()
+                .filter(pedido=pedido)
+                .first()
+            )
+            if (
+                pagamento
+                and pagamento.status == Pagamento.Status.PENDENTE
+                and pagamento.init_point
+            ):
+                return redirect(pagamento.init_point)
+            if pagamento and pagamento.status == Pagamento.Status.APROVADO:
+                messages.info(request, "O pagamento deste pedido já foi aprovado.")
+                return redirect("sales:pedido_token", pedido.token_acesso)
 
         from .payments import obter_client
 
@@ -257,6 +287,7 @@ class PagamentoIniciarView(View):
                 pagamento = Pagamento.objects.create(
                     pedido=pedido,
                     preferencia_id=preferencia_id,
+                    init_point=init_point,
                     valor=pedido.total,
                     status=Pagamento.Status.PENDENTE,
                 )
@@ -271,17 +302,36 @@ class PagamentoIniciarView(View):
                         "motivo": "pagamento já aprovado",
                     },
                 )
-                messages.info(
-                    request,
-                    "O pagamento deste pedido já foi aprovado.",
-                )
+                messages.info(request, "O pagamento deste pedido já foi aprovado.")
                 return redirect("sales:pedido_token", pedido.token_acesso)
+            elif (
+                pagamento.status == Pagamento.Status.PENDENTE
+                and pagamento.init_point
+            ):
+                return redirect(pagamento.init_point)
             else:
+                tentativa_anterior = pagamento.status
                 pagamento.preferencia_id = preferencia_id
+                pagamento.init_point = init_point
                 pagamento.valor = pedido.total
                 pagamento.status = Pagamento.Status.PENDENTE
                 pagamento.save(
-                    update_fields=["preferencia_id", "valor", "status"]
+                    update_fields=[
+                        "preferencia_id",
+                        "init_point",
+                        "valor",
+                        "status",
+                    ]
+                )
+                registrar_auditoria(
+                    acao="pedido.pagamento_nova_tentativa",
+                    instancia=pedido,
+                    request=request,
+                    antes={"pagamento_status": tentativa_anterior},
+                    depois={
+                        "pagamento_status": pagamento.status,
+                        "preferencia_id": preferencia_id,
+                    },
                 )
 
             registrar_auditoria(
@@ -327,7 +377,9 @@ class SimularResultadoView(View):
         from .services import aplicar_resultado_pagamento
 
         dados = obter_client().consultar_pagamento(id_externo)
-        aplicar_resultado_pagamento(dados, request=request)
+        aplicar_resultado_pagamento(
+            dados, request=request, id_consultado=id_externo
+        )
         return redirect("sales:pedido_token", pedido.token_acesso)
 
 
@@ -357,7 +409,26 @@ class MercadoPagoWebhookView(View):
         except json.JSONDecodeError:
             payload = {}
 
-        data_id = extrair_data_id(request.META.get("QUERY_STRING", ""), payload)
+        data_id_query = extrair_data_id(
+            request.META.get("QUERY_STRING", ""), {}
+        )
+        data_id_body = extrair_data_id("", payload)
+        if (
+            data_id_query
+            and data_id_body
+            and data_id_query != data_id_body
+        ):
+            logger.warning(
+                "Webhook com IDs divergentes na query e no body rejeitado."
+            )
+            return JsonResponse(
+                {"erro": "identificadores divergentes"}, status=400
+            )
+        data_id = data_id_body or data_id_query
+        if not data_id:
+            logger.warning("Webhook sem identificador de recurso rejeitado.")
+            return JsonResponse({"erro": "identificador ausente"}, status=400)
+
         if not validar_assinatura_webhook(request.headers, data_id):
             logger.warning("Webhook com assinatura inválida rejeitado.")
             return JsonResponse({"erro": "assinatura invalida"}, status=403)
@@ -368,10 +439,24 @@ class MercadoPagoWebhookView(View):
         )
         try:
             dados = obter_client().consultar_pagamento(data_id)
-            pedido = aplicar_resultado_pagamento(dados, request=request)
+            pedido = aplicar_resultado_pagamento(
+                dados,
+                request=request,
+                id_consultado=data_id,
+            )
             evento.processado = True
             evento.resultado = f"pedido={getattr(pedido, 'numero', 'n/a')}"
             evento.save()
+        except ResultadoPagamentoInvalido as erro:
+            evento.erro = str(erro)[:500]
+            evento.resultado = "reconciliacao"
+            evento.save(update_fields=["erro", "resultado"])
+            logger.error(
+                "Webhook %s rejeitado por contrato divergente: %s",
+                data_id,
+                erro,
+            )
+            return JsonResponse({"recebido": True, "reconciliacao": True})
         except Exception as erro:
             evento.erro = str(erro)[:500]
             evento.save()
@@ -394,7 +479,11 @@ class MeusPedidosView(LoginRequiredMixin, TemplateView):
     def get_context_data(self, **kwargs):
         contexto = super().get_context_data(**kwargs)
         contexto["pedidos"] = (
-            Pedido.objects.filter(cliente__usuario=self.request.user)
+            Pedido.objects.filter(
+                cliente__usuario=self.request.user,
+                cliente__vinculo_verificado=True,
+                identidade_verificada=True,
+            )
             .prefetch_related("itens")
         )
         return contexto
@@ -446,17 +535,9 @@ class PedidosInternosListView(LoginRequiredMixin, GrupoRequiredMixin, ListView):
     grupos_permitidos = GRUPOS_INTERNOS
 
     def get_queryset(self):
-        usuario = self.request.user
-        queryset = Pedido.objects.select_related(
+        return pedidos_visiveis_para(self.request.user).select_related(
             "cliente", "unidade"
         ).prefetch_related("itens")
-        if usuario.is_superuser:
-            return queryset
-        if usuario.groups.filter(name="Vendedor").exists() and not (
-            usuario.groups.filter(name__in=("Administrador", "Gestor")).exists()
-        ):
-            return queryset.filter(usuario_criador=usuario)
-        return queryset
 
 
 class PedidoInternoDetailView(LoginRequiredMixin, GrupoRequiredMixin, DetailView):
@@ -465,13 +546,9 @@ class PedidoInternoDetailView(LoginRequiredMixin, GrupoRequiredMixin, DetailView
     grupos_permitidos = GRUPOS_INTERNOS
 
     def get_queryset(self):
-        usuario = self.request.user
-        queryset = Pedido.objects.select_related("cliente", "unidade")
-        if usuario.is_superuser:
-            return queryset
-        if usuario.groups.filter(name__in=("Administrador", "Gestor")).exists():
-            return queryset
-        return queryset.filter(usuario_criador=usuario)
+        return pedidos_visiveis_para(self.request.user).select_related(
+            "cliente", "unidade"
+        )
 
     def get_context_data(self, **kwargs):
         contexto = super().get_context_data(**kwargs)
@@ -479,12 +556,8 @@ class PedidoInternoDetailView(LoginRequiredMixin, GrupoRequiredMixin, DetailView
             Pedido.TRANSICOES_VALIDAS.get(self.object.status, set())
             & PERMIS_SO_TRANSICOES_OPERACIONAIS
         )
-        if (
-            Pedido.Status.EM_SEPARACAO in permitidos
-            and self.object.status_financeiro
-            != Pedido.StatusFinanceiro.PAGO
-        ):
-            permitidos.discard(Pedido.Status.EM_SEPARACAO)
+        if self.object.status_financeiro != Pedido.StatusFinanceiro.PAGO:
+            permitidos -= Pedido.EXIGE_FINANCEIRO_PAGO
         contexto["proximos_status"] = [
             (valor, Pedido.Status(valor).label)
             for valor in sorted(permitidos)
@@ -496,12 +569,11 @@ class PedidoAtualizarStatusView(LoginRequiredMixin, GrupoRequiredMixin, View):
     grupos_permitidos = GRUPOS_INTERNOS
 
     def post(self, request, pk):
-        pedido = get_object_or_404(
-            Pedido.objects.filter(self._recorte(request.user)),
-            pk=pk,
-        )
         novo_status = request.POST.get("status", "")
         if novo_status in STATUS_FINANCEIROS:
+            pedido = get_object_or_404(
+                pedidos_visiveis_para(request.user), pk=pk
+            )
             registrar_auditoria(
                 acao="tentativa_bloqueada_transicao_financeira",
                 instancia=pedido,
@@ -516,31 +588,18 @@ class PedidoAtualizarStatusView(LoginRequiredMixin, GrupoRequiredMixin, View):
                 "Transições financeiras só podem ser alteradas pelo provedor "
                 "de pagamento."
             )
-        if novo_status == Pedido.Status.CANCELADO:
-            # cancelar_pedido faz a transição E libera reservas.
-            try:
-                cancelar_pedido(pedido, request=request)
-            except ValidationError as erro:
-                messages.error(request, erro.message)
-                return redirect("sales:pedido_interno_detail", pk)
-            messages.success(
-                request, f"Pedido {pedido.numero} → Cancelado."
-            )
-            return redirect("sales:pedido_interno_detail", pk)
         try:
-            pedido.transicionar(novo_status, request=request)
+            pedido = alterar_status_operacional(
+                pk,
+                novo_status,
+                usuario=request.user,
+                request=request,
+            )
         except ValidationError as erro:
             messages.error(request, erro.message)
         else:
             messages.success(
-                request, f"Pedido {pedido.numero} → {pedido.get_status_display()}."
+                request,
+                f"Pedido {pedido.numero} → {pedido.get_status_display()}.",
             )
         return redirect("sales:pedido_interno_detail", pk)
-
-    @staticmethod
-    def _recorte(usuario):
-        if usuario.is_superuser or usuario.groups.filter(
-            name__in=("Administrador", "Gestor")
-        ).exists():
-            return Q()
-        return Q(usuario_criador=usuario)

@@ -1,8 +1,13 @@
 """Rate limiting dos endpoints críticos (SEC-04)."""
 
+import json
+
 from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.urls import reverse
+
+from sales.factories import PedidoFactory
+from sales.models import Pedido
 
 
 class LoginRateLimitTests(TestCase):
@@ -74,6 +79,30 @@ class CheckoutRateLimitTests(TestCase):
         self.assertEqual(nova_sessao.post(self.url, {}).status_code, 429)
 
 
+class PagamentoRateLimitTests(TestCase):
+    def setUp(self):
+        cache.clear()
+
+    def test_decima_primeira_criacao_de_pagamento_retorna_429(self):
+        pedido = PedidoFactory(
+            status=Pedido.Status.AGUARDANDO_PAGAMENTO,
+            status_financeiro=Pedido.StatusFinanceiro.PENDENTE,
+        )
+        url = reverse(
+            "sales:pagamento_iniciar", args=[pedido.token_acesso]
+        )
+
+        for submissao in range(1, 11):
+            with self.subTest(submissao=submissao):
+                resposta = self.client.post(url)
+                self.assertEqual(resposta.status_code, 302)
+
+        resposta = self.client.post(url)
+
+        self.assertEqual(resposta.status_code, 429)
+        self.assertIn("Retry-After", resposta.headers)
+
+
 class WebhookRateLimitTests(TestCase):
     def setUp(self):
         cache.clear()
@@ -81,18 +110,19 @@ class WebhookRateLimitTests(TestCase):
 
     @override_settings(MERCADO_PAGO_WEBHOOK_SECRET="segredo-teste")
     def test_sexagesima_primeira_requisicao_em_um_minuto_retorna_429(self):
+        payload = json.dumps({"data": {"id": "123"}})
         for requisicao in range(1, 61):
             with self.subTest(requisicao=requisicao):
                 resposta = self.client.post(
                     self.url,
-                    data="{}",
+                    data=payload,
                     content_type="application/json",
                 )
                 self.assertEqual(resposta.status_code, 403)
 
         resposta = self.client.post(
             self.url,
-            data="{}",
+            data=payload,
             content_type="application/json",
         )
 

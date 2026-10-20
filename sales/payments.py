@@ -50,11 +50,26 @@ class MercadoPagoFake:
 
     @staticmethod
     def consultar_pagamento(id_externo: str) -> dict:
+        from sales.models import Pedido
+
+        numero = _numero_do_fake(id_externo)
+        pedido = Pedido.objects.filter(numero=numero).first()
         aprovado = id_externo.endswith("-ok")
         return {
             "id": id_externo,
             "status": "approved" if aprovado else "refused",
-            "external_reference": _numero_do_fake(id_externo),
+            "external_reference": numero,
+            "transaction_amount": (
+                str(pedido.total) if pedido is not None else "0.00"
+            ),
+            "currency_id": "BRL",
+            "collector_id": (
+                getattr(settings, "MERCADO_PAGO_COLLECTOR_ID", "")
+                or "fake-collector"
+            ),
+            "live_mode": bool(
+                getattr(settings, "MERCADO_PAGO_LIVE_MODE", False)
+            ),
         }
 
 
@@ -168,10 +183,16 @@ def validar_assinatura_webhook(headers, data_id: str) -> bool:
     except (TypeError, ValueError):
         return False
 
+    # O contrato do Checkout Pro pode enviar ts em segundos ou milissegundos.
+    # A normalização vale só para a janela; o HMAC abaixo usa o ts original.
+    timestamp_segundos = (
+        timestamp / 1000 if timestamp > 10_000_000_000 else timestamp
+    )
+
     tolerancia = int(
         getattr(settings, "MERCADO_PAGO_WEBHOOK_TOLERANCE_SECONDS", 300)
     )
-    if abs(time.time() - timestamp) > tolerancia:
+    if abs(time.time() - timestamp_segundos) > tolerancia:
         return False
 
     manifest = f"id:{data_id};request-id:{request_id};ts:{ts};"

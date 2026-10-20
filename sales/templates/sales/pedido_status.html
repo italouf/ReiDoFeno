@@ -24,7 +24,7 @@
     {% include "store/includes/order_status_badge.html" with status=pedido.status rotulo=pedido.get_status_display %}
     {% include "store/includes/order_status_badge.html" with status=pedido.status_financeiro rotulo=pedido.get_status_financeiro_display %}
   </h1>
-  <p style="color:var(--cinza-texto);">Olá, {{ pedido.cliente.nome }}. Modalidade: <strong>{{ pedido.get_modalidade_display }}</strong> · Unidade: {{ pedido.unidade.nome }}</p>
+  <p style="color:var(--cinza-texto);">Olá, {{ pedido.nome_contato|default:pedido.cliente.nome }}. Modalidade: <strong>{{ pedido.get_modalidade_display }}</strong> · Unidade: {{ pedido.unidade.nome }}</p>
 
   <ul class="timeline-status" aria-label="Andamento do pedido">
     <li {% if pedido.status != 'cancelado' and pedido.status != 'rascunho' %}aria-current="true"{% endif %}>Pedido recebido</li>
@@ -64,9 +64,10 @@
   </div>
 
   {% if pedido.status_financeiro == 'pendente' and pedido.status in 'aguardando_pagamento pagamento_pendente' %}
-  <p style="margin-top:var(--e5);">
-    <a class="btn" href="{% url 'sales:pagamento_iniciar' pedido.token_acesso %}" style="min-height:48px;">Ir para o pagamento</a>
-  </p>
+  <form method="post" action="{% url 'sales:pagamento_iniciar' pedido.token_acesso %}" style="margin-top:var(--e5);">
+    {% csrf_token %}
+    <button type="submit" class="btn" style="min-height:48px;">Ir para o pagamento</button>
+  </form>
   {% endif %}
 
   <ul class="lista-beneficios" style="margin-top:var(--e5);">

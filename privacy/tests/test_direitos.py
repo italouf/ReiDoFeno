@@ -28,13 +28,18 @@ class DireitosTitularTests(TestCase):
             username=f"user{cliente.pk}", password="senha-forte-123"
         )
         cliente.usuario = usuario
+        cliente.vinculo_verificado = True
         cliente.save()
         self.client.force_login(usuario)
         return usuario
 
     def test_exportacao_gera_arquivo_e_registra_concluida(self):
         cliente = ClienteFactory(nome="Maria Export")
-        pedido = PedidoFactory(status=Pedido.Status.PAGO, cliente=cliente)
+        pedido = PedidoFactory(
+            status=Pedido.Status.PAGO,
+            cliente=cliente,
+            identidade_verificada=True,
+        )
         ItemPedidoFactory(pedido=pedido)
         self._login_com_cliente(cliente)
 
@@ -115,3 +120,5 @@ class DireitosTitularTests(TestCase):
         self.assertTrue(
             LogAuditoria.objects.filter(acao="cliente.alterado").exists()
         )
+        cliente.refresh_from_db()
+        self.assertFalse(cliente.vinculo_verificado)

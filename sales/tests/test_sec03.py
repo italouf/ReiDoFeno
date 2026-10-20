@@ -14,7 +14,7 @@ from sales.models import Pagamento, Pedido
 from sales.services import marcar_pagamento_aprovado
 from stock.models import Estoque, MovimentoEstoque
 
-from .helpers import fluxo_checkout
+from .helpers import DADOS_BASE, fluxo_checkout
 
 
 class AuditoriaStatusTests(TestCase):
@@ -68,6 +68,39 @@ class AuditoriaStatusTests(TestCase):
 
         pedido.refresh_from_db()
         self.assertEqual(pedido.status, Pedido.Status.PAGO)
+
+
+class AuditoriaCriacaoPedidoTests(TestCase):
+    def test_falha_na_auditoria_reverte_pedido_itens_e_reserva(self):
+        from catalog.factories import ProdutoFactory
+        from core.factories import UnidadeFactory
+        from stock.factories import EstoqueFactory
+
+        produto = ProdutoFactory(preco_online="10.00")
+        unidade = UnidadeFactory()
+        EstoqueFactory(
+            produto=produto, unidade=unidade, quantidade="10.00"
+        )
+        self.client.post(
+            reverse("sales:adicionar"),
+            {"produto_id": produto.pk, "quantidade": "2"},
+        )
+        dados = dict(DADOS_BASE)
+        dados["unidade"] = unidade.pk
+
+        with mock.patch(
+            "core.auditoria.LogAuditoria.objects.create",
+            side_effect=RuntimeError("auditoria indisponível"),
+        ):
+            with self.assertRaises(RuntimeError):
+                self.client.post(reverse("sales:checkout"), dados)
+
+        self.assertFalse(Pedido.objects.exists())
+        self.assertFalse(
+            Estoque.objects.filter(
+                produto=produto, unidade=unidade, quantidade_bloqueada__gt=0
+            ).exists()
+        )
 
 
 class AuditoriaPagamentoTests(TestCase):
@@ -125,6 +158,13 @@ class AuditoriaPagamentoTests(TestCase):
         )
         self.assertFalse(
             LogAuditoria.objects.filter(
-                objeto_id=str(pedido.pk)
+                acao="pedido.pagamento_aprovado",
+                objeto_id=str(pedido.pk),
+            ).exists()
+        )
+        self.assertFalse(
+            LogAuditoria.objects.filter(
+                acao="pedido.status_financeiro_alterado",
+                objeto_id=str(pedido.pk),
             ).exists()
         )

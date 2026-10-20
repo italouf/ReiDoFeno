@@ -119,5 +119,14 @@ class ClienteUpdateView(ClienteBaseView, AuditoriaFormValidMixin, UpdateView):
         )
 
     def form_valid(self, form):
+        email_anterior = (
+            Cliente.objects.filter(pk=self.object.pk)
+            .values_list("email", flat=True)
+            .first()
+        )
+        email_novo = (form.cleaned_data.get("email") or "").strip()
+        if (email_anterior or "").casefold() != email_novo.casefold():
+            # R5: mudança de e-mail invalida a prova e exige nova comprovação.
+            form.instance.vinculo_verificado = False
         messages.success(self.request, "Cliente atualizado com sucesso.")
         return super().form_valid(form)

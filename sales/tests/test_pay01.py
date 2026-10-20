@@ -58,6 +58,14 @@ class AssinaturaWebhookTests(SimpleTestCase):
         antigo = int(time.time()) - 600
         self.assertFalse(self._validar(data_id="123", ts=antigo))
 
+    def test_timestamp_em_milissegundos_recente_e_aceito(self):
+        agora_ms = int(time.time() * 1000)
+        self.assertTrue(self._validar(data_id="123", ts=agora_ms))
+
+    def test_timestamp_em_milissegundos_expirado_e_rejeitado(self):
+        antigo_ms = int(time.time() * 1000) - 600_000
+        self.assertFalse(self._validar(data_id="123", ts=antigo_ms))
+
     def test_timestamp_futuro_alem_da_tolerancia_e_rejeitado(self):
         futuro = int(time.time()) + 600
         self.assertFalse(self._validar(data_id="123", ts=futuro))

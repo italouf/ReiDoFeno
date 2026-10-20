@@ -22,6 +22,32 @@ jobs:
 
   tests:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: reidofeno
+          POSTGRES_USER: reidofeno
+          POSTGRES_PASSWORD: reidofeno
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U reidofeno"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgres://reidofeno:reidofeno@localhost:5432/reidofeno
+      REDIS_URL: redis://localhost:6379/1
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -32,10 +58,39 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install -r requirements-dev.txt
-      - name: Testes com cobertura
+      - name: Testes com cobertura (PostgreSQL + Redis)
         run: |
           mkdir -p reports
           pytest --junitxml=reports/junit.xml --cov --cov-fail-under=80 --cov-report=xml:reports/coverage.xml --cov-report=term-missing
+      - name: Check de produção (PostgreSQL + Redis)
+        env:
+          DJANGO_SETTINGS_MODULE: config.settings.production
+          DJANGO_SECRET_KEY: chave-de-ci-com-mais-de-50-caracteres-1234567890
+          DJANGO_ALLOWED_HOSTS: example.com
+          MERCADOPAGO_COLLECTOR_ID: collector-ci
+          MERCADOPAGO_LIVE_MODE: "True"
+          MERCADO_PAGO_FAKE: "False"
+          BLING_FAKE: "False"
+        run: python manage.py check --deploy
+      - name: Migração histórica 0001 → HEAD (PostgreSQL)
+        env:
+          MIGRATION_DATABASE_URL: postgres://reidofeno:reidofeno@localhost:5432/reidofeno_migracao
+        run: |
+          python - <<'PY'
+          import psycopg
+          conn = psycopg.connect(
+              "host=localhost user=reidofeno password=reidofeno dbname=postgres"
+          )
+          conn.autocommit = True
+          with conn.cursor() as cur:
+              cur.execute("DROP DATABASE IF EXISTS reidofeno_migracao")
+              cur.execute("CREATE DATABASE reidofeno_migracao")
+          conn.close()
+          PY
+          DATABASE_URL="$MIGRATION_DATABASE_URL" python manage.py migrate sales 0001 --noinput
+          DATABASE_URL="$MIGRATION_DATABASE_URL" python manage.py validar_migracao_legado --criar
+          DATABASE_URL="$MIGRATION_DATABASE_URL" python manage.py migrate --noinput
+          DATABASE_URL="$MIGRATION_DATABASE_URL" python manage.py validar_migracao_legado --verificar
       - name: Publicar relatórios de teste
         uses: actions/upload-artifact@v4
         if: always()

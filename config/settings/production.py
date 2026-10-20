@@ -80,12 +80,17 @@ DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "")
 
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
-# Rate limiting compartilhado entre workers. Requer:
-#   python manage.py createcachetable
+# Rate limiting compartilhado e com incremento atômico (R6).
+REDIS_URL = os.environ.get("REDIS_URL", "").strip()
+if not REDIS_URL:
+    raise ImproperlyConfigured(
+        "REDIS_URL é obrigatório em produção para rate limiting atômico."
+    )
 CACHES = {
     "default": {
-        "BACKEND": "django.core.cache.backends.db.DatabaseCache",
-        "LOCATION": "reidofeno_cache",
+        "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": REDIS_URL,
+        "OPTIONS": {"CLIENT_CLASS": "django_redis.client.DefaultClient"},
     }
 }
 
@@ -103,4 +108,20 @@ if MERCADO_PAGO_FAKE:
 if BLING_FAKE:
     raise ImproperlyConfigured(
         "BLING_FAKE=True não é permitido em produção."
+    )
+
+MERCADO_PAGO_COLLECTOR_ID = os.environ.get(
+    "MERCADOPAGO_COLLECTOR_ID", ""
+).strip()
+if not MERCADO_PAGO_COLLECTOR_ID:
+    raise ImproperlyConfigured(
+        "MERCADOPAGO_COLLECTOR_ID é obrigatório em produção para "
+        "validar o recebedor do pagamento."
+    )
+MERCADO_PAGO_LIVE_MODE = (
+    os.environ.get("MERCADOPAGO_LIVE_MODE", "True").lower() == "true"
+)
+if not MERCADO_PAGO_LIVE_MODE:
+    raise ImproperlyConfigured(
+        "MERCADOPAGO_LIVE_MODE deve ser True em produção."
     )

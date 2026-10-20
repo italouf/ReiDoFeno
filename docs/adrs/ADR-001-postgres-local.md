@@ -28,9 +28,10 @@ sem depender de Neon/Supabase. O contrato de configuração continua sendo
 4. `conn_max_age=600` e `conn_health_checks=True` são habilitados.
 5. O fallback SQLite permanece apenas em desenvolvimento/testes, onde é
    adequado ao ciclo local.
-6. O cache de rate limiting em produção usa a tabela `reidofeno_cache`
-   (`DatabaseCache`), compartilhada entre workers. O deploy deve executar
-   `python manage.py createcachetable`.
+6. O cache de rate limiting em produção usa Redis
+   (`django_redis.cache.RedisCache`), compartilhado e com incremento
+   atômico. `REDIS_URL` é obrigatório. `DatabaseCache` não é aceito para
+   contadores porque não garante incremento atômico.
 
 ## Consequências
 
@@ -57,7 +58,8 @@ Testes automatizados em `core/tests/test_settings_production.py`:
 
 - PostgreSQL local sem TLS configurado impedirá a conexão; isso é intencional
   e deve ser resolvido na infraestrutura, não no código.
-- Rate limiting com `DatabaseCache` exige a tabela criada no deploy. O build
-  deve executar `createcachetable` antes de liberar tráfego.
+- Rate limiting com Redis exige o serviço provisionado e `REDIS_URL`
+  configurado; indisponibilidade do cache deve ser tratada como falha de
+  proteção, não como bypass silencioso.
 - A decisão não define RPO/RTO; esses números continuam pendentes de aprovação
   da operação e devem constar no runbook antes do go-live.

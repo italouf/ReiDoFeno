@@ -37,6 +37,16 @@ class Pedido(models.Model):
         {Status.PAGO, Status.PAGAMENTO_PENDENTE, Status.FALHOU}
     )
 
+    # Estados que só podem ser atingidos com cobertura financeira paga.
+    EXIGE_FINANCEIRO_PAGO = frozenset(
+        {
+            Status.EM_SEPARACAO,
+            Status.PRONTO_PARA_ENTREGA,
+            Status.ENVIADO,
+            Status.CONCLUIDO,
+        }
+    )
+
     TRANSICOES_VALIDAS: dict[str, set[str]] = {
         Status.RASCUNHO: {Status.AGUARDANDO_PAGAMENTO, Status.CANCELADO},
         # Em separação exige status_financeiro=PAGO (validado em transicionar).
@@ -70,6 +80,22 @@ class Pedido(models.Model):
     cliente = models.ForeignKey(
         Cliente, on_delete=models.PROTECT, related_name="pedidos",
         verbose_name="cliente",
+    )
+    nome_contato = models.CharField(
+        "nome de contato", max_length=120, blank=True,
+        help_text="Nome informado no pedido; não é identidade verificada.",
+    )
+    identidade_verificada = models.BooleanField(
+        "identidade verificada",
+        default=False,
+        db_index=True,
+        help_text="Pedido criado pelo usuário já vinculado e comprovado.",
+    )
+    consentimento_compras = models.BooleanField(
+        "consentimento de compras", default=False
+    )
+    consentimento_marketing = models.BooleanField(
+        "consentimento de marketing", default=False
     )
     usuario_criador = models.ForeignKey(
         Usuario, on_delete=models.SET_NULL, null=True, blank=True,
@@ -155,12 +181,12 @@ class Pedido(models.Model):
                 f"Permitidas: {sorted(permitidos)}."
             )
         if (
-            novo_status == self.Status.EM_SEPARACAO
+            novo_status in self.EXIGE_FINANCEIRO_PAGO
             and self.status_financeiro != self.StatusFinanceiro.PAGO
         ):
             raise ValidationError(
-                "O pedido só pode ir para separação após confirmação "
-                "financeira do pagamento."
+                "O andamento só pode avançar com pagamento confirmado "
+                "(status_financeiro=pago)."
             )
         status_anterior = self.status
         self.status = novo_status
@@ -265,6 +291,10 @@ class Pagamento(models.Model):
     )
     provedor = models.CharField("provedor", max_length=30, default="mercadopago")
     preferencia_id = models.CharField("ID da preferência", max_length=60, blank=True)
+    init_point = models.CharField(
+        "URL de checkout", max_length=500, blank=True,
+        help_text="Reutilizada para idempotência enquanto a tentativa pendente.",
+    )
     id_externo = models.CharField(
         "ID externo do pagamento", max_length=60, blank=True, db_index=True
     )

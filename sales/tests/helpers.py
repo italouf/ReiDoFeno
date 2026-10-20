@@ -47,10 +47,13 @@ def fluxo_checkout(cliente_http, *, quantidade, dados_extra=None):
         f"{resposta.context['form'].errors if resposta.context else 'n/a'}"
     )
 
+    from customers.models import normalizar_documento
     from sales.models import Pedido
 
     pedido = (
-        Pedido.objects.filter(cliente__documento="52998224725")
+        Pedido.objects.filter(
+            cliente__documento=normalizar_documento(dados["documento"])
+        )
         .order_by("-pk")
         .first()
     )

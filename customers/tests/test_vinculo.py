@@ -1,15 +1,18 @@
 """SEC-02: vínculo cliente/usuário somente após comprovação por e-mail."""
 
 import re
+from datetime import timedelta
 from unittest import mock
 
 from django.core import mail
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from accounts.models import Usuario
 from core.models import LogAuditoria
 from customers.factories import ClienteFactory
+from customers.models import VinculoClienteToken
 
 DOCUMENTO = "52998224725"
 
@@ -71,17 +74,49 @@ class VinculoClienteTests(TestCase):
         self._solicitar()
         link = self._link_do_email()
 
-        resposta = self.client.get(link)
+        previa = self.client.get(link)
+        self.assertEqual(previa.status_code, 200)
+        cliente.refresh_from_db()
+        self.assertIsNone(cliente.usuario)
+
+        resposta = self.client.post(link)
 
         self.assertEqual(resposta.status_code, 302)
         cliente.refresh_from_db()
         self.assertEqual(cliente.usuario, self.usuario)
+        self.assertTrue(cliente.vinculo_verificado)
         log = LogAuditoria.objects.filter(
             acao="cliente.vinculo_confirmado",
             objeto_id=str(cliente.pk),
         ).first()
         self.assertIsNotNone(log)
         self.assertEqual(log.usuario, self.usuario)
+
+    def test_get_nao_consome_a_prova(self):
+        cliente = self._criar_cliente()
+        self.client.force_login(self.usuario)
+        self._solicitar()
+        link = self._link_do_email()
+
+        for _ in range(2):
+            self.assertEqual(self.client.get(link).status_code, 200)
+        cliente.refresh_from_db()
+        self.assertIsNone(cliente.usuario)
+
+        self.assertEqual(self.client.post(link).status_code, 302)
+        cliente.refresh_from_db()
+        self.assertEqual(cliente.usuario, self.usuario)
+
+    def test_prova_e_de_uso_unico(self):
+        cliente = self._criar_cliente()
+        self.client.force_login(self.usuario)
+        self._solicitar()
+        link = self._link_do_email()
+
+        self.assertEqual(self.client.post(link).status_code, 302)
+        self.assertEqual(self.client.post(link).status_code, 404)
+        cliente.refresh_from_db()
+        self.assertEqual(cliente.usuario, self.usuario)
 
     def test_email_diferente_nao_recebe_link(self):
         cliente = self._criar_cliente(email="outro@example.com")
@@ -128,20 +163,29 @@ class VinculoClienteTests(TestCase):
     def test_link_expirado_e_rejeitado(self):
         cliente = self._criar_cliente()
         self.client.force_login(self.usuario)
-        with mock.patch(
-            "django.core.signing.time.time",
-            return_value=1_700_000_000,
-        ):
-            self._solicitar()
+        self._solicitar()
         link = self._link_do_email()
+        VinculoClienteToken.objects.filter(cliente=cliente).update(
+            expira_em=timezone.now() - timedelta(minutes=1)
+        )
 
-        with mock.patch(
-            "django.core.signing.time.time",
-            return_value=1_700_000_000 + 7_200,
-        ):
-            resposta = self.client.get(link)
+        resposta = self.client.get(link)
 
         self.assertEqual(resposta.status_code, 404)
+        cliente.refresh_from_db()
+        self.assertIsNone(cliente.usuario)
+
+    def test_email_alterado_invalida_prova(self):
+        cliente = self._criar_cliente()
+        self.client.force_login(self.usuario)
+        self._solicitar()
+        link = self._link_do_email()
+        cliente.email = "novo-titular@example.com"
+        cliente.save(update_fields=["email"])
+
+        resposta = self.client.get(link)
+
+        self.assertEqual(resposta.status_code, 403)
         cliente.refresh_from_db()
         self.assertIsNone(cliente.usuario)
 
@@ -150,16 +194,18 @@ class VinculoClienteTests(TestCase):
         self.client.force_login(self.usuario)
         self._solicitar()
         link = self._link_do_email()
+        self.assertEqual(self.client.get(link).status_code, 200)
 
         with mock.patch(
             "customers.services.registrar_auditoria",
             side_effect=RuntimeError("auditoria indisponível"),
         ):
             with self.assertRaises(RuntimeError):
-                self.client.get(link)
+                self.client.post(link)
 
         cliente.refresh_from_db()
         self.assertIsNone(cliente.usuario)
+        self.assertFalse(cliente.vinculo_verificado)
 
     def test_anonimo_e_redirecionado_para_login(self):
         resposta = self.client.get(reverse("accounts:vincular_cliente"))

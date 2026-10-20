@@ -41,6 +41,8 @@ pip-audit -r requirements.txt
 | `CSRF_TRUSTED_ORIGINS` | recomendada | Origens confiáveis para CSRF |
 | `SITE_URL` | recomendada | URL pública usada em e-mails/links |
 | `MERCADOPAGO_ACCESS_TOKEN` | sim (modo real) | Credencial do Mercado Pago |
+| `MERCADOPAGO_COLLECTOR_ID` | sim (modo real) | Recebedor esperado na validação |
+| `MERCADOPAGO_LIVE_MODE` | sim (produção) | Exige ambiente live no webhook |
 | `MERCADOPAGO_WEBHOOK_SECRET` | sim (modo real) | Segredo de assinatura do webhook |
 | `MERCADOPAGO_WEBHOOK_TOLERANCE_SECONDS` | não | Tolerância do timestamp (padrão 300) |
 | `MERCADO_PAGO_FAKE` | não | `True` apenas em desenvolvimento/testes |
@@ -55,14 +57,17 @@ pip-audit -r requirements.txt
 | `RATELIMIT_CHECKOUT` | não | Limite de checkout por sessão (padrão `10/h`) |
 | `RATELIMIT_CHECKOUT_IP` | não | Limite de checkout por IP (padrão `30/h`) |
 | `RATELIMIT_PAGAMENTO` | não | Limite de início de pagamento (padrão `10/m`) |
+| `RATELIMIT_VINCULO_EMISSAO` | não | Emissão de prova de vínculo (padrão `3/h`) |
+| `RATELIMIT_VINCULO_CONSUMO` | não | Consumo de prova de vínculo (padrão `10/h`) |
 | `RATELIMIT_WEBHOOK` | não | Limite do webhook (padrão `60/m`) |
+| `REDIS_URL` | sim (produção) | Cache compartilhado com incremento atômico |
 
 ## Produção
 
 - `config/settings/production.py` exige `DATABASE_URL` PostgreSQL e força
   `sslmode=require`; não há fallback para SQLite (ADR-001).
-- O rate limiting usa `DatabaseCache` em produção. Execute
-  `python manage.py createcachetable` no deploy.
+- O rate limiting usa Redis com incremento atômico em produção. `REDIS_URL`
+  é obrigatório; não use `DatabaseCache` para contadores.
 - Produção rejeita `MERCADO_PAGO_FAKE=True` e `BLING_FAKE=True`; o simulador
   só existe em desenvolvimento/testes.
 - O webhook exige `MERCADOPAGO_WEBHOOK_SECRET` no modo real e aceita o

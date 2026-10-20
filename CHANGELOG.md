@@ -2,6 +2,41 @@
 
 Todas as mudanças relevantes deste projeto são registradas aqui.
 
+## [Fase 2A — remediação da auditoria independente] — 2026-10-20
+
+- **R1/PAY-02:** contrato financeiro completo (tentativa local, ID
+  consultado/retornado, valor, BRL, recebedor e `live_mode`) antes de
+  qualquer mutação; divergência gera auditoria e não altera estoque/pedido.
+- **R2:** pedido estornado/cancelado/pendente não avança para separação,
+  pronto, enviado ou concluído.
+- **R3:** transição operacional centralizada em serviço com
+  `select_for_update`, releitura e autorização por objeto.
+- **R4:** `Pedido.nome_contato` e `identidade_verificada` separam contato de
+  identidade; checkout não expõe nome canônico nem grava consentimento em
+  cadastro não comprovado.
+- **R5/R10:** prova de vínculo com nonce hasheado, uso único, expiração,
+  POST/CSRF e invalidação por e-mail; vínculos legados exigem revisão
+  administrativa com justificativa e auditoria.
+- **R6:** rate limiting migrado para Redis com incremento atômico; início de
+  pagamento virou POST limitado e idempotente; CI com PostgreSQL/Redis.
+- **R7:** timestamp de webhook aceita segundos/milissegundos; query/body/ID
+  precisam concordar; eventos ignorados preservam todos os modelos.
+- **R8:** criação de pedido/reserva auditada atomicamente; liberação de
+  reserva auditada; comando `inventariar_legado` para conciliação read-only.
+
+### Migrations
+
+- `sales.0003_pedido_consentimento_compras_and_more`: snapshot de contato,
+  identidade verificada e flags de consentimento do pedido.
+- `sales.0004_pagamento_init_point`: reuso idempotente de preferência.
+- `customers.0004_cliente_vinculo_verificado_vinculoclientetoken`: estado de
+  vínculo comprovado e provas de uso único.
+
+### Documentação
+
+- `docs/security/fase2a-remediation-spec.md`
+- ADR-001/ADR-002 e runbook atualizados para VPS, Redis e revisão de legado.
+
 ## [Fase 2A] — 2026-10-19 — Contenção de segurança crítica
 
 ### Segurança

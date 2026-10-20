@@ -69,7 +69,7 @@ def test_compra_completa_ate_estoque_baixado(live_server):
         url_pedido = page.url
 
         # Pagamento (simulador em modo fake)
-        page.get_by_role("link", name="Ir para o pagamento").click()
+        page.get_by_role("button", name="Ir para o pagamento").click()
         page.get_by_role("button", name="Aprovar pagamento").click()
 
         expect(page.locator(".badge").nth(1)).to_contain_text("Pago")

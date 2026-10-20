@@ -2,7 +2,7 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import views as auth_views
 from django.contrib.auth.mixins import LoginRequiredMixin
-from django.shortcuts import redirect
+from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils.decorators import method_decorator
 from django.views.generic import FormView, View
@@ -10,6 +10,7 @@ from django.views.generic import FormView, View
 from core.rate_limit import limitar_com_429
 from customers.services import (
     confirmar_vinculo_cliente,
+    obter_token_vinculo,
     solicitar_vinculo_cliente,
 )
 
@@ -30,6 +31,14 @@ class LoginView(auth_views.LoginView):
     redirect_authenticated_user = True
 
 
+@method_decorator(
+    limitar_com_429(
+        key="user",
+        rate=settings.RATELIMIT_VINCULO_EMISSAO,
+        retry_after=3600,
+    ),
+    name="dispatch",
+)
 class VincularClienteView(LoginRequiredMixin, FormView):
     """Solicita o link de comprovação de vínculo ao e-mail já cadastrado."""
 
@@ -53,10 +62,28 @@ class VincularClienteView(LoginRequiredMixin, FormView):
         return redirect(self.get_success_url())
 
 
+@method_decorator(
+    limitar_com_429(
+        key="ip",
+        rate=settings.RATELIMIT_VINCULO_CONSUMO,
+        retry_after=3600,
+    ),
+    name="dispatch",
+)
 class ConfirmarVinculoClienteView(LoginRequiredMixin, View):
-    """Consome o link assinado e cria o vínculo de forma atômica."""
+    """GET apresenta a confirmação; POST consome a prova de uso único."""
+
+    template_name = "registration/confirmar_vinculo.html"
 
     def get(self, request, token):
+        prova = obter_token_vinculo(token, request.user)
+        return render(
+            request,
+            self.template_name,
+            {"token": token, "prova": prova},
+        )
+
+    def post(self, request, token):
         confirmar_vinculo_cliente(
             token=token,
             usuario=request.user,

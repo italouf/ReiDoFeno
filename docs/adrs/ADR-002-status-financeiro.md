@@ -65,6 +65,33 @@ um pedido efetivamente separado.
    - `cancelado`/`falhou` ou pagamento recusado/cancelado → `cancelado`;
    - demais → `pendente`.
 
+## Remediação da auditoria independente (2026-10-20)
+
+- **R1/PAY-02:** `aplicar_resultado_pagamento` valida `Pagamento` local,
+  ID consultado/retornado, `external_reference`, valor exato, BRL, recebedor
+  e `live_mode` antes de qualquer mutação. Divergência gera
+  `pedido.pagamento_contrato_invalido` e não altera pedido/pagamento/estoque.
+- **R2:** qualquer avanço para separação, pronto, enviado ou concluído exige
+  `status_financeiro=pago`; estornado/cancelado/pendente não avançam.
+- **R3:** `alterar_status_operacional()` relê o pedido com
+  `select_for_update` e aplica o recorte de autorização antes de decidir.
+- **R4:** `Pedido.nome_contato` é snapshot do checkout; público/e-mails usam
+  esse nome, não o nome canônico. `identidade_verificada` só é verdadeiro
+  para cliente comprovado; pedidos não verificados não entram em
+  `meus-pedidos`/exportação e não gravam consentimento no cadastro canônico.
+- **R5/R10:** prova de vínculo é nonce hasheado, uso único, expira, é
+  vinculada ao e-mail do cadastro e consumida por POST/CSRF. Vínculos legados
+  ficam `vinculo_verificado=False` até revisão administrativa; admin exige
+  justificativa e audita.
+- **R6:** rate limiting usa Redis com incremento atômico; início de pagamento
+  é POST, limitado e idempotente por `Pagamento.init_point`.
+- **R7:** timestamp aceita segundos/milissegundos (HMAC preserva o valor
+  original); query/body/ID precisam concordar; evento ignorado preserva
+  Pedido, Pagamento e estoque.
+- **R8:** criação de pedido/reserva é auditada atomicamente; liberação de
+  reserva também; `inventariar_legado` lista dados sem prova sem reescrever
+  histórico.
+
 ## Consequências
 
 - Consultas de receita, recompra, NF-e, expiração e avisos passam a usar

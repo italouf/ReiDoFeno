@@ -40,7 +40,10 @@ class MeusPedidosTests(TestCase):
         cliente = pedido_meu.cliente
         usuario = Usuario.objects.create_user(username="cli", password="senha-forte-123")
         cliente.usuario = usuario
+        cliente.vinculo_verificado = True
         cliente.save()
+        pedido_meu.identidade_verificada = True
+        pedido_meu.save(update_fields=["identidade_verificada"])
 
         self.client.force_login(usuario)
         resposta = self.client.get(reverse("sales:meus_pedidos"))

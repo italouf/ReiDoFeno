@@ -1,10 +1,12 @@
 """Serviços de pedido: criação no checkout, aprovação e cancelamento."""
 import logging
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Sum
+from django.shortcuts import get_object_or_404
 
 from customers.models import Cliente
 from stock.models import Estoque
@@ -27,6 +29,29 @@ def _pedido_bloqueado(pedido: Pedido) -> Pedido:
     return Pedido.objects.select_for_update().get(pk=pedido.pk)
 
 
+def pedidos_visiveis_para(usuario):
+    """Recorte de autorização: gestor/admin tudo; vendedor só o que criou."""
+    if usuario.is_superuser or usuario.groups.filter(
+        name__in=("Administrador", "Gestor")
+    ).exists():
+        return Pedido.objects.all()
+    return Pedido.objects.filter(usuario_criador=usuario)
+
+
+@transaction.atomic
+def alterar_status_operacional(
+    pedido_id: int, novo_status: str, *, usuario, request=None
+) -> Pedido:
+    """Centraliza decisão e gravação sob lock, com autorização por objeto."""
+    pedido = get_object_or_404(
+        pedidos_visiveis_para(usuario).select_for_update(), pk=pedido_id
+    )
+    if novo_status == Pedido.Status.CANCELADO:
+        return cancelar_pedido(pedido, request=request, usuario=usuario)
+    pedido.transicionar(novo_status, request=request, usuario=usuario)
+    return pedido
+
+
 def saldo_disponivel(produto, unidade) -> Decimal:
     """Saldo livre (descontada reserva) do produto na unidade."""
     agregado = Estoque.objects.filter(produto=produto, unidade=unidade).aggregate(
@@ -39,25 +64,25 @@ def saldo_disponivel(produto, unidade) -> Decimal:
 
 def _cliente_por_documento(
     *, nome: str, documento: str, email: str, telefone: str,
-) -> Cliente:
+) -> tuple[Cliente, bool]:
     """Localiza ou cria o cliente pelo documento (armazenado em dígitos).
 
-    SEC-02: o checkout nunca vincula ``Cliente.usuario``. O vínculo exige
-    comprovação de posse do e-mail cadastrado (customers.services) ou ato
-    administrativo auditado.
+    SEC-02/R4: o checkout nunca vincula ``Cliente.usuario``. O retorno
+    indica também se o cadastro foi criado agora, para que os dados do
+    pedido não sejam confundidos com identidade comprovada.
     """
     from customers.models import normalizar_documento
 
     documento = normalizar_documento(documento)
     cliente = Cliente.objects.filter(documento=documento).first()
     if cliente:
-        return cliente
+        return cliente, False
     tipo_pessoa = (
         Cliente.TipoPessoa.FISICA
         if len(documento) == 11
         else Cliente.TipoPessoa.JURIDICA
     )
-    return Cliente.objects.create(
+    cliente = Cliente.objects.create(
         nome=nome,
         documento=documento,
         tipo_pessoa=tipo_pessoa,
@@ -66,6 +91,7 @@ def _cliente_por_documento(
         email=email,
         usuario=None,
     )
+    return cliente, True
 
 
 @transaction.atomic
@@ -83,16 +109,30 @@ def criar_pedido_do_carrinho(request, formulario) -> Pedido:
     criado_por_interno = bool(
         usuario and usuario.groups.filter(name__in=GRUPOS_INTERNOS).exists()
     )
-    cliente = _cliente_por_documento(
+    cliente, _criado = _cliente_por_documento(
         nome=formulario.cleaned_data["nome"],
         documento=formulario.cleaned_data["documento"],
         email=formulario.cleaned_data["email"],
         telefone=formulario.cleaned_data.get("telefone", ""),
     )
+    identidade_verificada = bool(
+        not criado_por_interno
+        and usuario is not None
+        and cliente.usuario_id == usuario.pk
+        and cliente.vinculo_verificado
+    )
+    aceita_marketing = bool(
+        not criado_por_interno
+        and formulario.cleaned_data.get("aceita_marketing")
+    )
 
     canal = Pedido.Canal.VENDEDOR if criado_por_interno else Pedido.Canal.LOJA
     pedido = Pedido.objects.create(
         cliente=cliente,
+        nome_contato=formulario.cleaned_data["nome"],
+        identidade_verificada=identidade_verificada,
+        consentimento_compras=not criado_por_interno,
+        consentimento_marketing=aceita_marketing,
         usuario_criador=usuario,
         canal=canal,
         unidade=unidade,
@@ -123,23 +163,47 @@ def criar_pedido_do_carrinho(request, formulario) -> Pedido:
 
     pedido.recalcular_totais()
 
-    # LGPD: consentimento de compras (base contrato) + marketing (opcional).
-    from privacy.services import registrar_consentimento
-
     ip = request.META.get("REMOTE_ADDR")
-    registrar_consentimento(
-        cliente=cliente,
-        finalidade="compras",
-        aceito=True,
-        ip=ip,
-    )
-    if formulario.cleaned_data.get("aceita_marketing"):
+    if identidade_verificada:
+        # LGPD: somente o titular comprovado exerce consentimentos no cadastro.
+        from privacy.services import registrar_consentimento
+
         registrar_consentimento(
             cliente=cliente,
-            finalidade="marketing",
+            finalidade="compras",
             aceito=True,
             ip=ip,
         )
+        if aceita_marketing:
+            registrar_consentimento(
+                cliente=cliente,
+                finalidade="marketing",
+                aceito=True,
+                ip=ip,
+            )
+
+    from core.auditoria import registrar_auditoria
+
+    registrar_auditoria(
+        acao="pedido.criado",
+        instancia=pedido,
+        request=request,
+        depois={
+            "cliente_id": cliente.pk,
+            "canal": pedido.canal,
+            "identidade_verificada": identidade_verificada,
+            "consentimento_compras": pedido.consentimento_compras,
+            "consentimento_marketing": pedido.consentimento_marketing,
+            "total": str(pedido.total),
+            "itens": [
+                {
+                    "produto": item.produto_nome,
+                    "quantidade": str(item.quantidade),
+                }
+                for item in pedido.itens.all()
+            ],
+        },
+    )
 
     carrinho.limpar()
     return pedido
@@ -380,11 +444,31 @@ def cancelar_pedido(
             Pedido.Status.PAGAMENTO_PENDENTE,
         )
     ):
+        itens_liberados = []
         for item in pedido.itens.select_related("produto"):
             liberar_reserva(
                 produto=item.produto,
                 unidade=pedido.unidade,
                 quantidade=item.quantidade,
+            )
+            itens_liberados.append(
+                {
+                    "produto": item.produto_nome,
+                    "quantidade": str(item.quantidade),
+                }
+            )
+        if itens_liberados:
+            from core.auditoria import registrar_auditoria
+
+            registrar_auditoria(
+                acao="pedido.reservas_liberadas",
+                instancia=pedido,
+                request=request,
+                usuario=usuario,
+                depois={
+                    "status_anterior": status_anterior,
+                    "itens": itens_liberados,
+                },
             )
 
     from .emails import email_pedido_cancelado
@@ -405,6 +489,110 @@ STATUS_PROVEDOR_PARA_PAGAMENTO = {
 }
 
 
+class ResultadoPagamentoInvalido(Exception):
+    """Resposta do provedor não corresponde ao contrato local da tentativa."""
+
+    def __init__(self, motivo: str):
+        self.motivo = motivo
+        super().__init__(motivo)
+
+
+def _validar_contrato_pagamento(
+    pedido: Pedido, dados_consulta: dict, *, id_consultado=None
+) -> Pagamento:
+    """Valida tentativa local, ID, valor, moeda, recebedor e ambiente."""
+    pagamento = getattr(pedido, "pagamento", None)
+    if pagamento is None:
+        raise ResultadoPagamentoInvalido(
+            "pedido não possui tentativa de pagamento local"
+        )
+    if pagamento.valor != pedido.total:
+        raise ResultadoPagamentoInvalido(
+            "tentativa local com valor divergente do pedido"
+        )
+
+    id_retornado = str(dados_consulta.get("id") or "").strip()
+    if not id_retornado:
+        raise ResultadoPagamentoInvalido("resposta sem id de pagamento")
+    if id_consultado not in (None, "") and id_retornado != str(id_consultado):
+        raise ResultadoPagamentoInvalido(
+            "id retornado difere do recurso consultado"
+        )
+    if pagamento.id_externo and pagamento.id_externo != id_retornado:
+        raise ResultadoPagamentoInvalido(
+            "tentativa local pertence a outro id externo"
+        )
+
+    external_reference = str(
+        dados_consulta.get("external_reference") or ""
+    ).strip()
+    if external_reference != pedido.numero:
+        raise ResultadoPagamentoInvalido(
+            "external_reference não corresponde ao pedido"
+        )
+
+    valor_bruto = dados_consulta.get("transaction_amount")
+    if valor_bruto is None:
+        raise ResultadoPagamentoInvalido("resposta sem valor")
+    try:
+        valor = Decimal(str(valor_bruto))
+    except (InvalidOperation, TypeError, ValueError) as erro:
+        raise ResultadoPagamentoInvalido("valor inválido") from erro
+    if valor != pedido.total:
+        raise ResultadoPagamentoInvalido(
+            f"valor divergente: provedor={valor}, pedido={pedido.total}"
+        )
+
+    moeda = str(dados_consulta.get("currency_id") or "").strip().upper()
+    if moeda != "BRL":
+        raise ResultadoPagamentoInvalido(f"moeda divergente: {moeda or 'ausente'}")
+
+    collector = str(dados_consulta.get("collector_id") or "").strip()
+    collector_configurado = str(
+        getattr(settings, "MERCADO_PAGO_COLLECTOR_ID", "") or ""
+    ).strip()
+    if collector_configurado:
+        if collector != collector_configurado:
+            raise ResultadoPagamentoInvalido("recebedor divergente")
+    elif not getattr(settings, "MERCADO_PAGO_FAKE", False):
+        raise ResultadoPagamentoInvalido("recebedor não configurado")
+
+    if "live_mode" in dados_consulta:
+        live_mode = dados_consulta.get("live_mode")
+        if isinstance(live_mode, str):
+            live_mode = live_mode.strip().lower() == "true"
+        if bool(live_mode) != bool(
+            getattr(settings, "MERCADO_PAGO_LIVE_MODE", False)
+        ):
+            raise ResultadoPagamentoInvalido("ambiente (live_mode) divergente")
+    elif not getattr(settings, "MERCADO_PAGO_FAKE", False):
+        raise ResultadoPagamentoInvalido("resposta sem live_mode")
+
+    return pagamento
+
+
+def _registrar_contrato_invalido(
+    pedido: Pedido, dados_consulta: dict, erro: ResultadoPagamentoInvalido, request
+) -> None:
+    from core.auditoria import registrar_auditoria
+
+    registrar_auditoria(
+        acao="pedido.pagamento_contrato_invalido",
+        instancia=pedido,
+        request=request,
+        depois={
+            "motivo": erro.motivo[:300],
+            "id_retornado": str(dados_consulta.get("id") or "")[:80],
+            "external_reference": str(
+                dados_consulta.get("external_reference") or ""
+            )[:30],
+            "status_provedor": str(
+                dados_consulta.get("status") or ""
+            )[:30],
+        },
+    )
+
+
 def _atualizar_pagamento_resultado(
     pedido: Pedido, *, status_provedor: str, id_externo: str
 ) -> None:
@@ -415,6 +603,12 @@ def _atualizar_pagamento_resultado(
     if (
         pagamento.status == Pagamento.Status.APROVADO
         and status_provedor not in ("charged_back", "refunded")
+    ):
+        return
+    if novo_status == Pagamento.Status.PENDENTE and pagamento.status in (
+        Pagamento.Status.APROVADO,
+        Pagamento.Status.RECUSADO,
+        Pagamento.Status.CANCELADO,
     ):
         return
     pagamento.status = novo_status
@@ -441,23 +635,15 @@ def _registrar_resultado_financeiro(
     )
 
 
-@transaction.atomic
-def aplicar_resultado_pagamento(dados_consulta: dict, *, request=None) -> Pedido | None:
-    """Aplica o resultado consultado no provedor ao pedido correspondente.
-
-    ADR-002/PAY-02: eventos fora de ordem não rebaixam um pagamento já
-    aprovado. A aprovação altera apenas o financeiro; recusa/cancelamento
-    encerram o andamento operacional e liberam reservas.
-    """
-    numero = str(dados_consulta.get("external_reference") or "")
-    status_provedor = str(dados_consulta.get("status") or "")
-    id_externo = str(dados_consulta.get("id") or "")
-
-    pedido = Pedido.objects.select_for_update().filter(numero=numero).first()
-    if pedido is None:
-        logger.warning("Notificação sem pedido correspondente: %s", numero)
-        return None
-
+def _aplicar_resultado_valido(
+    pedido: Pedido,
+    dados_consulta: dict,
+    *,
+    request,
+    status_provedor: str,
+    id_externo: str,
+) -> Pedido:
+    """Aplica um resultado já validado, com o pedido bloqueado pelo chamador."""
     if status_provedor == "approved":
         ja_estava_pago = (
             pedido.status_financeiro == Pedido.StatusFinanceiro.PAGO
@@ -631,3 +817,53 @@ def aplicar_resultado_pagamento(dados_consulta: dict, *, request=None) -> Pedido
         request=request,
     )
     return pedido
+
+
+def aplicar_resultado_pagamento(
+    dados_consulta: dict, *, request=None, id_consultado=None
+) -> Pedido | None:
+    """Valida o contrato e aplica o resultado sob lock.
+
+    R1/PAY-02: divergência de tentativa/ID/valor/moeda/recebedor/ambiente
+    não altera pedido, pagamento ou estoque; gera LogAuditoria e levanta
+    ``ResultadoPagamentoInvalido`` após commitar a ocorrência.
+    """
+    numero = str(dados_consulta.get("external_reference") or "")
+    status_provedor = str(dados_consulta.get("status") or "")
+    id_externo = str(dados_consulta.get("id") or "")
+
+    pedido_inicial = Pedido.objects.filter(numero=numero).first()
+    if pedido_inicial is None:
+        logger.warning("Notificação sem pedido correspondente: %s", numero)
+        return None
+
+    erro_contrato = None
+    resultado = None
+    with transaction.atomic():
+        pedido = Pedido.objects.select_for_update().get(pk=pedido_inicial.pk)
+        try:
+            _validar_contrato_pagamento(
+                pedido, dados_consulta, id_consultado=id_consultado
+            )
+        except ResultadoPagamentoInvalido as erro:
+            logger.error(
+                "Resultado de pagamento inválido para %s: %s",
+                pedido.numero,
+                erro.motivo,
+            )
+            _registrar_contrato_invalido(
+                pedido, dados_consulta, erro, request
+            )
+            erro_contrato = erro
+        else:
+            resultado = _aplicar_resultado_valido(
+                pedido,
+                dados_consulta,
+                request=request,
+                status_provedor=status_provedor,
+                id_externo=id_externo,
+            )
+
+    if erro_contrato is not None:
+        raise erro_contrato
+    return resultado

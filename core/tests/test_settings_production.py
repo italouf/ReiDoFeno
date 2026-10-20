@@ -14,6 +14,9 @@ class ProducaoPostgresTests(SimpleTestCase):
         env["DJANGO_SETTINGS_MODULE"] = "config.settings.production"
         env["DJANGO_SECRET_KEY"] = "chave-de-teste-segura"
         env["DJANGO_ALLOWED_HOSTS"] = "testserver"
+        env["MERCADOPAGO_COLLECTOR_ID"] = "collector-teste"
+        env["MERCADOPAGO_LIVE_MODE"] = "True"
+        env["REDIS_URL"] = "redis://localhost:6379/1"
         env.pop("DATABASE_URL", None)
         if database_url is not None:
             env["DATABASE_URL"] = database_url
@@ -101,3 +104,34 @@ class ProducaoPostgresTests(SimpleTestCase):
 
         self.assertNotEqual(resultado.returncode, 0)
         self.assertIn("BLING_FAKE", resultado.stderr + resultado.stdout)
+
+    def test_sem_redis_url_falha_em_producao(self):
+        resultado = self._executar(
+            database_url="postgres://usuario:senha@localhost:5432/reidofeno",
+            extra_env={"REDIS_URL": ""},
+        )
+
+        self.assertNotEqual(resultado.returncode, 0)
+        self.assertIn("REDIS_URL", resultado.stderr + resultado.stdout)
+
+    def test_sem_collector_falha_em_producao(self):
+        resultado = self._executar(
+            database_url="postgres://usuario:senha@localhost:5432/reidofeno",
+            extra_env={"MERCADOPAGO_COLLECTOR_ID": ""},
+        )
+
+        self.assertNotEqual(resultado.returncode, 0)
+        self.assertIn(
+            "MERCADOPAGO_COLLECTOR_ID", resultado.stderr + resultado.stdout
+        )
+
+    def test_live_mode_falso_falha_em_producao(self):
+        resultado = self._executar(
+            database_url="postgres://usuario:senha@localhost:5432/reidofeno",
+            extra_env={"MERCADOPAGO_LIVE_MODE": "False"},
+        )
+
+        self.assertNotEqual(resultado.returncode, 0)
+        self.assertIn(
+            "MERCADOPAGO_LIVE_MODE", resultado.stderr + resultado.stdout
+        )

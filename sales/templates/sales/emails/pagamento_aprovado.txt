@@ -1,6 +1,6 @@
 Pagamento aprovado — pedido {{ pedido.numero }}
 
-Olá, {{ pedido.cliente.nome }}.
+Olá, {{ pedido.nome_contato|default:pedido.cliente.nome }}.
 
 Seu pagamento do pedido {{ pedido.numero }} foi aprovado!
 Valor: R$ {{ pedido.total }}

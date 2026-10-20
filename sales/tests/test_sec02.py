@@ -66,9 +66,13 @@ class CheckoutNaoVinculaClienteTests(TestCase):
         usuario = Usuario.objects.create_user(
             username="titular-sec02", password=self.senha
         )
-        meu_cliente = ClienteFactory(usuario=usuario)
+        meu_cliente = ClienteFactory(
+            usuario=usuario, vinculo_verificado=True
+        )
         outro_cliente = ClienteFactory()
-        meu_pedido = PedidoFactory(cliente=meu_cliente)
+        meu_pedido = PedidoFactory(
+            cliente=meu_cliente, identidade_verificada=True
+        )
         pedido_alheio = PedidoFactory(cliente=outro_cliente)
 
         self.client.force_login(usuario)

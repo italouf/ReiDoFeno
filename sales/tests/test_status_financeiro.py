@@ -11,6 +11,7 @@ from core.models import LogAuditoria
 from sales.factories import PedidoFactory
 from sales.models import Pagamento, Pedido
 from sales.services import (
+    ResultadoPagamentoInvalido,
     _validar_disponibilidade,
     aplicar_resultado_pagamento,
     cancelar_pedido,
@@ -66,6 +67,24 @@ class StatusFinanceiroModelTests(TestCase):
         pedido.transicionar(Pedido.Status.EM_SEPARACAO)
 
         self.assertEqual(pedido.status, Pedido.Status.EM_SEPARACAO)
+
+    def test_estornado_nao_avanca_para_concluido(self):
+        pedido = PedidoFactory(
+            status=Pedido.Status.PRONTO_PARA_ENTREGA,
+            status_financeiro=Pedido.StatusFinanceiro.ESTORNADO,
+        )
+
+        with self.assertRaises(ValidationError):
+            pedido.transicionar(Pedido.Status.CONCLUIDO)
+
+    def test_pendente_nao_avanca_para_pronto(self):
+        pedido = PedidoFactory(
+            status=Pedido.Status.EM_SEPARACAO,
+            status_financeiro=Pedido.StatusFinanceiro.PENDENTE,
+        )
+
+        with self.assertRaises(ValidationError):
+            pedido.transicionar(Pedido.Status.PRONTO_PARA_ENTREGA)
 
     def test_transicao_para_estado_financeiro_e_bloqueada_no_modelo(self):
         pedido = PedidoFactory(status=Pedido.Status.AGUARDANDO_PAGAMENTO)
@@ -190,7 +209,12 @@ class ResultadoPagamentoTests(TestCase):
                 "external_reference": pedido.numero,
                 "status": status,
                 "id": "pay-status",
-            }
+                "transaction_amount": str(pedido.total),
+                "currency_id": "BRL",
+                "collector_id": "fake-collector",
+                "live_mode": False,
+            },
+            id_consultado="pay-status",
         )
 
     def test_pendente_mantem_status_operacional(self):
@@ -331,6 +355,22 @@ class ResultadoPagamentoTests(TestCase):
             pedido.pagamento.status, Pagamento.Status.CANCELADO
         )
 
+    def test_pending_apos_refunded_preserva_ambos_os_estados(self):
+        pedido = self._pedido_com_pagamento()
+        marcar_pagamento_aprovado(pedido, id_externo="pay-status")
+        self._aplicar(pedido, "refunded")
+
+        self._aplicar(pedido, "pending")
+
+        pedido.refresh_from_db()
+        pedido.pagamento.refresh_from_db()
+        self.assertEqual(
+            pedido.status_financeiro, Pedido.StatusFinanceiro.ESTORNADO
+        )
+        self.assertEqual(
+            pedido.pagamento.status, Pagamento.Status.CANCELADO
+        )
+
     def test_status_desconhecido_e_auditado(self):
         pedido = self._pedido_com_pagamento()
 
@@ -444,28 +484,44 @@ class ResultadoPagamentoTests(TestCase):
             pedido.status_financeiro, Pedido.StatusFinanceiro.ESTORNADO
         )
 
-    def test_resultado_pendente_sem_pagamento_e_sem_pedido(self):
+    def test_resultado_sem_tentativa_local_e_invalido(self):
         pedido = PedidoFactory(status=Pedido.Status.AGUARDANDO_PAGAMENTO)
-        resultado = aplicar_resultado_pagamento(
-            {
-                "external_reference": pedido.numero,
-                "status": "pending",
-                "id": "pay-sem-objeto",
-            }
-        )
+        with self.assertRaises(ResultadoPagamentoInvalido):
+            aplicar_resultado_pagamento(
+                {
+                    "external_reference": pedido.numero,
+                    "status": "pending",
+                    "id": "pay-sem-objeto",
+                    "transaction_amount": str(pedido.total),
+                    "currency_id": "BRL",
+                    "collector_id": "fake-collector",
+                    "live_mode": False,
+                },
+                id_consultado="pay-sem-objeto",
+            )
         inexistente = aplicar_resultado_pagamento(
             {
                 "external_reference": "PF999999",
                 "status": "pending",
                 "id": "pay-inexistente",
-            }
+                "transaction_amount": "10.00",
+                "currency_id": "BRL",
+                "collector_id": "fake-collector",
+                "live_mode": False,
+            },
+            id_consultado="pay-inexistente",
         )
 
-        self.assertEqual(resultado, pedido)
         self.assertIsNone(inexistente)
         pedido.refresh_from_db()
         self.assertEqual(
             pedido.status_financeiro, Pedido.StatusFinanceiro.PENDENTE
+        )
+        self.assertTrue(
+            LogAuditoria.objects.filter(
+                acao="pedido.pagamento_contrato_invalido",
+                objeto_id=str(pedido.pk),
+            ).exists()
         )
 
     def test_cancelar_com_financeiro_estornado_preserva_estorno(self):

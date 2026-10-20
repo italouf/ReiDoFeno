@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Confirmar vínculo — Rei do Feno{% endblock %}
+{% block content %}
+<div class="cartao form-cartao" style="max-width:38rem;">
+  <h1>Confirmar vínculo</h1>
+  <p>
+    Este link confirma que você controla o e-mail cadastrado para o cliente
+    <strong>{{ prova.cliente.nome }}</strong>. A prova é de uso único e expira
+    em {{ prova.expira_em|date:"d/m/Y H:i" }}.
+  </p>
+  <p>
+    Ao confirmar, sua conta passará a acessar o histórico de pedidos e os
+    direitos de privacidade desse cadastro.
+  </p>
+  <form method="post">
+    {% csrf_token %}
+    <div class="form-acoes">
+      <button type="submit" class="btn">Confirmar vínculo</button>
+      <a class="btn btn--secundario" href="{% url 'sales:meus_pedidos' %}">Cancelar</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

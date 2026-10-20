@@ -58,6 +58,12 @@ class Cliente(models.Model):
         related_name="cliente",
         verbose_name="usuário vinculado",
     )
+    vinculo_verificado = models.BooleanField(
+        "vínculo comprovado",
+        default=False,
+        db_index=True,
+        help_text="Vínculo criado pelo fluxo de comprovação ou revisão administrativa.",
+    )
     criado_em = models.DateTimeField("criado em", auto_now_add=True)
 
     class Meta:
@@ -123,4 +129,47 @@ class InteracaoVendedor(models.Model):
         return (
             f"{self.get_tipo_display()} — {self.cliente.nome} "
             f"por {self.vendedor.username}"
+        )
+
+
+class VinculoClienteToken(models.Model):
+    """Prova de vínculo de uso único; o token enviado é assinado e opaco."""
+
+    cliente = models.ForeignKey(
+        Cliente,
+        on_delete=models.CASCADE,
+        related_name="tokens_vinculo",
+        verbose_name="cliente",
+    )
+    usuario = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="tokens_vinculo",
+        verbose_name="usuário",
+    )
+    nonce_hash = models.CharField(
+        "hash do nonce", max_length=64, unique=True
+    )
+    email_hash = models.CharField("hash do e-mail", max_length=64)
+    criado_em = models.DateTimeField("criado em", auto_now_add=True)
+    expira_em = models.DateTimeField("expira em")
+    usado_em = models.DateTimeField("usado em", null=True, blank=True)
+    revogado_em = models.DateTimeField("revogado em", null=True, blank=True)
+
+    class Meta:
+        verbose_name = "prova de vínculo"
+        verbose_name_plural = "provas de vínculo"
+        ordering = ["-criado_em"]
+
+    def __str__(self):
+        return f"vínculo cliente={self.cliente_id} usuário={self.usuario_id}"
+
+    @property
+    def ativo(self) -> bool:
+        from django.utils import timezone
+
+        return (
+            self.usado_em is None
+            and self.revogado_em is None
+            and self.expira_em > timezone.now()
         )

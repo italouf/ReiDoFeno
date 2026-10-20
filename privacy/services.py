@@ -49,7 +49,9 @@ def abrir_solicitacao(*, cliente: Cliente, tipo: str) -> SolicitacaoTitular:
 def exportar_dados_do_titular(cliente: Cliente) -> dict:
     """Agrega todos os dados pessoais do titular em estrutura portável."""
     pedidos = []
-    for pedido in cliente.pedidos.prefetch_related("itens"):
+    for pedido in cliente.pedidos.filter(
+        identidade_verificada=True
+    ).prefetch_related("itens"):
         pedidos.append(
             {
                 "numero": pedido.numero,
