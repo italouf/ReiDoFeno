@@ -2,6 +2,22 @@
 
 Todas as mudanças relevantes deste projeto são registradas aqui.
 
+## [Fase 2A — fechamento local E01/E02] — 2026-10-20
+
+- **E01:** teste rastreado confirma que a correção de `id_externo` e
+  `aprovado_em` em pagamento legado já aprovado preenche os metadados,
+  preserva o status e grava
+  `pedido.pagamento_aprovado_metadados_corrigidos` com antes/depois; a
+  reaplicação preserva a primeira data e não duplica o evento.
+- **E02:** falha controlada na auditoria da correção reverte ID, data e
+  evento parcial, preservando o pagamento aprovado e o financeiro conciliado.
+- **Documentação:** spec consolidada com SHA auditado `05e5a2f`, CI run
+  39470071685, evidências atuais e riscos residuais; sem alteração funcional
+  ou migration nesta etapa.
+- **Validação local:** 346 passed, 4 skipped, 230 subtests, cobertura
+  89,67%; Ruff, Bandit (0 medium/high), pip-audit, check, check de produção
+  e migração histórica aprovados. CI do HEAD final pendente de execução na PR.
+
 ## [Fase 2A — correções D01–D03] — 2026-10-20
 
 - **D01:** edição própria relê e reautoriza o vínculo sob lock; revogação
