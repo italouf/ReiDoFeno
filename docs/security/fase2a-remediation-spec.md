@@ -192,10 +192,10 @@ enviado → concluido`
 
 ### Evidência local adicional
 
-- Suíte: **342 passed, 4 skipped, 230 subtests**.
+- Suíte: **343 passed, 4 skipped, 230 subtests**.
 - Skips: 3 testes de concorrência nativa PostgreSQL e 1 de Redis real sem
   `REDIS_URL`.
-- Cobertura global: 89,55%; `sales/services.py`: 94,54%;
+- Cobertura global: 89,58%; `sales/services.py`: 94,54%;
   `customers/services.py`: 94,55%.
 - Ruff, Bandit (0 medium/high), pip-audit, `manage.py check`,
   `check --deploy` e `makemigrations --check` passaram.

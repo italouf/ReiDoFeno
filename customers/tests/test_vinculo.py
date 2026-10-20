@@ -396,3 +396,45 @@ class VinculoClienteTests(TestCase):
             reverse("customers:cliente_editar", args=[cliente.pk])
         )
         self.assertEqual(leitura.status_code, 403)
+
+    def test_edicao_antes_da_revogacao_nao_impede_revogacao(self):
+        cliente = self._criar_cliente(
+            usuario=self.usuario, vinculo_verificado=True
+        )
+        self.client.force_login(self.usuario)
+
+        resposta = self.client.post(
+            reverse("customers:cliente_editar", args=[cliente.pk]),
+            {
+                "nome": "Nome Editado Antes",
+                "tipo_pessoa": cliente.tipo_pessoa,
+                "documento": cliente.documento,
+                "categoria": cliente.categoria,
+                "telefone": cliente.telefone,
+                "email": cliente.email,
+                "logradouro": "",
+                "numero": "",
+                "bairro": "",
+                "cidade": "",
+                "uf": "",
+                "cep": "",
+                "preferencia": "",
+            },
+        )
+        self.assertEqual(resposta.status_code, 302)
+
+        revisar_vinculo_cliente(
+            cliente=cliente,
+            verificado=False,
+            justificativa="Revogação após edição.",
+            request=None,
+        )
+
+        cliente.refresh_from_db()
+        self.assertEqual(cliente.nome, "Nome Editado Antes")
+        self.assertIsNone(cliente.usuario)
+        self.assertFalse(cliente.vinculo_verificado)
+        leitura = self.client.get(
+            reverse("customers:cliente_editar", args=[cliente.pk])
+        )
+        self.assertEqual(leitura.status_code, 403)
