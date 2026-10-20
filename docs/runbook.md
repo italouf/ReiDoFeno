@@ -4,6 +4,8 @@
 > (ADR-001). As seções de Render abaixo permanecem como blueprint legado
 > até a migração de infraestrutura da Fase 3; em qualquer host, o contrato é
 > `DATABASE_URL` PostgreSQL com TLS e `createcachetable` no deploy.
+> O proxy reverso deve preservar o IP do cliente em `REMOTE_ADDR`; não
+> confie em `X-Forwarded-For` de origem não controlada (SEC-03/rate limit).
 
 ## 1. Visão geral
 

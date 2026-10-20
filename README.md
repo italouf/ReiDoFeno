@@ -60,6 +60,10 @@ pip-audit -r requirements.txt
   `sslmode=require`; não há fallback para SQLite (ADR-001).
 - O rate limiting usa `DatabaseCache` em produção. Execute
   `python manage.py createcachetable` no deploy.
+- Se houver proxy reverso, configure-o para preservar o IP real em
+  `REMOTE_ADDR`. Não aceite `X-Forwarded-For` de origem não controlada
+  (SEC-03); ajuste o proxy, não o código, para que login/webhook tenham
+  limites por cliente.
 - Aplique `python manage.py migrate --noinput` antes de liberar tráfego.
 - Consulte `docs/runbook.md` para deploy, backups, restore e resposta a
   incidentes.
