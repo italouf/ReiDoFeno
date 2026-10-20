@@ -104,6 +104,23 @@ class StatusFinanceiroModelTests(TestCase):
             ).exists()
         )
 
+    def test_aprovacao_em_falhou_legado_nao_marca_pago(self):
+        pedido = PedidoFactory(status=Pedido.Status.FALHOU)
+
+        marcar_pagamento_aprovado(pedido, id_externo="123")
+
+        pedido.refresh_from_db()
+        self.assertEqual(
+            pedido.status_financeiro, Pedido.StatusFinanceiro.CANCELADO
+        )
+        self.assertEqual(pedido.status, Pedido.Status.FALHOU)
+        self.assertTrue(
+            LogAuditoria.objects.filter(
+                acao="pedido.pagamento_inconsistente",
+                objeto_id=str(pedido.pk),
+            ).exists()
+        )
+
 
 class ResultadoPagamentoTests(TestCase):
     def _pedido_com_pagamento(self):

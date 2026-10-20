@@ -173,8 +173,34 @@ def marcar_pagamento_aprovado(
         )
         return
 
+    if pedido.status_financeiro in (
+        Pedido.StatusFinanceiro.CANCELADO,
+        Pedido.StatusFinanceiro.ESTORNADO,
+    ):
+        from core.auditoria import registrar_auditoria
+
+        logger.error(
+            "Pedido %s com financeiro %s recebeu aprovação; "
+            "conciliação manual necessária.",
+            pedido.numero,
+            pedido.status_financeiro,
+        )
+        registrar_auditoria(
+            acao="pedido.pagamento_inconsistente",
+            instancia=pedido,
+            request=request,
+            depois={
+                "status": pedido.status,
+                "status_financeiro": pedido.status_financeiro,
+                "id_externo": id_externo,
+            },
+        )
+        _atualizar_pagamento_aprovado(pedido, id_externo=id_externo)
+        return
+
     if pedido.status in (
         Pedido.Status.RASCUNHO,
+        Pedido.Status.FALHOU,
         Pedido.Status.EM_SEPARACAO,
         Pedido.Status.PRONTO_PARA_ENTREGA,
         Pedido.Status.ENVIADO,

@@ -45,8 +45,9 @@ um pedido efetivamente separado.
    conciliação manual; o pedido não é reaberto. Eventos `pending`,
    `refused` ou `cancelled` posteriores a um pagamento aprovado são
    ignorados e auditados (`pedido.pagamento_evento_ignorado`).
-7. A aprovação de um pedido em `rascunho` ou já em andamento pós-pagamento
-   sem financeiro `pago` não altera o pedido; gera
+7. A aprovação de um pedido em `rascunho`, com financeiro
+   `cancelado`/`estornado` ou já em andamento pós-pagamento sem financeiro
+   `pago` não altera o pedido; gera
    `pedido.pagamento_inconsistente` para conciliação.
 8. A migration `0002_pedido_status_financeiro` popula o novo campo usando
    `Pedido.status` e `Pagamento.status`:

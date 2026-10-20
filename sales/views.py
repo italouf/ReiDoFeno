@@ -200,7 +200,6 @@ class PagamentoIniciarView(View):
             not in (
                 Pedido.Status.AGUARDANDO_PAGAMENTO,
                 Pedido.Status.PAGAMENTO_PENDENTE,
-                Pedido.Status.FALHOU,
             )
         ):
             messages.info(request, "Este pedido não está aguardando pagamento.")
