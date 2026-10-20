@@ -159,6 +159,26 @@ class Pedido(models.Model):
         verbose_name = "pedido"
         verbose_name_plural = "pedidos"
         ordering = ["-criado_em"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(subtotal__gte=Decimal("0.00")),
+                name="pedido_subtotal_nao_negativo",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(frete__gte=Decimal("0.00")),
+                name="pedido_frete_nao_negativo",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(total__gte=Decimal("0.00")),
+                name="pedido_total_nao_negativo",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    total=models.F("subtotal") + models.F("frete")
+                ),
+                name="pedido_total_igual_subtotal_mais_frete",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.numero or '(sem número)'} — {self.cliente.nome} [{self.status}]"
@@ -170,6 +190,25 @@ class Pedido(models.Model):
         if criando and not self.numero:
             self.numero = f"PF{self.pk:06d}"
             super().save(update_fields=["numero"])
+
+    def clean(self):
+        super().clean()
+        erros = {}
+        if self.subtotal is not None and self.subtotal < 0:
+            erros["subtotal"] = "Subtotal não pode ser negativo."
+        if self.frete is not None and self.frete < 0:
+            erros["frete"] = "Frete não pode ser negativo."
+        if self.total is not None and self.total < 0:
+            erros["total"] = "Total não pode ser negativo."
+        if (
+            self.subtotal is not None
+            and self.frete is not None
+            and self.total is not None
+            and self.total != self.subtotal + self.frete
+        ):
+            erros["total"] = "Total deve ser igual a subtotal + frete."
+        if erros:
+            raise ValidationError(erros)
 
     def tem_prova_financeira(self) -> bool:
         """Prova explícita (provedor validado ou reconciliação autorizada)."""
@@ -255,11 +294,15 @@ class Pedido(models.Model):
         )
 
     def recalcular_totais(self) -> None:
+        if Decimal(self.frete) < 0:
+            raise ValidationError("Frete não pode ser negativo.")
         self.subtotal = sum(
             (item.subtotal for item in self.itens.all()), Decimal("0.00")
         )
         self.total = self.subtotal + Decimal(self.frete)
-        self.save(update_fields=["subtotal", "total", "atualizado_em"])
+        self.save(
+            update_fields=["subtotal", "frete", "total", "atualizado_em"]
+        )
 
 
 class ItemPedido(models.Model):
@@ -283,9 +326,29 @@ class ItemPedido(models.Model):
     class Meta:
         verbose_name = "item do pedido"
         verbose_name_plural = "itens do pedido"
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(quantidade__gt=Decimal("0.00")),
+                name="item_quantidade_positiva",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(preco_unitario__gte=Decimal("0.00")),
+                name="item_preco_nao_negativo",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.quantidade}× {self.produto_nome}"
+
+    def clean(self):
+        super().clean()
+        erros = {}
+        if self.quantidade is not None and self.quantidade <= 0:
+            erros["quantidade"] = "Quantidade deve ser maior que zero."
+        if self.preco_unitario is not None and self.preco_unitario < 0:
+            erros["preco_unitario"] = "Preço unitário não pode ser negativo."
+        if erros:
+            raise ValidationError(erros)
 
     @property
     def subtotal(self) -> Decimal:
@@ -330,9 +393,22 @@ class Pagamento(models.Model):
     class Meta:
         verbose_name = "pagamento"
         verbose_name_plural = "pagamentos"
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(valor__gte=Decimal("0.00")),
+                name="pagamento_valor_nao_negativo",
+            ),
+        ]
 
     def __str__(self):
         return f"Pagamento {self.pedido.numero} [{self.status}] R$ {self.valor}"
+
+    def clean(self):
+        super().clean()
+        if self.valor is not None and self.valor < 0:
+            raise ValidationError(
+                {"valor": "Valor do pagamento não pode ser negativo."}
+            )
 
 
 class PagamentoWebhookEvento(models.Model):
