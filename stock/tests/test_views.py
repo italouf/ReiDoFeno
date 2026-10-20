@@ -136,8 +136,12 @@ class MovimentacaoFluxoTests(TestCase):
         destino = Estoque.objects.get(produto=self.produto, unidade=self.iacu)
         self.assertEqual(origem.quantidade, Decimal("35"))
         self.assertEqual(destino.quantidade, Decimal("15"))
-        saida = MovimentoEstoque.objects.filter(tipo="saida").latest("id")
-        entrada = MovimentoEstoque.objects.filter(tipo="entrada").latest("id")
+        saida = MovimentoEstoque.objects.filter(
+            tipo="transferencia_saida"
+        ).latest("id")
+        entrada = MovimentoEstoque.objects.filter(
+            tipo="transferencia_entrada"
+        ).latest("id")
         self.assertEqual(saida.movimento_par, entrada)
 
     def test_ledger_exibe_movimentos(self):

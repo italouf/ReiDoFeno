@@ -1,6 +1,44 @@
+from decimal import Decimal
+
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
+
+from .exceptions import ImutabilidadeViolation
+
+TIPOS_DELTA_POSITIVO = (
+    "entrada",
+    "entrada_inicial",
+    "transferencia_entrada",
+    "ajuste_positivo",
+)
+TIPOS_DELTA_NEGATIVO = (
+    "saida",
+    "transferencia_saida",
+    "ajuste_negativo",
+    "baixa_definitiva",
+)
+TIPOS_DELTA_LEGADOS = ("ajuste", "transferencia")
+
+
+class MovimentoEstoqueQuerySet(models.QuerySet):
+    """Ledger append-only: mutações em massa também são proibidas."""
+
+    def update(self, **kwargs):
+        raise ImutabilidadeViolation(
+            "Movimentos de estoque não podem ser alterados em massa; "
+            "crie um movimento de compensação."
+        )
+
+    def delete(self):
+        raise ImutabilidadeViolation(
+            "Movimentos de estoque não podem ser excluídos em massa; "
+            "crie um movimento de compensação."
+        )
+
+    def _update_permitido(self, **kwargs):
+        """Operação interna restrita ao vínculo recíproco de transferência."""
+        return super().update(**kwargs)
 
 
 class Estoque(models.Model):
@@ -63,9 +101,15 @@ class MovimentoEstoque(models.Model):
 
     class Tipo(models.TextChoices):
         ENTRADA = "entrada", "Entrada"
+        ENTRADA_INICIAL = "entrada_inicial", "Entrada inicial (migração)"
         SAIDA = "saida", "Saída"
-        AJUSTE = "ajuste", "Ajuste"
-        TRANSFERENCIA = "transferencia", "Transferência"
+        AJUSTE = "ajuste", "Ajuste (legado)"
+        AJUSTE_POSITIVO = "ajuste_positivo", "Ajuste positivo"
+        AJUSTE_NEGATIVO = "ajuste_negativo", "Ajuste negativo"
+        TRANSFERENCIA = "transferencia", "Transferência (legado)"
+        TRANSFERENCIA_ENTRADA = "transferencia_entrada", "Entrada por transferência"
+        TRANSFERENCIA_SAIDA = "transferencia_saida", "Saída por transferência"
+        BAIXA_DEFINITIVA = "baixa_definitiva", "Baixa definitiva"
 
     produto = models.ForeignKey(
         "catalog.Produto",
@@ -79,10 +123,16 @@ class MovimentoEstoque(models.Model):
         related_name="movimentos",
         verbose_name="unidade",
     )
-    tipo = models.CharField("tipo", max_length=15, choices=Tipo.choices)
+    tipo = models.CharField("tipo", max_length=30, choices=Tipo.choices)
+    delta = models.DecimalField(
+        "delta",
+        max_digits=12,
+        decimal_places=2,
+        help_text="Sinal e magnitude: positivo entra, negativo sai.",
+    )
     quantidade = models.DecimalField(
         "quantidade", max_digits=12, decimal_places=2,
-        help_text="Valor absoluto da movimentação (ajustes usam sinal).",
+        help_text="Derivado de abs(delta); mantido para leitura.",
     )
     motivo = models.TextField("motivo", blank=True)
     usuario = models.ForeignKey(
@@ -103,22 +153,53 @@ class MovimentoEstoque(models.Model):
     )
     criado_em = models.DateTimeField("criado em", auto_now_add=True)
 
+    objects = MovimentoEstoqueQuerySet.as_manager()
+
     class Meta:
         verbose_name = "movimento de estoque"
         verbose_name_plural = "movimentos de estoque"
         ordering = ["-criado_em"]
+        constraints = [
+            models.CheckConstraint(
+                condition=~models.Q(delta=Decimal("0.00")),
+                name="movimento_delta_nao_zero",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        tipo__in=TIPOS_DELTA_POSITIVO,
+                        delta__gt=Decimal("0.00"),
+                    )
+                    | models.Q(
+                        tipo__in=TIPOS_DELTA_NEGATIVO,
+                        delta__lt=Decimal("0.00"),
+                    )
+                    | models.Q(tipo__in=TIPOS_DELTA_LEGADOS)
+                ),
+                name="movimento_delta_coerente_com_tipo",
+            ),
+        ]
 
     def __str__(self):
-        return f"{self.get_tipo_display()} {self.quantidade} {self.produto} @ {self.unidade}"
+        return (
+            f"{self.get_tipo_display()} {self.delta} "
+            f"{self.produto} @ {self.unidade}"
+        )
 
     def save(self, *args, **kwargs):
-        if self.pk and not kwargs.pop("_permitir_edicao", False):
-            raise ValidationError(
-                "Movimentos de estoque são imutáveis; faça um ajuste ou estorno."
+        if self.pk is not None:
+            raise ImutabilidadeViolation(
+                f"Movimento {self.pk} não pode ser alterado. "
+                "Crie um movimento de compensação."
             )
+        if self.delta is None:
+            raise ValidationError("Delta é obrigatório.")
+        self.delta = Decimal(self.delta)
+        self.quantidade = abs(self.delta)
         super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):
-        raise ValidationError(
-            "Movimentos de estoque não podem ser excluídos; faça um estorno."
+        raise ImutabilidadeViolation(
+            f"Movimento {self.pk} não pode ser deletado. "
+            "Crie um movimento de compensação."
         )

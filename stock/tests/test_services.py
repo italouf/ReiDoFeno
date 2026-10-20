@@ -112,8 +112,12 @@ class RegistrarMovimentoTests(TestCase):
         self.assertEqual(destino.quantidade, Decimal("12"))
         self.assertEqual(saida.movimento_par, entrada)
         self.assertEqual(entrada.movimento_par, saida)
-        self.assertEqual(saida.tipo, MovimentoEstoque.Tipo.SAIDA)
-        self.assertEqual(entrada.tipo, MovimentoEstoque.Tipo.ENTRADA)
+        self.assertEqual(
+            saida.tipo, MovimentoEstoque.Tipo.TRANSFERENCIA_SAIDA
+        )
+        self.assertEqual(
+            entrada.tipo, MovimentoEstoque.Tipo.TRANSFERENCIA_ENTRADA
+        )
 
     def test_movimento_registra_usuario(self):
         from accounts.models import Usuario

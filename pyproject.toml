@@ -15,6 +15,9 @@ testpaths = [
 ]
 addopts = "-ra"
 faulthandler_timeout = 45
+markers = [
+    "postgres: teste exige PostgreSQL real (row-lock/trigger); ignorado no SQLite local",
+]
 
 [tool.coverage.run]
 branch = true
