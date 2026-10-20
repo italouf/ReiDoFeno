@@ -55,6 +55,15 @@ DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "")
 
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
+# Rate limiting compartilhado entre workers. Requer:
+#   python manage.py createcachetable
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.db.DatabaseCache",
+        "LOCATION": "reidofeno_cache",
+    }
+}
+
 # Em produção o adapter real é obrigatório, salvo override explícito.
 MERCADO_PAGO_FAKE = (
     os.environ.get("MERCADO_PAGO_FAKE", "False").lower() == "true"

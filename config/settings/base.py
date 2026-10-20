@@ -113,11 +113,18 @@ AUTHENTICATION_BACKENDS = [
 ]
 
 # Limitador de tentativas de login (django-axes)
-AXES_FAILURE_LIMIT = 5
+# O limite efetivo por minuto é aplicado por django-ratelimit em
+# accounts.views.LoginView. Axes mantém o bloqueio temporário por 15 min.
+AXES_FAILURE_LIMIT = 6
 AXES_COOLOFF_TIME = timedelta(minutes=15)
 AXES_LOCKOUT_PARAMETERS = [["username", "ip_address"]]
 AXES_RESET_ON_SUCCESS = True
 AXES_VERBOSE = 0
+
+# Rate limiting dos endpoints críticos (SEC-04).
+RATELIMIT_LOGIN = os.environ.get("RATELIMIT_LOGIN", "5/m")
+RATELIMIT_CHECKOUT = os.environ.get("RATELIMIT_CHECKOUT", "10/h")
+RATELIMIT_WEBHOOK = os.environ.get("RATELIMIT_WEBHOOK", "60/m")
 
 LOGIN_URL = "/accounts/login/"
 LOGIN_REDIRECT_URL = "/painel/painel/"

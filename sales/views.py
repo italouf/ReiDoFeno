@@ -17,6 +17,7 @@ from django.views.generic import DetailView, FormView, ListView, TemplateView, V
 from catalog.models import Produto
 from core.auditoria import registrar_auditoria
 from core.mixins import GRUPOS_INTERNOS, GrupoRequiredMixin
+from core.rate_limit import chave_sessao, limitar_com_429
 
 from .cart import Carrinho
 from .emails import email_pedido_criado
@@ -119,6 +120,14 @@ class RemoverItemCarrinhoView(View):
 # --------------------------------------------------------------------------- #
 
 
+@method_decorator(
+    limitar_com_429(
+        key=chave_sessao,
+        rate=settings.RATELIMIT_CHECKOUT,
+        retry_after=3600,
+    ),
+    name="dispatch",
+)
 class CheckoutView(FormView):
     template_name = "sales/checkout.html"
     form_class = CheckoutForm
@@ -250,6 +259,14 @@ class SimularResultadoView(View):
         return redirect("sales:pedido_token", pedido.token_acesso)
 
 
+@method_decorator(
+    limitar_com_429(
+        key="ip",
+        rate=settings.RATELIMIT_WEBHOOK,
+        retry_after=60,
+    ),
+    name="dispatch",
+)
 @method_decorator(csrf_exempt, name="dispatch")
 class MercadoPagoWebhookView(View):
     """Recebe notificações do provedor: assinatura validada + idempotência."""

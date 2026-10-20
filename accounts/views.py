@@ -1,10 +1,13 @@
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import views as auth_views
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.shortcuts import redirect
 from django.urls import reverse
+from django.utils.decorators import method_decorator
 from django.views.generic import FormView, View
 
+from core.rate_limit import limitar_com_429
 from customers.services import (
     confirmar_vinculo_cliente,
     solicitar_vinculo_cliente,
@@ -13,6 +16,14 @@ from customers.services import (
 from .forms import LoginForm, VinculoClienteForm
 
 
+@method_decorator(
+    limitar_com_429(
+        key="ip",
+        rate=settings.RATELIMIT_LOGIN,
+        retry_after=60,
+    ),
+    name="dispatch",
+)
 class LoginView(auth_views.LoginView):
     form_class = LoginForm
     template_name = "registration/login.html"
