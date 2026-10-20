@@ -9,9 +9,11 @@ from django.db.models import Sum
 from django.shortcuts import get_object_or_404
 
 from customers.models import Cliente
-from stock.models import Estoque
+from stock.models import Estoque, ReservaEstoque
 from stock.services import (
+    consumir_reserva,
     dar_baixa_definitiva,
+    liberar_bloqueio_legado,
     liberar_reserva,
     reservar,
 )
@@ -148,7 +150,7 @@ def criar_pedido_do_carrinho(request, formulario) -> Pedido:
     )
 
     for item in itens:
-        ItemPedido.objects.create(
+        item_pedido = ItemPedido.objects.create(
             pedido=pedido,
             produto=item["produto"],
             produto_nome=item["produto"].nome,
@@ -159,6 +161,8 @@ def criar_pedido_do_carrinho(request, formulario) -> Pedido:
             produto=item["produto"],
             unidade=unidade,
             quantidade=item["quantidade"],
+            pedido=pedido,
+            item_pedido=item_pedido,
         )
 
     pedido.recalcular_totais()
@@ -376,14 +380,24 @@ def marcar_pagamento_aprovado(
     pedido.financeiro_conciliado = True
     pedido.save(update_fields=["financeiro_conciliado", "atualizado_em"])
 
-    for item in pedido.itens.select_related("produto"):
-        dar_baixa_definitiva(
-            produto=item.produto,
-            unidade=pedido.unidade,
-            quantidade=item.quantidade,
-            pedido=pedido.numero,
-            request=request,
+    reservas = list(
+        pedido.reservas.select_for_update().filter(
+            status=ReservaEstoque.Status.ATIVA
         )
+    )
+    if reservas:
+        for reserva in reservas:
+            consumir_reserva(reserva)
+    else:
+        # Compatibilidade com pedidos legados sem reserva identificada.
+        for item in pedido.itens.select_related("produto"):
+            dar_baixa_definitiva(
+                produto=item.produto,
+                unidade=pedido.unidade,
+                quantidade=item.quantidade,
+                pedido=pedido.numero,
+                request=request,
+            )
 
     _atualizar_pagamento_aprovado(pedido, id_externo=id_externo)
 
@@ -557,19 +571,35 @@ def cancelar_pedido(
             Pedido.Status.PAGAMENTO_PENDENTE,
         )
     ):
+        reservas = list(
+            pedido.reservas.select_for_update().filter(
+                status=ReservaEstoque.Status.ATIVA
+            )
+        )
         itens_liberados = []
-        for item in pedido.itens.select_related("produto"):
-            liberar_reserva(
-                produto=item.produto,
-                unidade=pedido.unidade,
-                quantidade=item.quantidade,
-            )
-            itens_liberados.append(
-                {
-                    "produto": item.produto_nome,
-                    "quantidade": str(item.quantidade),
-                }
-            )
+        if reservas:
+            for reserva in reservas:
+                liberar_reserva(reserva)
+                itens_liberados.append(
+                    {
+                        "produto": reserva.produto.nome,
+                        "quantidade": str(reserva.quantidade),
+                    }
+                )
+        else:
+            # Compatibilidade com pedidos legados sem reserva identificada.
+            for item in pedido.itens.select_related("produto"):
+                liberar_bloqueio_legado(
+                    produto=item.produto,
+                    unidade=pedido.unidade,
+                    quantidade=item.quantidade,
+                )
+                itens_liberados.append(
+                    {
+                        "produto": item.produto_nome,
+                        "quantidade": str(item.quantidade),
+                    }
+                )
         if itens_liberados:
             from core.auditoria import registrar_auditoria
 

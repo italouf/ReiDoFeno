@@ -9,6 +9,7 @@ from django.test import TestCase, TransactionTestCase
 from analytics.models import Aviso
 from catalog.factories import ProdutoFactory
 from core.factories import UnidadeFactory
+from sales.factories import ItemPedidoFactory, PedidoFactory
 from stock.factories import EstoqueFactory
 from stock.models import Estoque, MovimentoEstoque
 from stock.services import (
@@ -156,13 +157,26 @@ class ImutabilidadeMovimentoTests(TestCase):
 
 
 class ReservaTests(TestCase):
+    def _reservar(self, produto, unidade, quantidade):
+        pedido = PedidoFactory(unidade=unidade)
+        item = ItemPedidoFactory(
+            pedido=pedido, produto=produto, quantidade=quantidade
+        )
+        return reservar(
+            produto=produto,
+            unidade=unidade,
+            quantidade=quantidade,
+            pedido=pedido,
+            item_pedido=item,
+        )
+
     def test_reserva_bloqueia_disponibilidade(self):
         produto = ProdutoFactory()
         unidade = UnidadeFactory()
         EstoqueFactory(
             produto=produto, unidade=unidade, quantidade="10"
         )
-        reservar(produto=produto, unidade=unidade, quantidade=6)
+        self._reservar(produto, unidade, 6)
         estoque = Estoque.objects.get(produto=produto, unidade=unidade)
         self.assertEqual(estoque.disponivel, Decimal("4"))
 
@@ -173,16 +187,17 @@ class ReservaTests(TestCase):
             produto=produto, unidade=unidade, quantidade="3"
         )
         with self.assertRaises(ValidationError):
-            reservar(produto=produto, unidade=unidade, quantidade=4)
+            self._reservar(produto, unidade, 4)
 
     def test_liberar_reserva_devolve_disponibilidade(self):
         produto = ProdutoFactory()
         unidade = UnidadeFactory()
         EstoqueFactory(
             produto=produto, unidade=unidade,
-            quantidade="10", quantidade_bloqueada="6",
+            quantidade="10", quantidade_bloqueada="0",
         )
-        liberar_reserva(produto=produto, unidade=unidade, quantidade=6)
+        reserva = self._reservar(produto, unidade, 6)
+        liberar_reserva(reserva)
         estoque = Estoque.objects.get(produto=produto, unidade=unidade)
         self.assertEqual(estoque.disponivel, Decimal("10"))
 

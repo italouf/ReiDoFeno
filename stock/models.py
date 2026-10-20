@@ -203,3 +203,81 @@ class MovimentoEstoque(models.Model):
             f"Movimento {self.pk} não pode ser deletado. "
             "Crie um movimento de compensação."
         )
+
+
+class ReservaEstoque(models.Model):
+    """Reserva identificada de estoque, vinculada a um pedido."""
+
+    class Status(models.TextChoices):
+        ATIVA = "ativa", "Ativa"
+        CONSUMIDA = "consumida", "Consumida"
+        LIBERADA = "liberada", "Liberada"
+        EXPIRADA = "expirada", "Expirada"
+
+    pedido = models.ForeignKey(
+        "sales.Pedido",
+        on_delete=models.CASCADE,
+        related_name="reservas",
+        verbose_name="pedido",
+    )
+    item_pedido = models.ForeignKey(
+        "sales.ItemPedido",
+        on_delete=models.CASCADE,
+        related_name="reservas",
+        null=True,
+        blank=True,
+        verbose_name="item do pedido",
+    )
+    produto = models.ForeignKey(
+        "catalog.Produto",
+        on_delete=models.PROTECT,
+        related_name="reservas",
+        verbose_name="produto",
+    )
+    unidade = models.ForeignKey(
+        "core.Unidade",
+        on_delete=models.PROTECT,
+        related_name="reservas",
+        verbose_name="unidade",
+    )
+    quantidade = models.DecimalField(
+        "quantidade", max_digits=12, decimal_places=2
+    )
+    status = models.CharField(
+        "status",
+        max_length=20,
+        choices=Status.choices,
+        default=Status.ATIVA,
+        db_index=True,
+    )
+    criado_em = models.DateTimeField("criado em", auto_now_add=True)
+    consumida_em = models.DateTimeField("consumida em", null=True, blank=True)
+    liberada_em = models.DateTimeField("liberada em", null=True, blank=True)
+
+    class Meta:
+        verbose_name = "reserva de estoque"
+        verbose_name_plural = "reservas de estoque"
+        ordering = ["-criado_em"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=("pedido", "produto", "unidade"),
+                condition=models.Q(status="ativa"),
+                name="reserva_ativa_unica_por_pedido_produto_unidade",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(quantidade__gt=Decimal("0.00")),
+                name="reserva_quantidade_positiva",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=("produto", "unidade", "status"),
+                name="reserva_estoque_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return (
+            f"Reserva {self.pk or '(nova)'} pedido={self.pedido_id} "
+            f"{self.quantidade} {self.produto} @ {self.unidade} [{self.status}]"
+        )

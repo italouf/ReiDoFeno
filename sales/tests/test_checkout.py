@@ -6,7 +6,7 @@ from django.urls import reverse
 
 from customers.models import Cliente
 from sales.models import Pedido
-from stock.models import Estoque
+from stock.models import Estoque, ReservaEstoque
 
 from .helpers import criar_produto_com_estoque, fluxo_checkout
 
@@ -25,6 +25,9 @@ class CheckoutTests(TestCase):
             produto=item.produto, unidade=pedido.unidade
         )
         self.assertEqual(estoque.quantidade_bloqueada, Decimal("4"))
+        reserva = pedido.reservas.get(status=ReservaEstoque.Status.ATIVA)
+        self.assertEqual(reserva.item_pedido, item)
+        self.assertEqual(reserva.quantidade, Decimal("4"))
         self.assertEqual(pedido.total, Decimal("40.00"))
         self.assertEqual(pedido.canal, Pedido.Canal.LOJA)
 

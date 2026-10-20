@@ -10,6 +10,7 @@ from decimal import Decimal, InvalidOperation
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import F, Sum
+from django.utils import timezone
 
 from analytics.models import Aviso
 
@@ -19,11 +20,14 @@ from .models import (
     TIPOS_DELTA_POSITIVO,
     Estoque,
     MovimentoEstoque,
+    ReservaEstoque,
 )
 
 __all__ = [
     "ImutabilidadeViolation",
+    "consumir_reserva",
     "dar_baixa_definitiva",
+    "liberar_bloqueio_legado",
     "liberar_reserva",
     "registrar_ajuste",
     "registrar_movimento",
@@ -268,9 +272,19 @@ def _avisar_estoque_baixo(estoque: Estoque) -> None:
         )
 
 
-def reservar(*, produto, unidade, quantidade) -> None:
-    """Reserva quantidade para um pedido em andamento (API agregada legada)."""
+def reservar(
+    *, produto, unidade, quantidade, pedido=None, item_pedido=None
+) -> ReservaEstoque:
+    """Cria reserva identificada pelo pedido e bloqueia o estoque."""
     quantidade = _quantidade_positiva(quantidade)
+    if pedido is None:
+        raise ValidationError(
+            "Reserva de estoque exige pedido identificado; "
+            "reservas órfãs não são permitidas."
+        )
+    if item_pedido is not None and item_pedido.pedido_id != pedido.pk:
+        raise ValidationError("Item do pedido não pertence ao pedido informado.")
+
     with transaction.atomic():
         estoque = (
             Estoque.objects.select_for_update()
@@ -279,13 +293,93 @@ def reservar(*, produto, unidade, quantidade) -> None:
         )
         if estoque is None or estoque.disponivel < quantidade:
             raise ValidationError("Quantidade indisponível na unidade.")
+
+        reserva = ReservaEstoque.objects.create(
+            pedido=pedido,
+            item_pedido=item_pedido,
+            produto=produto,
+            unidade=unidade,
+            quantidade=quantidade,
+            status=ReservaEstoque.Status.ATIVA,
+        )
         Estoque.objects.filter(pk=estoque.pk).update(
             quantidade_bloqueada=F("quantidade_bloqueada") + quantidade
         )
+        return reserva
 
 
-def liberar_reserva(*, produto, unidade, quantidade) -> None:
-    """Libera reserva agregada (API legada usada por fluxos sem identidade)."""
+def _estoque_bloqueado(produto, unidade) -> Estoque:
+    return Estoque.objects.select_for_update().get(
+        produto=produto, unidade=unidade
+    )
+
+
+def _desbloquear(estoque: Estoque, quantidade) -> None:
+    if estoque.quantidade_bloqueada < quantidade:
+        raise ValidationError(
+            "Reserva inconsistente: quantidade bloqueada menor que a reserva."
+        )
+    Estoque.objects.filter(pk=estoque.pk).update(
+        quantidade_bloqueada=F("quantidade_bloqueada") - quantidade
+    )
+
+
+def _sincronizar_reserva(original, atual):
+    if original is atual:
+        return
+    original.status = atual.status
+    original.consumida_em = atual.consumida_em
+    original.liberada_em = atual.liberada_em
+
+
+@transaction.atomic
+def consumir_reserva(reserva: ReservaEstoque) -> ReservaEstoque:
+    """Consome uma reserva ativa; idempotente para reserva já finalizada."""
+    original = reserva
+    reserva = ReservaEstoque.objects.select_for_update().get(pk=reserva.pk)
+    if reserva.status != ReservaEstoque.Status.ATIVA:
+        _sincronizar_reserva(original, reserva)
+        return reserva
+
+    estoque = _estoque_bloqueado(reserva.produto, reserva.unidade)
+    _desbloquear(estoque, reserva.quantidade)
+
+    registrar_movimento(
+        produto=reserva.produto,
+        unidade=reserva.unidade,
+        tipo=MovimentoEstoque.Tipo.BAIXA_DEFINITIVA,
+        delta=-reserva.quantidade,
+        motivo=f"Consumo da reserva do pedido {reserva.pedido.numero}",
+    )
+
+    reserva.status = ReservaEstoque.Status.CONSUMIDA
+    reserva.consumida_em = timezone.now()
+    reserva.save(update_fields=["status", "consumida_em"])
+    _sincronizar_reserva(original, reserva)
+    return reserva
+
+
+@transaction.atomic
+def liberar_reserva(reserva: ReservaEstoque) -> ReservaEstoque:
+    """Libera uma reserva ativa; idempotente e sem movimento de estoque."""
+    original = reserva
+    reserva = ReservaEstoque.objects.select_for_update().get(pk=reserva.pk)
+    if reserva.status != ReservaEstoque.Status.ATIVA:
+        _sincronizar_reserva(original, reserva)
+        return reserva
+
+    estoque = _estoque_bloqueado(reserva.produto, reserva.unidade)
+    _desbloquear(estoque, reserva.quantidade)
+
+    reserva.status = ReservaEstoque.Status.LIBERADA
+    reserva.liberada_em = timezone.now()
+    reserva.save(update_fields=["status", "liberada_em"])
+    _sincronizar_reserva(original, reserva)
+    return reserva
+
+
+def liberar_bloqueio_legado(*, produto, unidade, quantidade) -> None:
+    """Compatibilidade com bloqueios legados sem identidade de pedido."""
     quantidade = _quantidade_positiva(quantidade)
     with transaction.atomic():
         estoque = (
@@ -306,9 +400,11 @@ def liberar_reserva(*, produto, unidade, quantidade) -> None:
 def dar_baixa_definitiva(
     *, produto, unidade, quantidade, pedido=None, usuario=None, request=None
 ) -> None:
-    """Converte reserva agregada em saída definitiva após pagamento aprovado."""
+    """Converte reserva agregada legada em saída definitiva."""
     quantidade = _quantidade_positiva(quantidade)
-    liberar_reserva(produto=produto, unidade=unidade, quantidade=quantidade)
+    liberar_bloqueio_legado(
+        produto=produto, unidade=unidade, quantidade=quantidade
+    )
     registrar_movimento(
         produto=produto,
         unidade=unidade,
