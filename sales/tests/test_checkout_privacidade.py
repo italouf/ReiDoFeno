@@ -2,6 +2,7 @@
 
 from django.contrib.auth.models import Group
 from django.core import mail
+from django.core.exceptions import PermissionDenied
 from django.core.management import call_command
 from django.test import TestCase
 from django.urls import reverse
@@ -54,8 +55,8 @@ class CheckoutPrivacidadeTests(TestCase):
         self.assertIn("Visitante do Checkout", corpo)
         self.assertNotIn("Vítima Confidencial", corpo)
 
-        exportado = exportar_dados_do_titular(self.vitima)
-        self.assertEqual(exportado["pedidos"], [])
+        with self.assertRaises(PermissionDenied):
+            exportar_dados_do_titular(self.vitima)
 
     def test_cliente_vinculado_ainda_nao_ve_pedido_nao_verificado(self):
         usuario = Usuario.objects.create_user(

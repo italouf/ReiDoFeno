@@ -20,6 +20,7 @@ from catalog.models import Produto
 from core.auditoria import registrar_auditoria
 from core.mixins import GRUPOS_INTERNOS, GrupoRequiredMixin
 from core.rate_limit import chave_sessao, limitar_com_429
+from customers.models import Cliente
 
 from .cart import Carrinho
 from .emails import email_pedido_criado
@@ -528,19 +529,24 @@ class MercadoPagoWebhookView(View):
 
 
 class MeusPedidosView(LoginRequiredMixin, TemplateView):
-    """Cliente autenticado vê SOMENTE os próprios pedidos."""
+    """Cliente autenticado vê SOMENTE os próprios pedidos comprovados."""
 
     template_name = "sales/meus_pedidos.html"
 
     def get_context_data(self, **kwargs):
         contexto = super().get_context_data(**kwargs)
+        cliente = Cliente.objects.filter(
+            usuario=self.request.user,
+            vinculo_verificado=True,
+        ).first()
+        contexto["vinculo_pendente"] = cliente is None
         contexto["pedidos"] = (
-            Pedido.objects.filter(
-                cliente__usuario=self.request.user,
-                cliente__vinculo_verificado=True,
+            Pedido.objects.none()
+            if cliente is None
+            else Pedido.objects.filter(
+                cliente=cliente,
                 identidade_verificada=True,
-            )
-            .prefetch_related("itens")
+            ).prefetch_related("itens")
         )
         return contexto
 
