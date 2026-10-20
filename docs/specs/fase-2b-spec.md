@@ -27,13 +27,15 @@ Fase 2A.
    Estoque.quantidade_bloqueada` para reservas criadas pela aplicação; consumir/liberar
    são idempotentes.
 4. `Pedido.total == Pedido.subtotal + Pedido.frete`; valores financeiros e quantidades
-   não podem ser negativos (ou zero, no caso da quantidade).
+   não podem ser negativos (ou zero, no caso da quantidade). A igualdade é comparada
+   com arredondamento de 2 casas para ser portátil entre SQLite e PostgreSQL.
 5. CPF, CNPJ numérico e CNPJ alfanumérico são aceitos; letras são preservadas em
    maiúsculas e o DV oficial é validado.
 6. `meus-pedidos` e exportação LGPD exigem `vinculo_verificado` e pedido do próprio
    titular; pedidos de visitante não aparecem.
-7. Preço de atacado só se aplica a cliente ATACADO, produto em fardo, quantidade > 50 e
-   `preco_atacado` preenchido; o preço é congelado no `ItemPedido`.
+7. Preço de atacado só se aplica a cliente ATACADO com vínculo comprovado (ou pedido
+   criado por vendedor interno), produto em fardo, quantidade > 50 e `preco_atacado`
+   preenchido; o preço é congelado no `ItemPedido`.
 
 ## Migrations aditivas
 
@@ -51,6 +53,9 @@ Nenhuma migration aplicada foi reescrita.
 
 - SQLite local (`transaction_mode=IMMEDIATE`): serviços, constraints, CNPJ,
   titularidade, atacado.
+- Migração histórica: o comando `validar_migracao_legado` cria estoque, movimentos
+  legados (entrada/ajuste) e reserva parcial no schema 0001, migra até HEAD e valida
+  `SUM(delta)`, `SUM(reservas ativas)` e a alocação parcial.
 - PostgreSQL 15 (CI): trigger do ledger, row-lock e concorrência
   aprovação/cancelamento/consumo de reserva. Testes marcados `@pytest.mark.postgres`
   são ignorados no SQLite por `conftest.py`.
@@ -69,11 +74,12 @@ Nenhuma migration aplicada foi reescrita.
 ## Gate de saída
 
 - [x] STO-01, ADR-003, DAT-01, CUS-01, ADR-005 e atacado implementados e testados.
-- [x] Suíte local: 413 passed, 6 skipped (5 PostgreSQL + 1 Redis), 230 subtests.
+- [x] Suíte local: 433 passed, 6 skipped (5 PostgreSQL + 1 Redis), 233 subtests.
+- [x] Migração histórica 0001 → HEAD validada em SQLite (ledger + reserva parcial).
 - [x] `ruff check`, `manage.py check`, `makemigrations --check --dry-run`.
 - [x] Migration completa em banco SQLite vazio.
 - [ ] Trigger/concorrência PostgreSQL validados na CI (workflow inclui o branch).
 - [x] Specs em `docs/specs/fase-2b/` e ADRs 003/013/014.
-- [x] Cobertura: `stock/services.py` 99,02%, `sales/services.py` 93,88%,
-      `customers/services.py` 94,55%, total do escopo 91,22%.
+- [x] Cobertura: `stock/services.py` 99,02%, `sales/services.py` 93,89%,
+      `customers/services.py` 94,55%, total do escopo 91,41%.
 - [x] Bandit: 0 medium/high; pip-audit: 0 vulnerabilidades; `ruff`: limpo.

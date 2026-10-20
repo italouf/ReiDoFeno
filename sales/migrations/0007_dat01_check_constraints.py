@@ -5,6 +5,7 @@ from decimal import Decimal
 import django.db.models.expressions
 from django.conf import settings
 from django.db import migrations, models
+from django.db.models.functions import Round
 
 
 def validar_dados_existentes(apps, schema_editor):
@@ -29,7 +30,7 @@ def validar_dados_existentes(apps, schema_editor):
         )
 
     pedidos_inconsistentes = Pedido.objects.exclude(
-        total=models.F("subtotal") + models.F("frete")
+        total=Round(models.F("subtotal") + models.F("frete"), 2)
     )
     if pedidos_inconsistentes.exists():
         problemas.append(
@@ -108,6 +109,6 @@ class Migration(migrations.Migration):
         ),
         migrations.AddConstraint(
             model_name='pedido',
-            constraint=models.CheckConstraint(condition=models.Q(('total', django.db.models.expressions.CombinedExpression(models.F('subtotal'), '+', models.F('frete')))), name='pedido_total_igual_subtotal_mais_frete'),
+            constraint=models.CheckConstraint(condition=models.Q(('total', Round(django.db.models.expressions.CombinedExpression(models.F('subtotal'), '+', models.F('frete')), 2))), name='pedido_total_igual_subtotal_mais_frete'),
         ),
     ]

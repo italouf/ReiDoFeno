@@ -76,6 +76,23 @@ class CheckConstraintsTests(TransactionTestCase):
         )
         self.assertEqual(pedido.total, Decimal("110.00"))
 
+    def test_pedido_com_frete_nao_inteiro_aceito(self):
+        """A igualdade de totais não pode depender de float do SQLite."""
+        for subtotal, frete, total in (
+            ("33.33", "0.01", "33.34"),
+            ("0.10", "0.20", "0.30"),
+            ("19.99", "7.77", "27.76"),
+        ):
+            with self.subTest(subtotal=subtotal, frete=frete, total=total):
+                pedido = _pedido(
+                    cliente=self.cliente,
+                    unidade=self.unidade,
+                    subtotal=Decimal(subtotal),
+                    frete=Decimal(frete),
+                    total=Decimal(total),
+                )
+                self.assertEqual(pedido.total, Decimal(total))
+
     def test_item_quantidade_zero_rejeitada(self):
         pedido = _pedido(cliente=self.cliente, unidade=self.unidade)
         with pytest.raises(IntegrityError):

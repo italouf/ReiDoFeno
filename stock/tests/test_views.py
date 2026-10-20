@@ -117,6 +117,27 @@ class MovimentacaoFluxoTests(TestCase):
         self.assertEqual(resposta.status_code, 200)
         self.assertIn("obrigat", resposta.content.decode())
 
+    def test_ajuste_negativo_grava_tipo_especifico(self):
+        EstoqueFactory(
+            produto=self.produto, unidade=self.feira, quantidade="10.00"
+        )
+        resposta = self.client.post(
+            reverse("stock:movimento_ajuste"),
+            {
+                "produto": self.produto.pk,
+                "unidade": self.feira.pk,
+                "quantidade": "-2.00",
+                "motivo": "quebra no manuseio",
+            },
+            follow=True,
+        )
+        self.assertRedirects(resposta, reverse("stock:movimento_lista"))
+        movimento = MovimentoEstoque.objects.latest("id")
+        self.assertEqual(
+            movimento.tipo, MovimentoEstoque.Tipo.AJUSTE_NEGATIVO
+        )
+        self.assertEqual(movimento.delta, Decimal("-2.00"))
+
     def test_transferencia_via_post(self):
         EstoqueFactory(
             produto=self.produto, unidade=self.feira, quantidade="50"

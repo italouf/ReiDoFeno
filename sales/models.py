@@ -3,6 +3,7 @@ from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.db.models.functions import Round
 
 from accounts.models import Usuario
 from catalog.models import Produto
@@ -174,7 +175,9 @@ class Pedido(models.Model):
             ),
             models.CheckConstraint(
                 condition=models.Q(
-                    total=models.F("subtotal") + models.F("frete")
+                    total=Round(
+                        models.F("subtotal") + models.F("frete"), 2
+                    )
                 ),
                 name="pedido_total_igual_subtotal_mais_frete",
             ),

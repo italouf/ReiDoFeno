@@ -31,8 +31,10 @@ limites dos fatores.
 ## Compatibilidade SQLite/PostgreSQL
 
 As constraints usam apenas comparações e aritmética simples entre colunas, suportadas
-por ambos os backends. A igualdade `total = subtotal + frete` é uma expressão
-`CHECK` padrão. Não há `RunSQL` específico de backend.
+por ambos os backends. A igualdade `total = subtotal + frete` é comparada com
+`ROUND(..., 2)` para evitar divergência de ponto flutuante no SQLite (por exemplo,
+`33.33 + 0.01`); no PostgreSQL o arredondamento de `numeric` também é exato. Não há
+`RunSQL` específico de backend.
 
 ## Migração
 

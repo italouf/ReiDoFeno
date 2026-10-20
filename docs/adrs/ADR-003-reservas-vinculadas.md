@@ -34,8 +34,9 @@ Regras:
 ## Integração
 
 - Checkout: cria o `ItemPedido` e em seguida a reserva vinculada.
-- Pagamento aprovado: consome as reservas ativas do pedido. Se o pedido for legado e não
-  tiver reservas, mantém o caminho agregado anterior (`dar_baixa_definitiva`).
+- Pagamento aprovado: consome as reservas ativas do pedido e baixa diretamente a
+  diferença entre o item e o total reservado (reserva legada parcial). Se o produto não
+  tiver nenhuma reserva, mantém o caminho agregado anterior (`dar_baixa_definitiva`).
 - Cancelamento/expiração: libera as reservas ativas. Sem reservas, mantém o caminho
   agregado legado apenas para pedidos pendentes.
 
@@ -45,7 +46,9 @@ Reservas legadas não têm identidade. A migration 0003 aloca o bloqueio existen
 pedidos pendentes (`aguardando_pagamento`/`pagamento_pendente`, financeiro pendente),
 respeitando a ordem de criação e o saldo bloqueado. Bloqueios sem pedido identificável
 são liberados; ao final, `quantidade_bloqueada` é reescrita como a soma das reservas
-ativas. O saldo físico (`quantidade`) não é alterado.
+ativas. O saldo físico (`quantidade`) não é alterado. Quando o bloqueio legado é menor
+que o item, a reserva fica parcial e a aprovação baixa a diferença diretamente, sem
+tocar em bloqueio que nunca existiu.
 
 ## Alternativas rejeitadas
 

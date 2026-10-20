@@ -46,8 +46,8 @@ Constraints:
 ## Integrações
 
 - `sales.services.criar_pedido_do_carrinho`: cria `ItemPedido` e reserva vinculada.
-- `sales.services.marcar_pagamento_aprovado`: consome reservas ativas; fallback agregado
-  para pedido legado sem reservas.
+- `sales.services.marcar_pagamento_aprovado`: consome reservas ativas e baixa a
+  diferença de reserva parcial; fallback agregado para produto sem reservas.
 - `sales.services.cancelar_pedido`: libera reservas ativas; fallback agregado apenas
   para pedidos pendentes legados.
 - `expirar_pedidos` herda o cancelamento.
@@ -68,3 +68,4 @@ Constraints:
 - [ ] Checkout/pagamento/cancelamento integrados.
 - [ ] Reconciliação validada por teste.
 - [ ] Concorrência validada em PostgreSQL (CI).
+- [ ] Reserva parcial de legado baixa a diferença na aprovação.

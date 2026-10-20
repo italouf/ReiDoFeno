@@ -8,18 +8,24 @@
   passam a ser `transferencia_entrada`/`transferencia_saida`.
 - **ADR-003:** `ReservaEstoque` vinculada a pedido/item, com unique parcial,
   consumo/liberação idempotentes, reconciliação com `quantidade_bloqueada` e
-  integração no checkout, pagamento aprovado, cancelamento e expiração.
+  integração no checkout, pagamento aprovado, cancelamento e expiração. A baixa
+  cobre reservas parciais de pedidos legados sem deixar saldo remanescente.
 - **DAT-01:** check constraints de valores não negativos e
-  `total = subtotal + frete`; migration valida o legado antes de aplicar.
+  `total = subtotal + frete`; a igualdade usa arredondamento de 2 casas para ser
+  portátil entre SQLite e PostgreSQL; migration valida o legado antes de aplicar.
 - **CUS-01:** CPF, CNPJ numérico e CNPJ alfanumérico (ASCII - 48, módulo 11);
   normalização preserva letras maiúsculas; fiscal e filtro de PII atualizados.
 - **ADR-005:** `meus-pedidos` exige vínculo comprovado e pedido do titular;
   exportação LGPD sem vínculo retorna 403; tela orienta o usuário pendente.
 - **Atacado:** `Produto.preco_atacado` e regra estrita de mais de 50 fardos
-  para cliente ATACADO, com preço congelado no `ItemPedido`.
-- **Validação local:** 426 passed, 6 skipped (5 PostgreSQL + 1 Redis), 230
-  subtests; cobertura `stock/services.py` 99,02%, `sales/services.py` 93,88%,
-  `customers/services.py` 94,55%, total 91,22%; Ruff, Bandit (0 medium/high),
+  para cliente ATACADO com vínculo comprovado (ou pedido de vendedor interno),
+  com preço congelado no `ItemPedido`.
+- **Migração histórica:** `validar_migracao_legado` passa a criar estoque,
+  movimentos legados e reserva parcial no schema 0001 e valida ledger, reservas
+  e alocação após migrar até HEAD.
+- **Validação local:** 433 passed, 6 skipped (5 PostgreSQL + 1 Redis), 233
+  subtests; cobertura `stock/services.py` 99,02%, `sales/services.py` 93,89%,
+  `customers/services.py` 94,55%, total 91,41%; Ruff, Bandit (0 medium/high),
   pip-audit (0 vulnerabilidades), `manage.py check`, `makemigrations --check`
   e migração completa em SQLite aprovados. Trigger e concorrência PostgreSQL
   ficam cobertos pelos testes `@pytest.mark.postgres` na CI.

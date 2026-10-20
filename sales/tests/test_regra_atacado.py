@@ -2,9 +2,12 @@
 
 from decimal import Decimal
 
+from django.contrib.auth.models import Group
+from django.core.management import call_command
 from django.test import TestCase
 from django.urls import reverse
 
+from accounts.models import Usuario
 from catalog.factories import ProdutoFactory
 from catalog.models import Produto
 from core.factories import UnidadeFactory
@@ -118,11 +121,20 @@ class RegraAtacadoTests(TestCase):
 
 
 class CheckoutAtacadoTests(TestCase):
-    def _preparar(self, *, categoria, **produto_kwargs):
+    def _preparar(self, *, categoria, verificado=True, **produto_kwargs):
         cliente = ClienteFactory(
             documento="52998224725",
             categoria=categoria,
         )
+        if verificado:
+            usuario = Usuario.objects.create_user(
+                username=f"atacado-{cliente.pk}",
+                password="senha-forte-123",
+            )
+            cliente.usuario = usuario
+            cliente.vinculo_verificado = True
+            cliente.save(update_fields=["usuario", "vinculo_verificado"])
+            self.client.force_login(usuario)
         produto = _produto_fardo(**produto_kwargs)
         unidade = UnidadeFactory(nome="Feira de Santana")
         EstoqueFactory(
@@ -206,3 +218,46 @@ class CheckoutAtacadoTests(TestCase):
         pedido = Pedido.objects.latest("pk")
         assert pedido.unidade_id == unidade.pk
         assert Unidade.objects.filter(pk=unidade.pk).exists()
+
+    def test_visitante_com_documento_atacado_paga_preco_online(self):
+        cliente, produto, unidade = self._preparar(
+            categoria=Cliente.Categoria.ATACADO, verificado=False
+        )
+        self.client.post(
+            reverse("sales:adicionar"),
+            {"produto_id": produto.pk, "quantidade": "51"},
+        )
+        dados = dict(DADOS_BASE)
+        dados["unidade"] = unidade.pk
+        resposta = self.client.post(reverse("sales:checkout"), dados)
+        assert resposta.status_code == 302
+        pedido = Pedido.objects.latest("pk")
+        assert pedido.identidade_verificada is False
+        assert pedido.itens.get().preco_unitario == Decimal("110.00")
+        cliente.refresh_from_db()
+        assert cliente.categoria == Cliente.Categoria.ATACADO
+
+    def test_vendedor_interno_aplica_atacado_para_cliente_cadastrado(self):
+        call_command("seed_groups", verbosity=0)
+        vendedor = Usuario.objects.create_user(
+            username="vendedor-atacado", password="senha-forte-123"
+        )
+        vendedor.groups.add(Group.objects.get(name="Vendedor"))
+        self.client.force_login(vendedor)
+        cliente, produto, unidade = self._preparar(
+            categoria=Cliente.Categoria.ATACADO, verificado=False
+        )
+        # _preparar não loga quando verificado=False; restaura o vendedor.
+        self.client.force_login(vendedor)
+        self.client.post(
+            reverse("sales:adicionar"),
+            {"produto_id": produto.pk, "quantidade": "51"},
+        )
+        dados = dict(DADOS_BASE)
+        dados["unidade"] = unidade.pk
+        resposta = self.client.post(reverse("sales:checkout"), dados)
+        assert resposta.status_code == 302
+        pedido = Pedido.objects.latest("pk")
+        assert pedido.canal == Pedido.Canal.VENDEDOR
+        assert pedido.itens.get().preco_unitario == Decimal("80.00")
+        assert cliente.categoria == Cliente.Categoria.ATACADO

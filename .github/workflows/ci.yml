@@ -92,6 +92,7 @@ jobs:
           conn.close()
           PY
           DATABASE_URL="$MIGRATION_DATABASE_URL" python manage.py migrate sales 0001 --noinput
+          DATABASE_URL="$MIGRATION_DATABASE_URL" python manage.py migrate stock 0001 --noinput
           DATABASE_URL="$MIGRATION_DATABASE_URL" python manage.py validar_migracao_legado --criar
           DATABASE_URL="$MIGRATION_DATABASE_URL" python manage.py migrate --noinput
           DATABASE_URL="$MIGRATION_DATABASE_URL" python manage.py validar_migracao_legado --verificar

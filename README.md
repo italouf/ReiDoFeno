@@ -110,6 +110,8 @@ pip-audit -r requirements.txt
 
 - Clientes com categoria **ATACADO** recebem `Produto.preco_atacado` quando
   compram **mais de 50 fardos** de um produto cuja unidade de medida é `fardo`.
+- A tabela exige vínculo comprovado do titular ou pedido criado por vendedor
+  interno; visitante que informa CNPJ alheio usa o preço online.
 - O limiar é estrito: 50 fardos usam o preço-base do canal.
 - Clientes VAREJO, produtos que não são fardos e produtos sem preço de atacado
   usam o preço-base (loja: `preco_online`; atacadista: `preco_balcao`).

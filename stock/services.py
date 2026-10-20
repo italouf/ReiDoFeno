@@ -331,7 +331,9 @@ def _sincronizar_reserva(original, atual):
 
 
 @transaction.atomic
-def consumir_reserva(reserva: ReservaEstoque) -> ReservaEstoque:
+def consumir_reserva(
+    reserva: ReservaEstoque, *, usuario=None, request=None
+) -> ReservaEstoque:
     """Consome uma reserva ativa; idempotente para reserva já finalizada."""
     original = reserva
     reserva = ReservaEstoque.objects.select_for_update().get(pk=reserva.pk)
@@ -348,6 +350,8 @@ def consumir_reserva(reserva: ReservaEstoque) -> ReservaEstoque:
         tipo=MovimentoEstoque.Tipo.BAIXA_DEFINITIVA,
         delta=-reserva.quantidade,
         motivo=f"Consumo da reserva do pedido {reserva.pedido.numero}",
+        usuario=usuario,
+        request=request,
     )
 
     reserva.status = ReservaEstoque.Status.CONSUMIDA
@@ -395,6 +399,7 @@ def liberar_bloqueio_legado(*, produto, unidade, quantidade) -> None:
         )
 
 
+@transaction.atomic
 def dar_baixa_definitiva(
     *, produto, unidade, quantidade, pedido=None, usuario=None, request=None
 ) -> None:

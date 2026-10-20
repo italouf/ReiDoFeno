@@ -10,9 +10,14 @@
 Um item usa `Produto.preco_atacado` quando **todas** as condições são verdadeiras:
 
 1. `Cliente.categoria == ATACADO`;
-2. `Produto.unidade_medida == FARDO` (a regra não se aplica a kg, saca ou unidade);
-3. `quantidade > 50` (limiar estrito; 50 usa o preço-base);
-4. `Produto.preco_atacado` está preenchido.
+2. o pedido é do titular com vínculo comprovado (`identidade_verificada=True`) **ou**
+   foi criado por vendedor interno (`criado_por_interno=True`);
+3. `Produto.unidade_medida == FARDO` (a regra não se aplica a kg, saca ou unidade);
+4. `quantidade > 50` (limiar estrito; 50 usa o preço-base);
+5. `Produto.preco_atacado` está preenchido.
+
+Um visitante que informa um CNPJ alheio (sem prova de vínculo) não recebe a tabela de
+atacado: usa o preço-base online do canal.
 
 Caso contrário, usa o preço-base do canal:
 
@@ -47,6 +52,8 @@ preço promocional no carrinho pode ser tratada em fase posterior.
 - [ ] 51 fardos para cliente ATACADO usa atacado.
 - [ ] 50 fardos usa preço-base.
 - [ ] Cliente VAREJO nunca usa atacado.
+- [ ] Visitante sem vínculo usando CNPJ de atacadista paga preço online.
+- [ ] Vendedor interno pode aplicar a tabela para cliente cadastrado.
 - [ ] Produto sem `preco_atacado` usa preço-base.
 - [ ] Produto que não é fardo não aplica a regra.
 - [ ] Checkout grava o preço calculado no `ItemPedido`.

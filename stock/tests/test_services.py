@@ -215,6 +215,27 @@ class ReservaTests(TestCase):
         self.assertEqual(estoque.quantidade, Decimal("6"))
         self.assertEqual(estoque.quantidade_bloqueada, Decimal("0"))
 
+    def test_falha_no_movimento_reverte_liberacao_do_bloqueio(self):
+        from unittest import mock
+
+        produto = ProdutoFactory()
+        unidade = UnidadeFactory()
+        EstoqueFactory(
+            produto=produto, unidade=unidade,
+            quantidade="10", quantidade_bloqueada="4",
+        )
+        with mock.patch(
+            "stock.services.registrar_movimento",
+            side_effect=RuntimeError("falha no ledger"),
+        ):
+            with self.assertRaises(RuntimeError):
+                dar_baixa_definitiva(
+                    produto=produto, unidade=unidade, quantidade=4
+                )
+        estoque = Estoque.objects.get(produto=produto, unidade=unidade)
+        self.assertEqual(estoque.quantidade_bloqueada, Decimal("4"))
+        self.assertEqual(estoque.quantidade, Decimal("10"))
+
 
 class ConcurrencyStockTests(TransactionTestCase):
     """Concorrência: saídas simultâneas não podem ultrapassar o saldo."""

@@ -10,12 +10,13 @@ from django.shortcuts import get_object_or_404
 
 from catalog.models import Produto
 from customers.models import Cliente
-from stock.models import Estoque, ReservaEstoque
+from stock.models import Estoque, MovimentoEstoque, ReservaEstoque
 from stock.services import (
     consumir_reserva,
     dar_baixa_definitiva,
     liberar_bloqueio_legado,
     liberar_reserva,
+    registrar_movimento,
     reservar,
 )
 
@@ -195,10 +196,12 @@ def criar_pedido_do_carrinho(request, formulario) -> Pedido:
 
     for item in itens:
         produto = item["produto"]
+        tabela_atacado = (
+            cliente.categoria == Cliente.Categoria.ATACADO
+            and (identidade_verificada or criado_por_interno)
+        )
         preco_base = (
-            produto.preco_balcao
-            if cliente.categoria == Cliente.Categoria.ATACADO
-            else produto.preco_online
+            produto.preco_balcao if tabela_atacado else produto.preco_online
         )
         item_pedido = ItemPedido.objects.create(
             pedido=pedido,
@@ -207,7 +210,7 @@ def criar_pedido_do_carrinho(request, formulario) -> Pedido:
             quantidade=item["quantidade"],
             preco_unitario=calcular_preco_unitario(
                 produto=produto,
-                cliente=cliente,
+                cliente=cliente if tabela_atacado else None,
                 quantidade=item["quantidade"],
                 preco_base=preco_base,
             ),
@@ -281,6 +284,82 @@ def _validar_disponibilidade(itens, unidade) -> None:
             "Quantidade indisponível em "
             f"{unidade.nome}: " + "; ".join(faltas)
         )
+
+
+def _baixar_estoque_do_pedido(pedido: Pedido, *, request=None) -> None:
+    """Baixa cada item, cobrindo reservas parciais de pedidos legados.
+
+    Reservas identificadas consomem o bloqueio e geram movimento. A diferença
+    entre o item e o total reservado é baixada diretamente (nunca foi
+    bloqueada). Produto sem nenhuma reserva usa o fallback agregado da Fase 1.
+    Reserva ativa sem item correspondente é liberada para não ficar órfã.
+    """
+    itens = {}
+    for item in pedido.itens.select_related("produto"):
+        dados = itens.setdefault(
+            item.produto_id,
+            {"produto": item.produto, "quantidade": Decimal("0.00")},
+        )
+        dados["quantidade"] += Decimal(item.quantidade)
+
+    reservas = list(
+        pedido.reservas.select_for_update()
+        .filter(status=ReservaEstoque.Status.ATIVA)
+        .select_related("produto")
+    )
+    por_produto = {}
+    for reserva in reservas:
+        por_produto.setdefault(reserva.produto_id, []).append(reserva)
+
+    for produto_id, dados in itens.items():
+        reservas_produto = por_produto.pop(produto_id, [])
+        if not reservas_produto:
+            dar_baixa_definitiva(
+                produto=dados["produto"],
+                unidade=pedido.unidade,
+                quantidade=dados["quantidade"],
+                pedido=pedido.numero,
+                request=request,
+            )
+            continue
+
+        total_reservado = sum(
+            (reserva.quantidade for reserva in reservas_produto),
+            Decimal("0.00"),
+        )
+        for reserva in reservas_produto:
+            consumir_reserva(reserva, request=request)
+
+        faltante = dados["quantidade"] - total_reservado
+        if faltante > 0:
+            registrar_movimento(
+                produto=dados["produto"],
+                unidade=pedido.unidade,
+                tipo=MovimentoEstoque.Tipo.BAIXA_DEFINITIVA,
+                delta=-faltante,
+                motivo=(
+                    f"Baixa complementar do pedido {pedido.numero} "
+                    "(reserva legada parcial)"
+                ),
+                request=request,
+            )
+        elif faltante < 0:
+            logger.warning(
+                "Pedido %s tem reserva (%s) maior que o item (%s) do produto %s.",
+                pedido.numero,
+                total_reservado,
+                dados["quantidade"],
+                produto_id,
+            )
+
+    for reservas_sobrando in por_produto.values():
+        for reserva in reservas_sobrando:
+            logger.warning(
+                "Reserva %s sem item correspondente no pedido %s; liberando.",
+                reserva.pk,
+                pedido.numero,
+            )
+            liberar_reserva(reserva)
 
 
 @transaction.atomic
@@ -435,24 +514,7 @@ def marcar_pagamento_aprovado(
     pedido.financeiro_conciliado = True
     pedido.save(update_fields=["financeiro_conciliado", "atualizado_em"])
 
-    reservas = list(
-        pedido.reservas.select_for_update().filter(
-            status=ReservaEstoque.Status.ATIVA
-        )
-    )
-    if reservas:
-        for reserva in reservas:
-            consumir_reserva(reserva)
-    else:
-        # Compatibilidade com pedidos legados sem reserva identificada.
-        for item in pedido.itens.select_related("produto"):
-            dar_baixa_definitiva(
-                produto=item.produto,
-                unidade=pedido.unidade,
-                quantidade=item.quantidade,
-                pedido=pedido.numero,
-                request=request,
-            )
+    _baixar_estoque_do_pedido(pedido, request=request)
 
     _atualizar_pagamento_aprovado(pedido, id_externo=id_externo)
 

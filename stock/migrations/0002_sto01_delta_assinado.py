@@ -62,6 +62,22 @@ def preparar_ledger(apps, schema_editor):
     Estoque = apps.get_model("stock", "Estoque")
     LogAuditoria = apps.get_model("core", "LogAuditoria")
 
+    estoques = set(
+        Estoque.objects.values_list("produto_id", "unidade_id")
+    )
+    orfaos = [
+        (produto_id, unidade_id)
+        for produto_id, unidade_id in Movimento.objects.values_list(
+            "produto_id", "unidade_id"
+        ).distinct()
+        if (produto_id, unidade_id) not in estoques
+    ]
+    if orfaos:
+        raise RuntimeError(
+            "STO-01: movimentos sem linha de Estoque para (produto, unidade): "
+            + ", ".join(str(par) for par in orfaos[:10])
+        )
+
     for estoque in Estoque.objects.all().iterator():
         movimentos = list(
             Movimento.objects.filter(
@@ -175,7 +191,7 @@ def remover_trigger_postgres(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("core", "0001_initial"),
+        ("core", "0002_logauditoria"),
         ("stock", "0001_initial"),
     ]
 
