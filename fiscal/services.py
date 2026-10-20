@@ -6,7 +6,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from analytics.models import Aviso
-from customers.validators import DocumentoValidator, _apenas_digitos
+from customers.validators import DocumentoValidator, normalizar_documento
 
 from .client import ErroFiscal, obter_client
 from .models import NotaFiscal
@@ -22,7 +22,7 @@ def pedido_elegivel(pedido) -> bool:
         or pedido.status == "cancelado"
     ):
         return False
-    documento = _apenas_digitos(pedido.cliente.documento)
+    documento = normalizar_documento(pedido.cliente.documento)
     try:
         DocumentoValidator()(documento)
     except ValidationError:
