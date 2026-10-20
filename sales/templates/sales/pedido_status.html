@@ -28,7 +28,7 @@
 
   <ul class="timeline-status" aria-label="Andamento do pedido">
     <li {% if pedido.status != 'cancelado' and pedido.status != 'rascunho' %}aria-current="true"{% endif %}>Pedido recebido</li>
-    <li {% if pedido.status_financeiro == 'pago' or pedido.status == 'pago' or pedido.status == 'concluido' %}aria-current="true"{% endif %}>Pagamento</li>
+    <li {% if pedido.status_financeiro == 'pago' %}aria-current="true"{% endif %}>Pagamento</li>
     <li {% if pedido.status in 'em_separacao pronto_para_entrega enviado concluido' %}aria-current="true"{% endif %}>Separação</li>
     <li {% if pedido.status in 'pronto_para_entrega enviado concluido' %}aria-current="true"{% endif %}>Pronto/Entrega</li>
     <li {% if pedido.status == 'concluido' %}aria-current="true"{% endif %}>Concluído</li>

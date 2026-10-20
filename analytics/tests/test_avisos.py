@@ -110,3 +110,21 @@ class RecompraTests(TestCase):
         self.assertFalse(
             Aviso.objects.filter(tipo=Aviso.Tipo.POSSIVEL_RECOMPRA).exists()
         )
+
+    def test_cliente_com_compra_antiga_e_pedido_cancelado_ainda_e_sinalizado(self):
+        cliente = ClienteFactory(nome="Compra e Cancelamento")
+        pedido_antigo = PedidoFactory(
+            status=Pedido.Status.PAGO, cliente=cliente
+        )
+        antigo = timezone.now() - timedelta(days=60)
+        Pedido.objects.filter(pk=pedido_antigo.pk).update(criado_em=antigo)
+        PedidoFactory(
+            status=Pedido.Status.CANCELADO, cliente=cliente
+        )
+
+        call_command("gerar_avisos_comerciais", verbosity=0)
+
+        avisos = Aviso.objects.filter(tipo=Aviso.Tipo.POSSIVEL_RECOMPRA)
+        self.assertIn(
+            str(cliente.pk), set(avisos.values_list("objeto_id", flat=True))
+        )

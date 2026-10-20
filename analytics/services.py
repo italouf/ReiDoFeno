@@ -2,7 +2,7 @@
 from datetime import date, datetime, time
 from decimal import Decimal
 
-from django.db.models import DateTimeField, DecimalField, F, Max, Q, Sum
+from django.db.models import DateTimeField, DecimalField, Exists, F, Max, OuterRef, Q, Sum
 from django.utils import timezone
 
 from costs.services import despesas_no_periodo
@@ -84,22 +84,26 @@ def clientes_para_recompra(dias: int):
     from customers.models import Cliente
 
     limite = timezone.now() - timedelta(days=dias)
+    compras_antigas = (
+        Pedido.objects.filter(
+            cliente=OuterRef("pk"),
+            status_financeiro=Pedido.StatusFinanceiro.PAGO,
+            criado_em__lt=limite,
+        )
+        .exclude(status=Pedido.Status.CANCELADO)
+    )
     return (
-        Cliente.objects.annotate(
+        Cliente.objects.filter(Exists(compras_antigas))
+        .annotate(
             ultima_compra=Max(
                 "pedidos__criado_em",
                 filter=Q(
                     pedidos__status_financeiro=Pedido.StatusFinanceiro.PAGO
                 )
-                & ~Q(pedidos__status__in=STATUS_EXCLUIDOS_VENDA),
+                & ~Q(pedidos__status=Pedido.Status.CANCELADO),
                 output_field=DateTimeField(),
             )
         )
-        .filter(
-            pedidos__status_financeiro=Pedido.StatusFinanceiro.PAGO,
-            pedidos__criado_em__lt=limite,
-            ultima_compra__lt=limite,
-        )
-        .exclude(pedidos__status__in=STATUS_EXCLUIDOS_VENDA)
+        .filter(ultima_compra__lt=limite)
         .distinct()
     )
