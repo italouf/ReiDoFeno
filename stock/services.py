@@ -151,8 +151,6 @@ def registrar_movimento(
         raise ValidationError(
             "Movimento deixaria o saldo abaixo da quantidade bloqueada."
         )
-    if novo_saldo < 0:
-        raise ValidationError("O saldo não pode ficar negativo.")
 
     Estoque.objects.filter(pk=estoque.pk).update(
         quantidade=F("quantidade") + delta

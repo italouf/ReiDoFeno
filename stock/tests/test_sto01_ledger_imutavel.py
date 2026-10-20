@@ -14,8 +14,10 @@ from stock.factories import EstoqueFactory
 from stock.models import Estoque, MovimentoEstoque
 from stock.services import (
     ImutabilidadeViolation,
+    liberar_bloqueio_legado,
     registrar_ajuste,
     registrar_movimento,
+    saldo_ledger,
     transferir_estoque,
 )
 
@@ -73,6 +75,7 @@ class LedgerImutavelTests(TransactionTestCase):
             unidade=self.unidade,
         )
         assert estoque.quantidade == saldo_calculado == Decimal("8.00")
+        assert saldo_ledger(self.produto, self.unidade) == Decimal("8.00")
 
     def test_mutacao_direta_queryset_eh_bloqueada(self):
         """QuerySet.update() em movimento existente deve falhar."""
@@ -160,12 +163,14 @@ class LedgerImutavelTests(TransactionTestCase):
             with connection.cursor() as cursor:
                 cursor.execute(
                     "UPDATE stock_movimentoestoque SET delta = 999 "
-                    f"WHERE id = {movimento.pk}"
+                    "WHERE id = %s",
+                    [movimento.pk],
                 )
         with pytest.raises(DatabaseError):
             with connection.cursor() as cursor:
                 cursor.execute(
-                    f"DELETE FROM stock_movimentoestoque WHERE id = {movimento.pk}"
+                    "DELETE FROM stock_movimentoestoque WHERE id = %s",
+                    [movimento.pk],
                 )
         assert MovimentoEstoque.objects.filter(pk=movimento.pk).exists()
 
@@ -246,3 +251,103 @@ class DeltaCoerenciaTests(TestCase):
         movimento.delta = Decimal("2.00")
         with pytest.raises(ImutabilidadeViolation):
             movimento.save()
+
+
+class ValidacaoServicoTests(TestCase):
+    def setUp(self):
+        self.produto = ProdutoFactory()
+        self.unidade = UnidadeFactory()
+        EstoqueFactory(
+            produto=self.produto,
+            unidade=self.unidade,
+            quantidade="10.00",
+            quantidade_bloqueada="4.00",
+        )
+
+    def test_delta_invalido_e_rejeitado(self):
+        from django.core.exceptions import ValidationError
+
+        with pytest.raises(ValidationError):
+            registrar_movimento(
+                produto=self.produto,
+                unidade=self.unidade,
+                tipo=MovimentoEstoque.Tipo.ENTRADA,
+                delta="abc",
+            )
+
+    def test_delta_e_quantidade_juntos_sao_rejeitados(self):
+        from django.core.exceptions import ValidationError
+
+        with pytest.raises(ValidationError):
+            registrar_movimento(
+                produto=self.produto,
+                unidade=self.unidade,
+                tipo=MovimentoEstoque.Tipo.ENTRADA,
+                delta=Decimal("1.00"),
+                quantidade=Decimal("1.00"),
+            )
+
+    def test_delta_ausente_e_rejeitado(self):
+        from django.core.exceptions import ValidationError
+
+        with pytest.raises(ValidationError):
+            registrar_movimento(
+                produto=self.produto,
+                unidade=self.unidade,
+                tipo=MovimentoEstoque.Tipo.ENTRADA,
+            )
+
+    def test_quantidade_legada_zero_e_rejeitada(self):
+        from django.core.exceptions import ValidationError
+
+        with pytest.raises(ValidationError):
+            registrar_movimento(
+                produto=self.produto,
+                unidade=self.unidade,
+                tipo=MovimentoEstoque.Tipo.SAIDA,
+                quantidade=Decimal("0.00"),
+            )
+
+    def test_ajuste_abaixo_do_bloqueado_e_rejeitado(self):
+        from django.core.exceptions import ValidationError
+
+        with pytest.raises(ValidationError):
+            registrar_ajuste(
+                produto=self.produto,
+                unidade=self.unidade,
+                delta=Decimal("-7.00"),
+                motivo="quebra",
+            )
+
+    def test_baixa_abaixo_do_bloqueado_e_rejeitada(self):
+        from django.core.exceptions import ValidationError
+
+        with pytest.raises(ValidationError):
+            registrar_movimento(
+                produto=self.produto,
+                unidade=self.unidade,
+                tipo=MovimentoEstoque.Tipo.BAIXA_DEFINITIVA,
+                delta=Decimal("-7.00"),
+                motivo="baixa",
+            )
+
+    def test_transferencia_com_quantidade_zero_e_rejeitada(self):
+        from django.core.exceptions import ValidationError
+
+        outra = UnidadeFactory(nome="Outra unidade")
+        with pytest.raises(ValidationError):
+            transferir_estoque(
+                produto=self.produto,
+                unidade_origem=self.unidade,
+                unidade_destino=outra,
+                quantidade=Decimal("0.00"),
+            )
+
+    def test_liberar_bloqueio_legado_sem_estoque_e_noop(self):
+        outro_produto = ProdutoFactory()
+        outra_unidade = UnidadeFactory(nome="Sem estoque")
+        liberar_bloqueio_legado(
+            produto=outro_produto,
+            unidade=outra_unidade,
+            quantidade=Decimal("1.00"),
+        )

@@ -133,6 +133,64 @@ class ReservaVinculadaTests(TransactionTestCase):
         with pytest.raises(ValidationError):
             self._reservar(self.pedido1, "5.00")
 
+    def test_reserva_sem_estoque_eh_rejeitada(self):
+        from django.core.exceptions import ValidationError
+
+        produto_sem_estoque = ProdutoFactory()
+        pedido = PedidoFactory(unidade=self.unidade)
+        item = ItemPedidoFactory(
+            pedido=pedido, produto=produto_sem_estoque, quantidade=Decimal("1.00")
+        )
+        with pytest.raises(ValidationError):
+            reservar(
+                produto=produto_sem_estoque,
+                unidade=self.unidade,
+                quantidade=Decimal("1.00"),
+                pedido=pedido,
+                item_pedido=item,
+            )
+
+    def test_item_de_outro_pedido_eh_rejeitado(self):
+        from django.core.exceptions import ValidationError
+
+        item_alheio = ItemPedidoFactory(
+            pedido=self.pedido2,
+            produto=self.produto,
+            quantidade=Decimal("1.00"),
+        )
+        with pytest.raises(ValidationError):
+            reservar(
+                produto=self.produto,
+                unidade=self.unidade,
+                quantidade=Decimal("1.00"),
+                pedido=self.pedido1,
+                item_pedido=item_alheio,
+            )
+
+    def test_consumir_reserva_inconsistente_eh_rejeitado(self):
+        from django.core.exceptions import ValidationError
+
+        reserva = self._reservar(self.pedido1, "5.00")
+        Estoque.objects.filter(
+            produto=self.produto, unidade=self.unidade
+        ).update(quantidade_bloqueada=Decimal("0.00"))
+        with pytest.raises(ValidationError):
+            consumir_reserva(reserva)
+        reserva.refresh_from_db()
+        assert reserva.status == ReservaEstoque.Status.ATIVA
+
+    def test_liberar_reserva_inconsistente_eh_rejeitada(self):
+        from django.core.exceptions import ValidationError
+
+        reserva = self._reservar(self.pedido1, "5.00")
+        Estoque.objects.filter(
+            produto=self.produto, unidade=self.unidade
+        ).update(quantidade_bloqueada=Decimal("0.00"))
+        with pytest.raises(ValidationError):
+            liberar_reserva(reserva)
+        reserva.refresh_from_db()
+        assert reserva.status == ReservaEstoque.Status.ATIVA
+
     def test_reserva_reconcilia_com_bloqueio(self):
         self._reservar(self.pedido1, "3.00")
         r2 = self._reservar(self.pedido2, "4.00")
