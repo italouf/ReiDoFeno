@@ -307,3 +307,43 @@ class VinculoClienteTests(TestCase):
         self.assertEqual(self.client.post(link).status_code, 302)
         cliente.refresh_from_db()
         self.assertTrue(cliente.vinculo_verificado)
+
+    def test_titular_verificado_troca_documento_exige_nova_comprovacao(self):
+        cliente = self._criar_cliente(
+            usuario=self.usuario, vinculo_verificado=True
+        )
+        self.client.force_login(self.usuario)
+        novo_documento = "11144477735"
+
+        resposta = self.client.post(
+            reverse("customers:cliente_editar", args=[cliente.pk]),
+            {
+                "nome": cliente.nome,
+                "tipo_pessoa": cliente.tipo_pessoa,
+                "documento": novo_documento,
+                "categoria": cliente.categoria,
+                "telefone": cliente.telefone,
+                "email": cliente.email,
+                "logradouro": "",
+                "numero": "",
+                "bairro": "",
+                "cidade": "",
+                "uf": "",
+                "cep": "",
+                "preferencia": "",
+            },
+        )
+
+        self.assertEqual(resposta.status_code, 302)
+        cliente.refresh_from_db()
+        self.assertFalse(cliente.vinculo_verificado)
+        self.assertEqual(cliente.documento, novo_documento)
+
+        self.client.post(
+            reverse("accounts:vincular_cliente"),
+            {"documento": novo_documento},
+        )
+        link = self._link_do_email()
+        self.assertEqual(self.client.post(link).status_code, 302)
+        cliente.refresh_from_db()
+        self.assertTrue(cliente.vinculo_verificado)

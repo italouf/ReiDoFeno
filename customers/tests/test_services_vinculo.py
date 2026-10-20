@@ -150,6 +150,73 @@ class TokenVinculoTests(TestCase):
             obter_token_vinculo(self._prova(), self.usuario)
 
 
+class IdentidadeVersaoTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.usuario = Usuario.objects.create_user(
+            username="versao", password="senha-forte-123"
+        )
+
+    def _cliente(self):
+        return ClienteFactory(
+            documento=DOC,
+            email="versao@example.com",
+            usuario=self.usuario,
+            vinculo_verificado=True,
+        )
+
+    def _token_versao_zero(self, cliente):
+        nonce = "nonce-versao-zero"
+        VinculoClienteToken.objects.create(
+            cliente=cliente,
+            usuario=self.usuario,
+            nonce_hash=hashlib.sha256(nonce.encode()).hexdigest(),
+            email_hash=hashlib.sha256(
+                cliente.email.casefold().encode()
+            ).hexdigest(),
+            identidade_versao=0,
+            expira_em=timezone.now() + timedelta(hours=1),
+        )
+        return signing.dumps({"nonce": nonce}, salt=SALT_VINCULO)
+
+    def test_save_de_instancia_antiga_nao_reduz_versao(self):
+        cliente = self._cliente()
+        token = self._token_versao_zero(cliente)
+        stale = type(cliente).objects.get(pk=cliente.pk)
+
+        cliente.email = "intermediario@example.com"
+        cliente.save()
+        cliente.email = "versao@example.com"
+        cliente.save()
+        cliente.refresh_from_db()
+        versao_atual = cliente.identidade_versao
+        self.assertGreaterEqual(versao_atual, 2)
+
+        stale.nome = "Nome Alterado pela Instância Antiga"
+        stale.save()
+        cliente.refresh_from_db()
+        self.assertEqual(cliente.identidade_versao, versao_atual)
+
+        with self.assertRaises(PermissionDenied):
+            obter_token_vinculo(token, self.usuario)
+
+    def test_update_fields_de_nome_tambem_preserva_versao(self):
+        cliente = self._cliente()
+        cliente.email = "intermediario@example.com"
+        cliente.save()
+        cliente.email = "versao@example.com"
+        cliente.save()
+        cliente.refresh_from_db()
+        versao_atual = cliente.identidade_versao
+        stale = type(cliente).objects.get(pk=cliente.pk)
+
+        stale.nome = "Outro Nome"
+        stale.save(update_fields=["nome"])
+
+        cliente.refresh_from_db()
+        self.assertEqual(cliente.identidade_versao, versao_atual)
+
+
 class RevisaoAdministrativaTests(TestCase):
     @classmethod
     def setUpTestData(cls):

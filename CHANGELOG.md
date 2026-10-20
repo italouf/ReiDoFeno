@@ -2,6 +2,17 @@
 
 Todas as mudanças relevantes deste projeto são registradas aqui.
 
+## [Fase 2A — correções R01–R04] — 2026-10-20
+
+- **R01:** criação administrativa verificada exige justificativa e evento de
+  domínio; falha de auditoria reverte a criação.
+- **R02:** `identidade_versao` é monotônica sob lock; save de instância antiga
+  não reduz a versão nem revalida prova.
+- **R03:** mudança de CPF/CNPJ na edição própria ou admin derruba a
+  verificação e exige nova prova.
+- **R04:** aprovação válida de pedido legado sincroniza o `Pagamento`
+  existente, sem baixa duplicada de estoque, com auditoria e rollback.
+
 ## [Fase 2A — remediação residual N01–N07] — 2026-10-20
 
 - **N01:** vínculo pendente não lê/edita cadastro; e-mail só muda após

@@ -98,6 +98,10 @@ um pedido efetivamente separado.
   durável mesmo se o e-mail for restaurado.
 - **N06:** `Pagamento.idempotency_key` e `criacao_expira_em` são persistidos
   antes do efeito externo; a preferência usa `X-Idempotency-Key`.
+- **R04:** aprovação válida de pedido legado sincroniza o `Pagamento`
+  existente e `financeiro_conciliado`, sem repetir baixa de estoque.
+- **R02/R03:** `identidade_versao` é monotônica sob lock e documento/CPF-CNPJ
+  faz parte do contexto comprovado; alteração exige nova comprovação.
 
 ## Consequências
 

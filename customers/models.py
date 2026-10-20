@@ -1,5 +1,5 @@
 from django.conf import settings
-from django.db import models
+from django.db import models, transaction
 
 from .validators import DocumentoValidator
 
@@ -82,35 +82,45 @@ class Cliente(models.Model):
     def save(self, *args, **kwargs):
         self.documento = normalizar_documento(self.documento)
         if self.pk:
-            anterior = (
-                type(self)
-                .objects.filter(pk=self.pk)
-                .values(
-                    "email",
-                    "documento",
-                    "usuario_id",
-                    "vinculo_verificado",
-                    "identidade_versao",
-                )
-                .first()
-            )
-            if anterior is not None:
-                identidade_mudou = (
-                    anterior["email"] != self.email
-                    or anterior["documento"] != self.documento
-                    or anterior["usuario_id"] != self.usuario_id
-                    or anterior["vinculo_verificado"]
-                    != self.vinculo_verificado
-                )
-                if identidade_mudou:
-                    self.identidade_versao = (
-                        anterior["identidade_versao"] + 1
+            with transaction.atomic():
+                anterior = (
+                    type(self)
+                    .objects.select_for_update()
+                    .filter(pk=self.pk)
+                    .values(
+                        "email",
+                        "documento",
+                        "usuario_id",
+                        "vinculo_verificado",
+                        "identidade_versao",
                     )
+                    .first()
+                )
+                if anterior is not None:
+                    identidade_mudou = (
+                        anterior["email"] != self.email
+                        or anterior["documento"] != self.documento
+                        or anterior["usuario_id"] != self.usuario_id
+                        or anterior["vinculo_verificado"]
+                        != self.vinculo_verificado
+                    )
+                    if identidade_mudou:
+                        self.identidade_versao = (
+                            anterior["identidade_versao"] + 1
+                        )
+                    else:
+                        # Instância antiga não pode reduzir a versão.
+                        self.identidade_versao = max(
+                            self.identidade_versao or 0,
+                            anterior["identidade_versao"],
+                        )
                     if kwargs.get("update_fields") is not None:
                         kwargs["update_fields"] = set(
                             kwargs["update_fields"]
                         ) | {"identidade_versao"}
-        super().save(*args, **kwargs)
+                super().save(*args, **kwargs)
+        else:
+            super().save(*args, **kwargs)
 
     @property
     def whatsapp_url(self) -> str:

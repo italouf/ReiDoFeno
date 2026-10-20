@@ -1,11 +1,14 @@
 """R10: revisão administrativa de vínculo com justificativa e auditoria."""
 
+from unittest import mock
+
 from django.test import TestCase
 from django.urls import reverse
 
 from accounts.models import Usuario
 from core.models import LogAuditoria
 from customers.factories import ClienteFactory
+from customers.models import Cliente
 from sales.factories import PedidoFactory
 
 
@@ -191,3 +194,63 @@ class AdminVinculoTests(TestCase):
         self.assertEqual(resposta.status_code, 200)
         self.cliente.refresh_from_db()
         self.assertEqual(self.cliente.usuario, self.titular)
+
+    def _dados_criacao(self, **overrides):
+        dados = self._dados(
+            nome="Cliente Novo Admin",
+            documento="11144477735",
+            email="novo-admin@example.com",
+            usuario=self.outro_titular.pk,
+            vinculo_verificado="on",
+            justificativa_vinculo="Documento conferido na criação.",
+        )
+        dados.update(overrides)
+        return dados
+
+    def test_admin_criacao_verificada_exige_justificativa(self):
+        self.client.force_login(self.admin)
+
+        resposta = self.client.post(
+            reverse("admin:customers_cliente_add"),
+            self._dados_criacao(justificativa_vinculo=""),
+        )
+
+        self.assertEqual(resposta.status_code, 200)
+        self.assertFalse(
+            Cliente.objects.filter(documento="11144477735").exists()
+        )
+
+    def test_admin_criacao_verificada_audita(self):
+        self.client.force_login(self.admin)
+
+        resposta = self.client.post(
+            reverse("admin:customers_cliente_add"),
+            self._dados_criacao(),
+        )
+
+        self.assertEqual(resposta.status_code, 302)
+        cliente = Cliente.objects.get(documento="11144477735")
+        self.assertTrue(cliente.vinculo_verificado)
+        log = LogAuditoria.objects.get(
+            acao="cliente.vinculo_revisado_admin",
+            objeto_id=str(cliente.pk),
+        )
+        self.assertFalse(log.antes["vinculo_verificado"])
+        self.assertTrue(log.depois["vinculo_verificado"])
+
+    def test_falha_auditoria_reverte_criacao_verificada(self):
+        self.client.force_login(self.admin)
+
+        with mock.patch(
+            "customers.services.registrar_auditoria",
+            side_effect=RuntimeError("auditoria indisponível"),
+        ):
+            with self.assertRaises(RuntimeError):
+                self.client.post(
+                    reverse("admin:customers_cliente_add"),
+                    self._dados_criacao(),
+                )
+
+        self.assertFalse(
+            Cliente.objects.filter(documento="11144477735").exists()
+        )

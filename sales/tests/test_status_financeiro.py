@@ -1,6 +1,7 @@
 """ADR-002: status financeiro separado do andamento operacional."""
 
 from decimal import Decimal
+from unittest import mock
 
 from django.core.exceptions import ValidationError
 from django.test import TestCase
@@ -278,6 +279,104 @@ class ResultadoPagamentoTests(TestCase):
             pedido.status_financeiro, Pedido.StatusFinanceiro.ESTORNADO
         )
         self.assertEqual(pedido.status, Pedido.Status.CANCELADO)
+
+    def test_aprovacao_legada_concilia_pagamento_pendente(self):
+        from decimal import Decimal
+
+        from sales.factories import PedidoFactory
+
+        pedido = PedidoFactory(
+            status=Pedido.Status.AGUARDANDO_PAGAMENTO,
+            status_financeiro=Pedido.StatusFinanceiro.PAGO,
+            financeiro_conciliado=False,
+            total="10.00",
+        )
+        pagamento = Pagamento.objects.create(
+            pedido=pedido,
+            valor=Decimal("10.00"),
+            status=Pagamento.Status.PENDENTE,
+        )
+
+        self._aplicar(pedido, "approved")
+
+        pedido.refresh_from_db()
+        pagamento.refresh_from_db()
+        self.assertTrue(pedido.financeiro_conciliado)
+        self.assertEqual(pagamento.status, Pagamento.Status.APROVADO)
+        self.assertEqual(pagamento.id_externo, "pay-status")
+        self.assertTrue(
+            LogAuditoria.objects.filter(
+                acao="pedido.financeiro_reconciliado",
+                objeto_id=str(pedido.pk),
+            ).exists()
+        )
+
+    def test_aprovacao_legada_repetida_nao_duplica_efeito(self):
+        from decimal import Decimal
+
+        from sales.factories import PedidoFactory
+
+        pedido = PedidoFactory(
+            status=Pedido.Status.AGUARDANDO_PAGAMENTO,
+            status_financeiro=Pedido.StatusFinanceiro.PAGO,
+            financeiro_conciliado=False,
+            total="10.00",
+        )
+        Pagamento.objects.create(
+            pedido=pedido,
+            valor=Decimal("10.00"),
+            status=Pagamento.Status.PENDENTE,
+        )
+
+        self._aplicar(pedido, "approved")
+        self._aplicar(pedido, "approved")
+
+        pedido.refresh_from_db()
+        pedido.pagamento.refresh_from_db()
+        self.assertTrue(pedido.financeiro_conciliado)
+        self.assertEqual(pedido.pagamento.status, Pagamento.Status.APROVADO)
+        # Um evento idempotente não repete a conciliação.
+        self.assertEqual(
+            LogAuditoria.objects.filter(
+                acao="pedido.financeiro_reconciliado",
+                objeto_id=str(pedido.pk),
+            ).count(),
+            1,
+        )
+
+    def test_falha_auditoria_reverte_conciliacao_e_pagamento_legado(self):
+        from core import auditoria as modulo_auditoria
+        from sales.factories import PedidoFactory
+
+        pedido = PedidoFactory(
+            status=Pedido.Status.AGUARDANDO_PAGAMENTO,
+            status_financeiro=Pedido.StatusFinanceiro.PAGO,
+            financeiro_conciliado=False,
+            total="10.00",
+        )
+        pagamento = Pagamento.objects.create(
+            pedido=pedido,
+            valor=pedido.total,
+            status=Pagamento.Status.PENDENTE,
+        )
+        real = modulo_auditoria.registrar_auditoria
+
+        def falhar_na_conciliacao(*args, **kwargs):
+            if kwargs.get("acao") == "pedido.financeiro_reconciliado":
+                raise RuntimeError("auditoria indisponível")
+            return real(*args, **kwargs)
+
+        with mock.patch(
+            "core.auditoria.registrar_auditoria",
+            side_effect=falhar_na_conciliacao,
+        ):
+            with self.assertRaises(RuntimeError):
+                self._aplicar(pedido, "approved")
+
+        pedido.refresh_from_db()
+        pagamento.refresh_from_db()
+        self.assertFalse(pedido.financeiro_conciliado)
+        self.assertEqual(pagamento.status, Pagamento.Status.PENDENTE)
 
     def test_aprovacao_apos_cancelamento_nao_reabre_pedido(self):
         pedido = self._pedido_com_pagamento()

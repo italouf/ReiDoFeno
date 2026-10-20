@@ -1,7 +1,8 @@
 # Fase 2A — Remediação verificável de segurança
 
-- **Status:** Remediação residual N01–N07 implementada; validação local concluída;
-  CI PostgreSQL/Redis configurada, aguardando execução no SHA final.
+- **Status:** Correções R01–R04 implementadas; suíte local e gates estáticos
+  aprovados. CI do SHA anterior (`0d4cbe8`) confirmada; novo SHA aguarda
+  execução CI após push autorizado.
 - **Data:** 2026-10-19
 - **Branch:** `fase-2a-seguranca-critica`
 - **Commit auditado:** `b510978cd5b82638a0b26114fa9506de6478a778`
@@ -191,8 +192,32 @@ enviado → concluido`
 
 ### Evidência local adicional
 
-- Suíte: **329 passed, 4 skipped, 230 subtests**.
+- Suíte: **338 passed, 4 skipped, 230 subtests**.
 - Skips: 3 testes de concorrência nativa PostgreSQL e 1 de Redis real sem
   `REDIS_URL`.
-- Cobertura e ferramentas: ver relatório final.
-- A CI não foi executada neste ambiente porque não houve push remoto.
+- Cobertura global: 89,50%; `sales/services.py`: 94,94%;
+  `customers/services.py`: 94,55%.
+- Ruff, Bandit (0 medium/high), pip-audit, `manage.py check`,
+  `check --deploy` e `makemigrations --check` passaram.
+- A CI do SHA `0d4cbe8` já foi confirmada com sucesso pela reauditoria.
+  O novo HEAD desta correção ainda não foi enviado; não há execução CI dele
+  sem push autorizado.
+
+## 11. Correções da auditoria de remediação (R01–R04)
+
+- **R01:** criação administrativa com `vinculo_verificado=True` exige
+  justificativa e passa por `revisar_vinculo_cliente`; o evento de domínio
+  é gravado na transação do admin. Falha de auditoria reverte a criação.
+- **R02:** `Cliente.save()` usa `transaction.atomic` +
+  `select_for_update`, incrementa a versão em mudança de identidade e faz
+  `max(versão_em_memória, versão_no_banco)` em saves de campos não
+  sensíveis. Instância antiga não reduz a versão, com ou sem
+  `update_fields`.
+- **R03:** documento/CPF-CNPJ faz parte do contexto comprovado. A edição
+  própria e o admin derrubam `vinculo_verificado` quando e-mail ou
+  documento mudam; a recuperação é feita por nova prova no e-mail
+  cadastrado.
+- **R04:** aprovação válida de pedido legado sincroniza o `Pagamento`
+  existente para `aprovado`/`id_externo`/`aprovado_em`, marca
+  `financeiro_conciliado` e audita, sem baixa duplicada de estoque. Falha
+  de auditoria reverte ambos; repetição é idempotente.

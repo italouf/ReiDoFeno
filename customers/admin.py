@@ -76,6 +76,12 @@ class ClienteAdminForm(forms.ModelForm):
                         "Informe a justificativa para alterar identidade, "
                         "e-mail, documento ou vínculo."
                     )
+        elif cleaned.get("vinculo_verificado") and not (
+            cleaned.get("justificativa_vinculo") or ""
+        ).strip():
+            raise forms.ValidationError(
+                "Informe a justificativa para comprovar o vínculo na criação."
+            )
         return cleaned
 
 
@@ -107,7 +113,22 @@ class ClienteAdmin(admin.ModelAdmin):
                 .first()
             )
         super().save_model(request, obj, form, change)
-        if not change or antes is None:
+        if not change:
+            if obj.vinculo_verificado:
+                revisar_vinculo_cliente(
+                    cliente=obj,
+                    verificado=True,
+                    justificativa=form.cleaned_data.get(
+                        "justificativa_vinculo"
+                    ) or "",
+                    request=request,
+                    antes={
+                        "usuario_id": None,
+                        "vinculo_verificado": False,
+                    },
+                )
+            return
+        if antes is None:
             return
 
         depois = {

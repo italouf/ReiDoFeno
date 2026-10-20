@@ -234,6 +234,29 @@ def marcar_pagamento_aprovado(
     """
     pedido = _pedido_bloqueado(pedido)
     if pedido.status_financeiro == Pedido.StatusFinanceiro.PAGO:
+        pagamento = getattr(pedido, "pagamento", None)
+        status_pagamento_anterior = (
+            pagamento.status if pagamento is not None else None
+        )
+        _atualizar_pagamento_aprovado(pedido, id_externo=id_externo)
+        if (
+            pagamento is not None
+            and status_pagamento_anterior != Pagamento.Status.APROVADO
+        ):
+            from core.auditoria import registrar_auditoria
+
+            registrar_auditoria(
+                acao="pedido.pagamento_aprovado",
+                instancia=pedido,
+                request=request,
+                depois={
+                    "status": pedido.status,
+                    "status_financeiro": pedido.status_financeiro,
+                    "id_externo": id_externo,
+                    "pagamento_id": pagamento.pk,
+                    "origem": "sincronizacao_legado",
+                },
+            )
         if not pedido.tem_prova_financeira():
             pedido.financeiro_conciliado = True
             pedido.save(update_fields=["financeiro_conciliado", "atualizado_em"])

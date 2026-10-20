@@ -13,7 +13,7 @@ from core.auditoria import AuditoriaFormValidMixin
 from core.mixins import GRUPOS_INTERNOS, GrupoRequiredMixin
 
 from .forms import ClienteForm, InteracaoForm
-from .models import Cliente
+from .models import Cliente, normalizar_documento
 
 GRUPOS_CADASTROS = ("Administrador", "Gestor")
 GRUPOS_CONSULTA = ("Administrador", "Gestor", "Vendedor")
@@ -120,14 +120,20 @@ class ClienteUpdateView(ClienteBaseView, AuditoriaFormValidMixin, UpdateView):
         )
 
     def form_valid(self, form):
-        email_anterior = (
+        anterior = (
             Cliente.objects.filter(pk=self.object.pk)
-            .values_list("email", flat=True)
+            .values("email", "documento")
             .first()
         )
         email_novo = (form.cleaned_data.get("email") or "").strip()
-        if (email_anterior or "").casefold() != email_novo.casefold():
-            # R5: mudança de e-mail invalida a prova e exige nova comprovação.
+        documento_novo = normalizar_documento(
+            form.cleaned_data.get("documento") or ""
+        )
+        if anterior and (
+            (anterior["email"] or "").casefold() != email_novo.casefold()
+            or anterior["documento"] != documento_novo
+        ):
+            # R3/R5: e-mail e CPF/CNPJ fazem parte do contexto comprovado.
             form.instance.vinculo_verificado = False
         messages.success(self.request, "Cliente atualizado com sucesso.")
         return super().form_valid(form)
