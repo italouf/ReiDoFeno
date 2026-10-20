@@ -23,4 +23,7 @@
 {% url 'loja:catalogo' as url_vitrine %}
 {% include "store/includes/empty_state.html" with icone="i-documento" titulo="Você ainda não fez pedidos." descricao="Seu histórico de compras aparece aqui, com status e valores." acao_url=url_vitrine acao_texto="Ver produtos" %}
 {% endif %}
+<p style="margin-top:var(--espaco-5);">
+  Já comprou antes? <a href="{% url 'accounts:vincular_cliente' %}">Vincule seu cadastro</a> para ver o histórico.
+</p>
 {% endblock %}

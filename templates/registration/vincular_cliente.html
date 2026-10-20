@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Vincular cadastro — Rei do Feno{% endblock %}
+{% block content %}
+<div class="cartao form-cartao" style="max-width:38rem;">
+  <h1>Vincular cadastro</h1>
+  <p>
+    Informe o CPF/CNPJ do cadastro que você já utilizou na loja. Se o e-mail
+    da sua conta for o mesmo do cadastro, enviaremos um link de confirmação.
+  </p>
+  <p>
+    Por segurança, o vínculo não é feito automaticamente pelo checkout e não
+    revelamos se um documento existe.
+  </p>
+  <form method="post" data-enviar>
+    {% csrf_token %}
+    {% include "components/form_campos.html" with form=form %}
+    <div class="form-acoes">
+      <button type="submit" class="btn">Enviar link de confirmação</button>
+      <a class="btn btn--secundario" href="{% url 'sales:meus_pedidos' %}">Voltar</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

@@ -34,17 +34,18 @@ def saldo_disponivel(produto, unidade) -> Decimal:
 
 def _cliente_por_documento(
     *, nome: str, documento: str, email: str, telefone: str,
-    usuario=None,
 ) -> Cliente:
-    """Localiza ou cria o cliente pelo documento (armazenado em dígitos)."""
+    """Localiza ou cria o cliente pelo documento (armazenado em dígitos).
+
+    SEC-02: o checkout nunca vincula ``Cliente.usuario``. O vínculo exige
+    comprovação de posse do e-mail cadastrado (customers.services) ou ato
+    administrativo auditado.
+    """
     from customers.models import normalizar_documento
 
     documento = normalizar_documento(documento)
     cliente = Cliente.objects.filter(documento=documento).first()
     if cliente:
-        if usuario is not None and cliente.usuario_id is None:
-            cliente.usuario = usuario
-            cliente.save(update_fields=["usuario"])
         return cliente
     tipo_pessoa = (
         Cliente.TipoPessoa.FISICA
@@ -58,7 +59,7 @@ def _cliente_por_documento(
         categoria=Cliente.Categoria.VAREJO,
         telefone=telefone,
         email=email,
-        usuario=usuario,
+        usuario=None,
     )
 
 
@@ -82,7 +83,6 @@ def criar_pedido_do_carrinho(request, formulario) -> Pedido:
         documento=formulario.cleaned_data["documento"],
         email=formulario.cleaned_data["email"],
         telefone=formulario.cleaned_data.get("telefone", ""),
-        usuario=usuario,
     )
 
     canal = Pedido.Canal.VENDEDOR if criado_por_interno else Pedido.Canal.LOJA

@@ -1,0 +1,151 @@
+"""SEC-02: vínculo cliente/usuário somente após comprovação por e-mail."""
+
+import re
+from unittest import mock
+
+from django.core import mail
+from django.test import TestCase
+from django.urls import reverse
+
+from accounts.models import Usuario
+from core.models import LogAuditoria
+from customers.factories import ClienteFactory
+
+DOCUMENTO = "52998224725"
+
+
+class VinculoClienteTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.senha = "senha-forte-123"
+        cls.usuario = Usuario.objects.create_user(
+            username="titular",
+            email="titular@example.com",
+            password=cls.senha,
+        )
+        cls.outro_usuario = Usuario.objects.create_user(
+            username="outro",
+            email="outro@example.com",
+            password=cls.senha,
+        )
+
+    def _criar_cliente(self, **overrides):
+        dados = {
+            "documento": DOCUMENTO,
+            "email": self.usuario.email,
+            "usuario": None,
+        }
+        dados.update(overrides)
+        return ClienteFactory(**dados)
+
+    def _solicitar(self):
+        return self.client.post(
+            reverse("accounts:vincular_cliente"),
+            {"documento": DOCUMENTO},
+        )
+
+    @staticmethod
+    def _link_do_email():
+        corpo = mail.outbox[-1].body
+        caminho = re.search(
+            r"(/accounts/vincular-cliente/confirmar/[^\s]+)", corpo
+        )
+        assert caminho is not None, corpo
+        return caminho.group(1)
+
+    def test_solicitacao_envia_email_e_nao_vincula_imediatamente(self):
+        cliente = self._criar_cliente()
+        self.client.force_login(self.usuario)
+
+        resposta = self._solicitar()
+
+        self.assertEqual(resposta.status_code, 302)
+        self.assertEqual(len(mail.outbox), 1)
+        cliente.refresh_from_db()
+        self.assertIsNone(cliente.usuario)
+        self.assertIn("vínculo", mail.outbox[0].subject.lower())
+
+    def test_confirmacao_por_email_vincula_e_audita(self):
+        cliente = self._criar_cliente()
+        self.client.force_login(self.usuario)
+        self._solicitar()
+        link = self._link_do_email()
+
+        resposta = self.client.get(link)
+
+        self.assertEqual(resposta.status_code, 302)
+        cliente.refresh_from_db()
+        self.assertEqual(cliente.usuario, self.usuario)
+        log = LogAuditoria.objects.filter(
+            acao="cliente.vinculo_confirmado",
+            objeto_id=str(cliente.pk),
+        ).first()
+        self.assertIsNotNone(log)
+        self.assertEqual(log.usuario, self.usuario)
+
+    def test_email_diferente_nao_recebe_link(self):
+        cliente = self._criar_cliente(email="outro@example.com")
+        self.client.force_login(self.usuario)
+
+        resposta = self._solicitar()
+
+        self.assertEqual(resposta.status_code, 302)
+        self.assertEqual(len(mail.outbox), 0)
+        cliente.refresh_from_db()
+        self.assertIsNone(cliente.usuario)
+
+    def test_documento_inexistente_tem_resposta_generica(self):
+        self.client.force_login(self.usuario)
+
+        resposta = self._solicitar()
+
+        self.assertEqual(resposta.status_code, 302)
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_cliente_ja_vinculado_nao_recebe_novo_link(self):
+        cliente = self._criar_cliente(usuario=self.outro_usuario)
+        self.client.force_login(self.usuario)
+
+        self._solicitar()
+
+        self.assertEqual(len(mail.outbox), 0)
+        cliente.refresh_from_db()
+        self.assertEqual(cliente.usuario, self.outro_usuario)
+
+    def test_link_nao_pode_ser_usado_por_outro_usuario(self):
+        cliente = self._criar_cliente()
+        self.client.force_login(self.usuario)
+        self._solicitar()
+        link = self._link_do_email()
+
+        self.client.force_login(self.outro_usuario)
+        resposta = self.client.get(link)
+
+        self.assertEqual(resposta.status_code, 403)
+        cliente.refresh_from_db()
+        self.assertIsNone(cliente.usuario)
+
+    def test_link_expirado_e_rejeitado(self):
+        cliente = self._criar_cliente()
+        self.client.force_login(self.usuario)
+        with mock.patch(
+            "django.core.signing.time.time",
+            return_value=1_700_000_000,
+        ):
+            self._solicitar()
+        link = self._link_do_email()
+
+        with mock.patch(
+            "django.core.signing.time.time",
+            return_value=1_700_000_000 + 7_200,
+        ):
+            resposta = self.client.get(link)
+
+        self.assertEqual(resposta.status_code, 404)
+        cliente.refresh_from_db()
+        self.assertIsNone(cliente.usuario)
+
+    def test_anonimo_e_redirecionado_para_login(self):
+        resposta = self.client.get(reverse("accounts:vincular_cliente"))
+        self.assertEqual(resposta.status_code, 302)
+        self.assertIn(reverse("accounts:login"), resposta["Location"])

@@ -1,13 +1,27 @@
 from django.contrib.auth import views as auth_views
 from django.urls import path, reverse_lazy
 
-from .views import LoginView
+from .views import (
+    ConfirmarVinculoClienteView,
+    LoginView,
+    VincularClienteView,
+)
 
 app_name = "accounts"
 
 urlpatterns = [
     path("login/", LoginView.as_view(), name="login"),
     path("logout/", auth_views.LogoutView.as_view(), name="logout"),
+    path(
+        "vincular-cliente/",
+        VincularClienteView.as_view(),
+        name="vincular_cliente",
+    ),
+    path(
+        "vincular-cliente/confirmar/<str:token>/",
+        ConfirmarVinculoClienteView.as_view(),
+        name="confirmar_vinculo_cliente",
+    ),
     path(
         "senha/recuperar/",
         auth_views.PasswordResetView.as_view(
