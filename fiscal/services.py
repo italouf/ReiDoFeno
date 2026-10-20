@@ -60,6 +60,17 @@ def enviar_para_emissao(pedido, client=None) -> NotaFiscal | None:
         nota.status = NotaFiscal.Status.ERRO
         nota.ultimo_erro = str(erro)[:500]
         nota.save()
+        from core.auditoria import registrar_auditoria
+
+        registrar_auditoria(
+            acao="fiscal.nota_erro",
+            instancia=nota,
+            depois={
+                "status": nota.status,
+                "tentativas": nota.tentativas,
+                "erro": nota.ultimo_erro,
+            },
+        )
         Aviso.registrar(
             tipo=Aviso.Tipo.FISCAL_ERRO,
             mensagem=f"Falha ao emitir NF-e do pedido {pedido.numero}: {erro}",
@@ -75,6 +86,18 @@ def enviar_para_emissao(pedido, client=None) -> NotaFiscal | None:
     nota.link_documento = resultado.get("link", "")
     nota.ultimo_erro = ""
     nota.save()
+    from core.auditoria import registrar_auditoria
+
+    registrar_auditoria(
+        acao="fiscal.nota_autorizada",
+        instancia=nota,
+        depois={
+            "status": nota.status,
+            "numero": nota.numero,
+            "chave": nota.chave_acesso,
+            "tentativas": nota.tentativas,
+        },
+    )
     return nota
 
 

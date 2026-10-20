@@ -246,7 +246,7 @@ class SimularResultadoView(View):
         from .services import aplicar_resultado_pagamento
 
         dados = obter_client().consultar_pagamento(id_externo)
-        aplicar_resultado_pagamento(dados)
+        aplicar_resultado_pagamento(dados, request=request)
         return redirect("sales:pedido_token", pedido.token_acesso)
 
 
@@ -279,7 +279,7 @@ class MercadoPagoWebhookView(View):
         )
         try:
             dados = obter_client().consultar_pagamento(data_id)
-            pedido = aplicar_resultado_pagamento(dados)
+            pedido = aplicar_resultado_pagamento(dados, request=request)
             evento.processado = True
             evento.resultado = f"pedido={getattr(pedido, 'numero', 'n/a')}"
             evento.save()
@@ -419,13 +419,13 @@ class PedidoAtualizarStatusView(LoginRequiredMixin, GrupoRequiredMixin, View):
             )
         if novo_status == Pedido.Status.CANCELADO:
             # cancelar_pedido faz a transição E libera reservas.
-            cancelar_pedido(pedido)
+            cancelar_pedido(pedido, request=request)
             messages.success(
                 request, f"Pedido {pedido.numero} → Cancelado."
             )
             return redirect("sales:pedido_interno_detail", pk)
         try:
-            pedido.transicionar(novo_status)
+            pedido.transicionar(novo_status, request=request)
         except ValidationError as erro:
             messages.error(request, erro.message)
         else:

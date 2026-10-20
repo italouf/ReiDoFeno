@@ -156,13 +156,15 @@ def _validar_disponibilidade(itens, unidade) -> None:
 
 
 @transaction.atomic
-def marcar_pagamento_aprovado(pedido: Pedido, *, id_externo: str = "") -> None:
+def marcar_pagamento_aprovado(
+    pedido: Pedido, *, id_externo: str = "", request=None
+) -> None:
     """Idempotente: move o pedido para 'pago' e efetiva a baixa do estoque."""
     if pedido.status == Pedido.Status.PAGO:
         logger.info("Pedido %s já estava pago; evento ignorado.", pedido.numero)
         return
 
-    pedido.transicionar(Pedido.Status.PAGO)
+    pedido.transicionar(Pedido.Status.PAGO, request=request)
 
     for item in pedido.itens.select_related("produto"):
         dar_baixa_definitiva(
@@ -170,6 +172,7 @@ def marcar_pagamento_aprovado(pedido: Pedido, *, id_externo: str = "") -> None:
             unidade=pedido.unidade,
             quantidade=item.quantidade,
             pedido=pedido.numero,
+            request=request,
         )
 
     pagamento = getattr(pedido, "pagamento", None)
@@ -181,9 +184,22 @@ def marcar_pagamento_aprovado(pedido: Pedido, *, id_externo: str = "") -> None:
         pagamento.aprovado_em = timezone.now()
         pagamento.save()
 
+    from core.auditoria import registrar_auditoria
+
+    registrar_auditoria(
+        acao="pedido.pagamento_aprovado",
+        instancia=pedido,
+        request=request,
+        depois={
+            "status": pedido.status,
+            "id_externo": id_externo,
+            "pagamento_id": getattr(pagamento, "pk", None),
+        },
+    )
+
 
 @transaction.atomic
-def cancelar_pedido(pedido: Pedido) -> None:
+def cancelar_pedido(pedido: Pedido, *, request=None) -> None:
     """Cancela liberando reservas quando aplicável (idempotente)."""
     if pedido.status in (Pedido.Status.CANCELADO, Pedido.Status.CONCLUIDO):
         logger.info(
@@ -194,7 +210,7 @@ def cancelar_pedido(pedido: Pedido) -> None:
         return
 
     status_anterior = pedido.status
-    pedido.transicionar(Pedido.Status.CANCELADO)
+    pedido.transicionar(Pedido.Status.CANCELADO, request=request)
 
     if status_anterior in (
         Pedido.Status.AGUARDANDO_PAGAMENTO,
@@ -221,7 +237,7 @@ STATUS_PROVEDOR_PARA_PAGAMENTO = {
 
 
 @transaction.atomic
-def aplicar_resultado_pagamento(dados_consulta: dict) -> Pedido | None:
+def aplicar_resultado_pagamento(dados_consulta: dict, *, request=None) -> Pedido | None:
     """Aplica o resultado consultado no provedor ao pedido correspondente.
 
     Idempotente: eventos já refletidos não produzem novo efeito.
@@ -237,7 +253,9 @@ def aplicar_resultado_pagamento(dados_consulta: dict) -> Pedido | None:
 
     if status_provedor == "approved":
         ja_estava_pago = pedido.status == Pedido.Status.PAGO
-        marcar_pagamento_aprovado(pedido, id_externo=id_externo)
+        marcar_pagamento_aprovado(
+            pedido, id_externo=id_externo, request=request
+        )
         if not ja_estava_pago:
             from .emails import email_pagamento_aprovado
 
@@ -252,12 +270,25 @@ def aplicar_resultado_pagamento(dados_consulta: dict) -> Pedido | None:
             pagamento.id_externo = id_externo or pagamento.id_externo
             pagamento.save()
 
+            from core.auditoria import registrar_auditoria
+
+            registrar_auditoria(
+                acao="pedido.pagamento_resultado",
+                instancia=pedido,
+                request=request,
+                depois={
+                    "status_provedor": status_provedor,
+                    "pagamento_status": novo_status,
+                    "id_externo": pagamento.id_externo,
+                },
+            )
+
     if status_provedor in ("refused", "cancelled", "charged_back"):
         if pedido.status in (
             Pedido.Status.AGUARDANDO_PAGAMENTO,
             Pedido.Status.PAGAMENTO_PENDENTE,
         ):
-            pedido.transicionar(Pedido.Status.FALHOU)
+            pedido.transicionar(Pedido.Status.FALHOU, request=request)
             # Recusa libera a reserva; o saldo volta a ficar disponível.
             for item in pedido.itens.select_related("produto"):
                 liberar_reserva(
@@ -267,5 +298,7 @@ def aplicar_resultado_pagamento(dados_consulta: dict) -> Pedido | None:
                 )
     elif status_provedor in ("pending", "in_process"):
         if pedido.status == Pedido.Status.AGUARDANDO_PAGAMENTO:
-            pedido.transicionar(Pedido.Status.PAGAMENTO_PENDENTE)
+            pedido.transicionar(
+                Pedido.Status.PAGAMENTO_PENDENTE, request=request
+            )
     return pedido

@@ -80,6 +80,7 @@ class MovimentoEntradaSaidaView(MovimentoCreateBaseView):
                 tipo=form.cleaned_data["tipo"],
                 quantidade=form.cleaned_data["quantidade"],
                 usuario=self.request.user,
+                request=self.request,
             )
         except ValidationError as erro:
             form.add_error(None, erro.message)
@@ -109,6 +110,7 @@ class MovimentoAjusteView(MovimentoCreateBaseView):
                 quantidade=form.cleaned_data["quantidade"],
                 motivo=form.cleaned_data["motivo"],
                 usuario=self.request.user,
+                request=self.request,
             )
         except ValidationError as erro:
             form.add_error(None, erro.message)
@@ -137,6 +139,7 @@ class MovimentoTransferenciaView(MovimentoCreateBaseView):
                 unidade_destino=form.cleaned_data["unidade_destino"],
                 quantidade=form.cleaned_data["quantidade"],
                 usuario=self.request.user,
+                request=self.request,
             )
         except ValidationError as erro:
             form.add_error(None, erro.message)

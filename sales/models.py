@@ -124,16 +124,34 @@ class Pedido(models.Model):
             self.numero = f"PF{self.pk:06d}"
             super().save(update_fields=["numero"])
 
-    def transicionar(self, novo_status: str) -> None:
-        """Aplica uma transição de status válida ou levanta ValidationError."""
+    def transicionar(self, novo_status: str, *, request=None, usuario=None) -> None:
+        """Aplica uma transição de status válida ou levanta ValidationError.
+
+        SEC-03: a mudança e o ``LogAuditoria`` são persistidos na mesma
+        transação; falha na auditoria reverte a transição.
+        """
         permitidos = self.TRANSICOES_VALIDAS.get(self.status, set())
         if novo_status not in permitidos:
             raise ValidationError(
                 f"Transição inválida: '{self.status}' → '{novo_status}'. "
                 f"Permitidas: {sorted(permitidos)}."
             )
+        status_anterior = self.status
         self.status = novo_status
-        self.save(update_fields=["status", "atualizado_em"])
+
+        from core.auditoria import auditar_atomicamente
+
+        auditar_atomicamente(
+            acao="pedido.status_alterado",
+            instancia=self,
+            request=request,
+            usuario=usuario,
+            antes={"status": status_anterior},
+            depois={"status": novo_status},
+            salvar=lambda: self.save(
+                update_fields=["status", "atualizado_em"]
+            ),
+        )
 
     def recalcular_totais(self) -> None:
         self.subtotal = sum(
