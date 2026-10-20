@@ -178,6 +178,13 @@ def confirmar_vinculo_cliente(*, token: str, usuario, request):
     prova.usado_em = timezone.now()
     prova.save(update_fields=["usado_em"])
     _revogar_tokens_ativos(cliente=cliente, usuario=usuario)
+
+    from sales.models import Pedido
+
+    pedidos_marcados = Pedido.objects.filter(
+        cliente=cliente, usuario_criador=usuario
+    ).update(identidade_verificada=True)
+
     registrar_auditoria(
         acao="cliente.vinculo_confirmado",
         instancia=cliente,
@@ -187,6 +194,7 @@ def confirmar_vinculo_cliente(*, token: str, usuario, request):
             "usuario_id": usuario.pk,
             "vinculo_verificado": True,
             "origem": "email",
+            "pedidos_marcados": pedidos_marcados,
         },
     )
     return cliente
@@ -212,6 +220,18 @@ def revisar_vinculo_cliente(
     cliente.save(update_fields=["usuario", "vinculo_verificado"])
     if not verificado:
         _revogar_tokens_ativos(cliente=cliente)
+    from sales.models import Pedido
+
+    if verificado and cliente.usuario_id:
+        pedidos_marcados = Pedido.objects.filter(
+            cliente=cliente, usuario_criador_id=cliente.usuario_id
+        ).update(identidade_verificada=True)
+    elif not verificado:
+        pedidos_marcados = Pedido.objects.filter(cliente=cliente).update(
+            identidade_verificada=False
+        )
+    else:
+        pedidos_marcados = 0
     registrar_auditoria(
         acao="cliente.vinculo_revisado_admin",
         instancia=cliente,
@@ -222,6 +242,7 @@ def revisar_vinculo_cliente(
             "vinculo_verificado": cliente.vinculo_verificado,
             "justificativa": justificativa.strip()[:500],
             "origem": "admin",
+            "pedidos_ajustados": pedidos_marcados,
         },
     )
     return cliente

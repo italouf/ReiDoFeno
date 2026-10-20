@@ -13,6 +13,7 @@ from accounts.models import Usuario
 from core.models import LogAuditoria
 from customers.factories import ClienteFactory
 from customers.models import VinculoClienteToken
+from sales.factories import PedidoFactory
 
 DOCUMENTO = "52998224725"
 
@@ -70,6 +71,11 @@ class VinculoClienteTests(TestCase):
 
     def test_confirmacao_por_email_vincula_e_audita(self):
         cliente = self._criar_cliente()
+        pedido = PedidoFactory(
+            cliente=cliente,
+            usuario_criador=self.usuario,
+            identidade_verificada=False,
+        )
         self.client.force_login(self.usuario)
         self._solicitar()
         link = self._link_do_email()
@@ -83,8 +89,10 @@ class VinculoClienteTests(TestCase):
 
         self.assertEqual(resposta.status_code, 302)
         cliente.refresh_from_db()
+        pedido.refresh_from_db()
         self.assertEqual(cliente.usuario, self.usuario)
         self.assertTrue(cliente.vinculo_verificado)
+        self.assertTrue(pedido.identidade_verificada)
         log = LogAuditoria.objects.filter(
             acao="cliente.vinculo_confirmado",
             objeto_id=str(cliente.pk),
