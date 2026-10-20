@@ -42,8 +42,13 @@ um pedido efetivamente separado.
 6. Eventos financeiros fora de ordem não rebaixam um pedido já pago. Uma
    aprovação tardia de pedido cancelado é registrada em
    `LogAuditoria` (`pedido.pagamento_apos_cancelamento`) e exige
-   conciliação manual; o pedido não é reaberto.
-7. A migration `0002_pedido_status_financeiro` popula o novo campo usando
+   conciliação manual; o pedido não é reaberto. Eventos `pending`,
+   `refused` ou `cancelled` posteriores a um pagamento aprovado são
+   ignorados e auditados (`pedido.pagamento_evento_ignorado`).
+7. A aprovação de um pedido em `rascunho` ou já em andamento pós-pagamento
+   sem financeiro `pago` não altera o pedido; gera
+   `pedido.pagamento_inconsistente` para conciliação.
+8. A migration `0002_pedido_status_financeiro` popula o novo campo usando
    `Pedido.status` e `Pagamento.status`:
    - estados operacionais de pedido pago → `pago`;
    - pagamento aprovado → `pago`;

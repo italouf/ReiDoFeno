@@ -405,7 +405,7 @@ class PedidoInternoDetailView(LoginRequiredMixin, GrupoRequiredMixin, DetailView
             & PERMIS_SO_TRANSICOES_OPERACIONAIS
         )
         if (
-            self.object.status == Pedido.Status.AGUARDANDO_PAGAMENTO
+            Pedido.Status.EM_SEPARACAO in permitidos
             and self.object.status_financeiro
             != Pedido.StatusFinanceiro.PAGO
         ):

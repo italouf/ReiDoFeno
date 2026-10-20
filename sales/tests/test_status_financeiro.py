@@ -212,6 +212,32 @@ class ResultadoPagamentoTests(TestCase):
             ).exists()
         )
 
+    def test_evento_pendente_apos_pagamento_nao_rebaixa(self):
+        pedido = self._pedido_com_pagamento()
+        marcar_pagamento_aprovado(pedido, id_externo="pay-status")
+
+        self._aplicar(pedido, "pending")
+
+        pedido.refresh_from_db()
+        self.assertEqual(
+            pedido.status_financeiro, Pedido.StatusFinanceiro.PAGO
+        )
+        self.assertTrue(
+            LogAuditoria.objects.filter(
+                acao="pedido.pagamento_evento_ignorado",
+                objeto_id=str(pedido.pk),
+            ).exists()
+        )
+
+    def test_pedido_legado_pago_sem_financeiro_pago_nao_separa(self):
+        pedido = PedidoFactory(
+            status=Pedido.Status.PAGO,
+            status_financeiro=Pedido.StatusFinanceiro.PENDENTE,
+        )
+
+        with self.assertRaises(ValidationError):
+            pedido.transicionar(Pedido.Status.EM_SEPARACAO)
+
     def test_evento_pendente_apos_cancelamento_nao_reabre(self):
         pedido = self._pedido_com_pagamento()
         cancelar_pedido(pedido)

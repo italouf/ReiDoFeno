@@ -474,10 +474,28 @@ def aplicar_resultado_pagamento(dados_consulta: dict, *, request=None) -> Pedido
         return pedido
 
     if status_provedor in ("pending", "in_process"):
-        if pedido.status in (
-            Pedido.Status.CANCELADO,
-            Pedido.Status.CONCLUIDO,
+        if (
+            pedido.status_financeiro != Pedido.StatusFinanceiro.PENDENTE
+            or pedido.status
+            in (
+                Pedido.Status.CANCELADO,
+                Pedido.Status.CONCLUIDO,
+            )
         ):
+            logger.warning(
+                "Evento %s ignorado: pedido %s está em %s/%s.",
+                status_provedor,
+                pedido.numero,
+                pedido.status,
+                pedido.status_financeiro,
+            )
+            _registrar_resultado_financeiro(
+                pedido,
+                acao="pedido.pagamento_evento_ignorado",
+                status_provedor=status_provedor,
+                id_externo=id_externo,
+                request=request,
+            )
             return pedido
         pedido.definir_status_financeiro(
             Pedido.StatusFinanceiro.PENDENTE,

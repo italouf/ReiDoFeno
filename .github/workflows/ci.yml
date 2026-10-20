@@ -34,7 +34,8 @@ jobs:
           pip install -r requirements-dev.txt
       - name: Testes com cobertura
         run: |
-          pytest --junitxml=reports/junit.xml --cov --cov-report=xml:reports/coverage.xml --cov-report=term-missing
+          mkdir -p reports
+          pytest --junitxml=reports/junit.xml --cov --cov-fail-under=80 --cov-report=xml:reports/coverage.xml --cov-report=term-missing
       - name: Publicar relatórios de teste
         uses: actions/upload-artifact@v4
         if: always()
@@ -54,7 +55,9 @@ jobs:
           pip install --upgrade pip
           pip install bandit==1.9.4 pip-audit==2.10.1
       - name: Bandit (análise estática)
-        run: bandit -c pyproject.toml -r . --severity-level medium -f txt -o reports/bandit.txt && cat reports/bandit.txt
+        run: |
+          mkdir -p reports
+          bandit -c pyproject.toml -r . --severity-level medium -f txt -o reports/bandit.txt && cat reports/bandit.txt
       - name: pip-audit (dependências)
         run: pip-audit -r requirements.txt --desc off
 

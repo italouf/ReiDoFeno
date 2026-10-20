@@ -156,7 +156,6 @@ class Pedido(models.Model):
             )
         if (
             novo_status == self.Status.EM_SEPARACAO
-            and self.status == self.Status.AGUARDANDO_PAGAMENTO
             and self.status_financeiro != self.StatusFinanceiro.PAGO
         ):
             raise ValidationError(

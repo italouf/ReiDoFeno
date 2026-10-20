@@ -35,8 +35,12 @@ Todas as mudanças relevantes deste projeto são registradas aqui.
     o andamento permanece em `aguardando_pagamento`.
   - A transição para `em_separacao` exige financeiro `pago`.
   - `transicionar()` não aceita mais estados financeiros legados.
+  - Eventos `pending`/`refused`/`cancelled` posteriores a um pagamento
+    aprovado são ignorados e auditados, sem rebaixar o financeiro.
   - Migration `sales.0002_pedido_status_financeiro` preserva os dados
     existentes.
+- CI passa a falhar com cobertura global abaixo de 80%
+  (`pytest --cov-fail-under=80`).
 - Deploy passa a exigir `python manage.py createcachetable`.
 
 ### Documentação
