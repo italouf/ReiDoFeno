@@ -1,5 +1,29 @@
 # Changelog
 
+## [Fase 2B — integridade financeira e estoque] — 2026-10-20
+
+- **STO-01:** `MovimentoEstoque.delta` assinado como fonte de verdade;
+  `quantidade` derivada; imutabilidade em instância, QuerySet, bulk e trigger
+  PostgreSQL; migração reconcilia o saldo legado e tipos de transferência
+  passam a ser `transferencia_entrada`/`transferencia_saida`.
+- **ADR-003:** `ReservaEstoque` vinculada a pedido/item, com unique parcial,
+  consumo/liberação idempotentes, reconciliação com `quantidade_bloqueada` e
+  integração no checkout, pagamento aprovado, cancelamento e expiração.
+- **DAT-01:** check constraints de valores não negativos e
+  `total = subtotal + frete`; migration valida o legado antes de aplicar.
+- **CUS-01:** CPF, CNPJ numérico e CNPJ alfanumérico (ASCII - 48, módulo 11);
+  normalização preserva letras maiúsculas; fiscal e filtro de PII atualizados.
+- **ADR-005:** `meus-pedidos` exige vínculo comprovado e pedido do titular;
+  exportação LGPD sem vínculo retorna 403; tela orienta o usuário pendente.
+- **Atacado:** `Produto.preco_atacado` e regra estrita de mais de 50 fardos
+  para cliente ATACADO, com preço congelado no `ItemPedido`.
+- **Validação local:** 426 passed, 6 skipped (5 PostgreSQL + 1 Redis), 230
+  subtests; cobertura `stock/services.py` 99,02%, `sales/services.py` 93,88%,
+  `customers/services.py` 94,55%, total 91,22%; Ruff, Bandit (0 medium/high),
+  pip-audit (0 vulnerabilidades), `manage.py check`, `makemigrations --check`
+  e migração completa em SQLite aprovados. Trigger e concorrência PostgreSQL
+  ficam cobertos pelos testes `@pytest.mark.postgres` na CI.
+
 Todas as mudanças relevantes deste projeto são registradas aqui.
 
 ## [Fase 2A — fechamento local E01/E02] — 2026-10-20

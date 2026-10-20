@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - fase-2a-seguranca-critica
+      - fase-2b-integridade-estoque
   pull_request:
   workflow_dispatch:
 
@@ -115,7 +116,7 @@ jobs:
       - name: Bandit (análise estática)
         run: |
           mkdir -p reports
-          bandit -c pyproject.toml -r . --severity-level medium -f txt -o reports/bandit.txt && cat reports/bandit.txt
+          bandit -c pyproject.toml -r . -ll -f txt -o reports/bandit.txt && cat reports/bandit.txt
       - name: pip-audit (dependências)
         run: pip-audit -r requirements.txt --desc off
 
