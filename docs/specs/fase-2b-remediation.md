@@ -74,6 +74,19 @@
 - **H06:** `sales/tests/test_regra_atacado.py` valida carrinho e checkout com a mesma
   cotação.
 
+## Resultado da validação
+
+- SQLite local: **456 passed, 9 skipped, 238 subtests**.
+- PostgreSQL 15 (Neon): **51 testes críticos** (B01, B03, H02, H03, H05, STO-01)
+  + **5 testes de concorrência** passaram; migração histórica 0001 → HEAD passou com
+  `validar_migracao_legado --criar/--verificar`.
+- A rodada integral PostgreSQL local não terminou dentro do limite por latência do
+  Neon; a CI do projeto deve executar a suíte completa no PostgreSQL 15 do workflow.
+- `ruff`, `manage.py check`, `makemigrations --check`, Bandit (0 medium/high) e
+  pip-audit (0) aprovados.
+- Invariantes verificados no banco local: nenhum ledger divergente, nenhum bloqueio
+  divergente e nenhum `delta` nulo/zero.
+
 ## Limitações e riscos residuais
 
 - O trigger de `TRUNCATE` é bloqueado em produção, mas testes habilitam o GUC

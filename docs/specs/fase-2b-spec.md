@@ -85,7 +85,7 @@ já aplicaram a versão anterior da 0002/0003 é tratada por 0004–0006 idempot
 ## Gate de saída
 
 - [x] STO-01, ADR-003, DAT-01, CUS-01, ADR-005 e atacado implementados e testados.
-- [x] Suíte local: 455 passed, 9 skipped (6 PostgreSQL + 1 Redis + 1 cache), 238
+- [x] Suíte local: 456 passed, 9 skipped (6 PostgreSQL + 1 Redis + 1 cache), 238
       subtests.
 - [x] Migração histórica 0001 → HEAD validada em SQLite e PostgreSQL 15 (ledger,
       reservas, quarentena e evidências).
