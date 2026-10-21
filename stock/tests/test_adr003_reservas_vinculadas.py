@@ -3,7 +3,6 @@
 from decimal import Decimal
 
 import pytest
-from django.db import IntegrityError, transaction
 from django.db.models import Sum
 from django.test import TestCase, TransactionTestCase
 
@@ -67,10 +66,31 @@ class ReservaVinculadaTests(TransactionTestCase):
         assert estoque.quantidade_bloqueada == Decimal("7.00")
 
     def test_uma_reserva_ativa_por_pedido_produto_unidade(self):
-        self._reservar(self.pedido1, "3.00")
-        with pytest.raises(IntegrityError):
-            with transaction.atomic():
-                self._reservar(self.pedido1, "2.00")
+        reserva = self._reservar(self.pedido1, "3.00")
+        mesma = reservar(
+            produto=self.produto,
+            unidade=self.unidade,
+            quantidade=Decimal("3.00"),
+            pedido=self.pedido1,
+            item_pedido=reserva.item_pedido,
+        )
+        assert mesma.pk == reserva.pk
+
+        item_extra = ItemPedidoFactory(
+            pedido=self.pedido1,
+            produto=self.produto,
+            quantidade=Decimal("2.00"),
+        )
+        from django.core.exceptions import ValidationError
+
+        with pytest.raises(ValidationError):
+            reservar(
+                produto=self.produto,
+                unidade=self.unidade,
+                quantidade=Decimal("2.00"),
+                pedido=self.pedido1,
+                item_pedido=item_extra,
+            )
 
     def test_consumir_reserva_idempotente(self):
         reserva = self._reservar(self.pedido1, "5.00")

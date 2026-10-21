@@ -49,7 +49,7 @@ class PostgresConcurrencyTests(TransactionTestCase):
             produto=self.produto,
             unidade=self.unidade,
             quantidade="10.00",
-            quantidade_bloqueada=Decimal("2.00"),
+            quantidade_bloqueada=Decimal("0.00"),
         )
 
     def _pedido(self, *, com_pagamento=False):
@@ -67,6 +67,13 @@ class PostgresConcurrencyTests(TransactionTestCase):
             produto=self.produto,
             quantidade=Decimal("2.00"),
             preco_unitario=Decimal("10.00"),
+        )
+        reservar(
+            produto=self.produto,
+            unidade=self.unidade,
+            quantidade=Decimal("2.00"),
+            pedido=pedido,
+            item_pedido=pedido.itens.get(),
         )
         if com_pagamento:
             Pagamento.objects.create(

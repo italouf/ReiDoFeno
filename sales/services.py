@@ -8,20 +8,22 @@ from django.db import transaction
 from django.db.models import Sum
 from django.shortcuts import get_object_or_404
 
-from catalog.models import Produto
 from customers.models import Cliente
-from stock.models import Estoque, MovimentoEstoque, ReservaEstoque
+from stock.models import Estoque, ReservaEstoque
 from stock.services import (
+    baixar_saldo_livre,
     consumir_reserva,
-    dar_baixa_definitiva,
-    liberar_bloqueio_legado,
     liberar_reserva,
-    registrar_movimento,
     reservar,
 )
 
 from .cart import Carrinho
-from .models import ItemPedido, Pagamento, Pedido
+from .models import Pagamento, Pedido
+from .pricing import (  # noqa: F401 - reexportado para compatibilidade
+    LIMIAR_ATACADO,
+    calcular_item_pedido,
+    calcular_preco_unitario,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -63,49 +65,6 @@ def saldo_disponivel(produto, unidade) -> Decimal:
     )
     return (agregado["saldo"] or Decimal("0")) - (
         agregado["bloqueada"] or Decimal("0")
-    )
-
-
-LIMIAR_ATACADO = Decimal("50.00")
-
-
-def calcular_preco_unitario(
-    *, produto, cliente, quantidade, preco_base=None
-) -> Decimal:
-    """Preço do item no checkout, com a regra de atacado (>50 fardos).
-
-    O preço-base do canal é preservado; a regra só troca para ``preco_atacado``
-    quando o cliente é ATACADO, o produto é vendido em fardo, a quantidade
-    supera 50 e existe preço de atacado cadastrado.
-    """
-    base = produto.preco_balcao if preco_base is None else preco_base
-    quantidade = Decimal(str(quantidade))
-    if (
-        cliente is not None
-        and cliente.categoria == Cliente.Categoria.ATACADO
-        and produto.unidade_medida == Produto.UnidadeMedida.FARDO
-        and quantidade > LIMIAR_ATACADO
-        and produto.preco_atacado is not None
-    ):
-        return produto.preco_atacado
-    return base
-
-
-def calcular_item_pedido(
-    *, produto, cliente, quantidade, preco_base=None
-) -> ItemPedido:
-    """Monta um ``ItemPedido`` não persistido com o preço correto."""
-    quantidade = Decimal(str(quantidade))
-    return ItemPedido(
-        produto=produto,
-        produto_nome=produto.nome,
-        quantidade=quantidade,
-        preco_unitario=calcular_preco_unitario(
-            produto=produto,
-            cliente=cliente,
-            quantidade=quantidade,
-            preco_base=preco_base,
-        ),
     )
 
 
@@ -151,6 +110,13 @@ def criar_pedido_do_carrinho(request, formulario) -> Pedido:
 
     unidade = formulario.cleaned_data["unidade"]
     _validar_disponibilidade(itens, unidade)
+    # Ordem global de locks por produto evita deadlock entre checkouts.
+    for item in sorted(itens, key=lambda entrada: entrada["produto"].pk):
+        Estoque.objects.select_for_update().get_or_create(
+            produto=item["produto"],
+            unidade=unidade,
+            defaults={"quantidade_minima": 0},
+        )
 
     usuario = request.user if request.user.is_authenticated else None
     criado_por_interno = bool(
@@ -203,18 +169,14 @@ def criar_pedido_do_carrinho(request, formulario) -> Pedido:
         preco_base = (
             produto.preco_balcao if tabela_atacado else produto.preco_online
         )
-        item_pedido = ItemPedido.objects.create(
-            pedido=pedido,
+        item_pedido = calcular_item_pedido(
             produto=produto,
-            produto_nome=produto.nome,
+            cliente=cliente if tabela_atacado else None,
             quantidade=item["quantidade"],
-            preco_unitario=calcular_preco_unitario(
-                produto=produto,
-                cliente=cliente if tabela_atacado else None,
-                quantidade=item["quantidade"],
-                preco_base=preco_base,
-            ),
+            preco_base=preco_base,
         )
+        item_pedido.pedido = pedido
+        item_pedido.save()
         reservar(
             produto=produto,
             unidade=unidade,
@@ -286,13 +248,42 @@ def _validar_disponibilidade(itens, unidade) -> None:
         )
 
 
-def _baixar_estoque_do_pedido(pedido: Pedido, *, request=None) -> None:
-    """Baixa cada item, cobrindo reservas parciais de pedidos legados.
+def _registrar_pendencia_estoque(
+    pedido: Pedido, *, produto, quantidade, motivo, request=None
+) -> None:
+    """Registra pendência auditada sem tocar em bloqueio de terceiros."""
+    from analytics.models import Aviso
+    from core.auditoria import registrar_auditoria
 
-    Reservas identificadas consomem o bloqueio e geram movimento. A diferença
-    entre o item e o total reservado é baixada diretamente (nunca foi
-    bloqueada). Produto sem nenhuma reserva usa o fallback agregado da Fase 1.
-    Reserva ativa sem item correspondente é liberada para não ficar órfã.
+    mensagem = (
+        f"Pedido {pedido.numero}: baixa pendente de {quantidade} "
+        f"de {produto.nome} — {motivo}"
+    )[:255]
+    Aviso.registrar(
+        tipo=Aviso.Tipo.ESTOQUE_PENDENTE,
+        mensagem=mensagem,
+        objeto=pedido,
+        severidade=Aviso.Severidade.ERRO,
+    )
+    registrar_auditoria(
+        acao="pedido.estoque_pendente",
+        instancia=pedido,
+        request=request,
+        depois={
+            "produto_id": produto.pk,
+            "quantidade": str(quantidade),
+            "motivo": motivo,
+        },
+    )
+
+
+def _baixar_estoque_do_pedido(pedido: Pedido, *, request=None) -> None:
+    """Baixa o devido de cada item sem reduzir bloqueio sem identidade.
+
+    Reservas ativas são consumidas; reservas já consumidas entram no cálculo.
+    A diferença é baixada apenas se houver saldo livre. Caso contrário, a
+    aprovação financeira permanece registrada e uma pendência auditada é criada.
+    Reservas ativas sem item correspondente não são liberadas por engano.
     """
     itens = {}
     for item in pedido.itens.select_related("produto"):
@@ -304,62 +295,107 @@ def _baixar_estoque_do_pedido(pedido: Pedido, *, request=None) -> None:
 
     reservas = list(
         pedido.reservas.select_for_update()
-        .filter(status=ReservaEstoque.Status.ATIVA)
+        .filter(
+            status__in=(
+                ReservaEstoque.Status.ATIVA,
+                ReservaEstoque.Status.CONSUMIDA,
+            )
+        )
         .select_related("produto")
+        .order_by("produto_id", "pk")
     )
     por_produto = {}
     for reserva in reservas:
         por_produto.setdefault(reserva.produto_id, []).append(reserva)
 
-    for produto_id, dados in itens.items():
-        reservas_produto = por_produto.pop(produto_id, [])
-        if not reservas_produto:
-            dar_baixa_definitiva(
+    for produto_id in sorted(itens):
+        dados = itens[produto_id]
+        todas = por_produto.pop(produto_id, [])
+        ativas = [
+            reserva
+            for reserva in todas
+            if reserva.status == ReservaEstoque.Status.ATIVA
+        ]
+        consumidas = sum(
+            (
+                reserva.quantidade
+                for reserva in todas
+                if reserva.status == ReservaEstoque.Status.CONSUMIDA
+            ),
+            Decimal("0.00"),
+        )
+        devido = dados["quantidade"]
+        total_ativo = sum(
+            (reserva.quantidade for reserva in ativas), Decimal("0.00")
+        )
+
+        if consumidas > devido:
+            _registrar_pendencia_estoque(
+                pedido,
                 produto=dados["produto"],
-                unidade=pedido.unidade,
-                quantidade=dados["quantidade"],
-                pedido=pedido.numero,
+                quantidade=consumidas - devido,
+                motivo="reservas já consumidas excedem a quantidade do item",
+                request=request,
+            )
+            continue
+        if consumidas + total_ativo > devido:
+            _registrar_pendencia_estoque(
+                pedido,
+                produto=dados["produto"],
+                quantidade=consumidas + total_ativo - devido,
+                motivo="reserva ativa excede a quantidade devida",
                 request=request,
             )
             continue
 
-        total_reservado = sum(
-            (reserva.quantidade for reserva in reservas_produto),
-            Decimal("0.00"),
-        )
-        for reserva in reservas_produto:
+        for reserva in ativas:
             consumir_reserva(reserva, request=request)
 
-        faltante = dados["quantidade"] - total_reservado
-        if faltante > 0:
-            registrar_movimento(
+        restante = devido - consumidas - total_ativo
+        if restante <= 0:
+            continue
+
+        estoque = (
+            Estoque.objects.select_for_update()
+            .filter(produto=dados["produto"], unidade=pedido.unidade)
+            .first()
+        )
+        livre = (
+            Decimal("0.00")
+            if estoque is None
+            else estoque.quantidade - estoque.quantidade_bloqueada
+        )
+        if estoque is None or livre < restante:
+            _registrar_pendencia_estoque(
+                pedido,
                 produto=dados["produto"],
-                unidade=pedido.unidade,
-                tipo=MovimentoEstoque.Tipo.BAIXA_DEFINITIVA,
-                delta=-faltante,
+                quantidade=restante,
                 motivo=(
-                    f"Baixa complementar do pedido {pedido.numero} "
-                    "(reserva legada parcial)"
+                    f"saldo livre insuficiente (livre={livre}, "
+                    f"necessário={restante})"
                 ),
                 request=request,
             )
-        elif faltante < 0:
-            logger.warning(
-                "Pedido %s tem reserva (%s) maior que o item (%s) do produto %s.",
-                pedido.numero,
-                total_reservado,
-                dados["quantidade"],
-                produto_id,
-            )
+            continue
+        baixar_saldo_livre(
+            produto=dados["produto"],
+            unidade=pedido.unidade,
+            quantidade=restante,
+            pedido=pedido.numero,
+            request=request,
+        )
 
     for reservas_sobrando in por_produto.values():
         for reserva in reservas_sobrando:
-            logger.warning(
-                "Reserva %s sem item correspondente no pedido %s; liberando.",
-                reserva.pk,
-                pedido.numero,
+            if reserva.status != ReservaEstoque.Status.ATIVA:
+                continue
+            _registrar_pendencia_estoque(
+                pedido,
+                produto=reserva.produto,
+                quantidade=reserva.quantidade,
+                motivo="reserva ativa sem item correspondente no pedido",
+                request=request,
             )
-            liberar_reserva(reserva)
 
 
 @transaction.atomic
@@ -383,6 +419,21 @@ def marcar_pagamento_aprovado(
             pagamento.aprovado_em if pagamento is not None else None
         )
         _atualizar_pagamento_aprovado(pedido, id_externo=id_externo)
+        reserva_ativa = (
+            ReservaEstoque.objects.filter(
+                pedido=pedido, status=ReservaEstoque.Status.ATIVA
+            )
+            .select_related("produto")
+            .first()
+        )
+        if reserva_ativa is not None:
+            _registrar_pendencia_estoque(
+                pedido,
+                produto=reserva_ativa.produto,
+                quantidade=reserva_ativa.quantidade,
+                motivo="pedido já pago com reserva ativa",
+                request=request,
+            )
         if (
             pagamento is not None
             and status_pagamento_anterior != Pagamento.Status.APROVADO
@@ -689,34 +740,20 @@ def cancelar_pedido(
         )
     ):
         reservas = list(
-            pedido.reservas.select_for_update().filter(
-                status=ReservaEstoque.Status.ATIVA
-            )
+            pedido.reservas.select_for_update()
+            .filter(status=ReservaEstoque.Status.ATIVA)
+            .select_related("produto")
+            .order_by("produto_id", "pk")
         )
         itens_liberados = []
-        if reservas:
-            for reserva in reservas:
-                liberar_reserva(reserva)
-                itens_liberados.append(
-                    {
-                        "produto": reserva.produto.nome,
-                        "quantidade": str(reserva.quantidade),
-                    }
-                )
-        else:
-            # Compatibilidade com pedidos legados sem reserva identificada.
-            for item in pedido.itens.select_related("produto"):
-                liberar_bloqueio_legado(
-                    produto=item.produto,
-                    unidade=pedido.unidade,
-                    quantidade=item.quantidade,
-                )
-                itens_liberados.append(
-                    {
-                        "produto": item.produto_nome,
-                        "quantidade": str(item.quantidade),
-                    }
-                )
+        for reserva in reservas:
+            liberar_reserva(reserva)
+            itens_liberados.append(
+                {
+                    "produto": reserva.produto.nome,
+                    "quantidade": str(reserva.quantidade),
+                }
+            )
         if itens_liberados:
             from core.auditoria import registrar_auditoria
 

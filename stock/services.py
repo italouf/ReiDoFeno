@@ -18,6 +18,7 @@ from .exceptions import ImutabilidadeViolation
 from .models import (
     TIPOS_DELTA_NEGATIVO,
     TIPOS_DELTA_POSITIVO,
+    BloqueioLegado,
     Estoque,
     MovimentoEstoque,
     ReservaEstoque,
@@ -25,13 +26,14 @@ from .models import (
 
 __all__ = [
     "ImutabilidadeViolation",
+    "baixar_saldo_livre",
     "consumir_reserva",
-    "dar_baixa_definitiva",
-    "liberar_bloqueio_legado",
     "liberar_reserva",
     "registrar_ajuste",
     "registrar_movimento",
     "reservar",
+    "resolver_bloqueio_legado",
+    "saldo_comprometido",
     "saldo_ledger",
     "transferir_estoque",
 ]
@@ -53,9 +55,12 @@ _TIPOS_TRANSFERENCIA = frozenset(
 
 def _decimal(valor, campo: str) -> Decimal:
     try:
-        return Decimal(str(valor))
+        numero = Decimal(str(valor))
     except (InvalidOperation, TypeError, ValueError) as erro:
         raise ValidationError(f"{campo} deve ser um número decimal.") from erro
+    if not numero.is_finite():
+        raise ValidationError(f"{campo} deve ser um número finito.")
+    return numero
 
 
 def _quantidade_positiva(quantidade) -> Decimal:
@@ -222,6 +227,14 @@ def transferir_estoque(
     """Transfere estoque gerando saída na origem e entrada no destino vinculadas."""
     quantidade = _quantidade_positiva(quantidade)
 
+    # Ordem global de locks por unidade evita deadlock A→B/B→A.
+    for unidade_id in sorted({unidade_origem.pk, unidade_destino.pk}):
+        Estoque.objects.select_for_update().get_or_create(
+            produto=produto,
+            unidade_id=unidade_id,
+            defaults={"quantidade_minima": 0},
+        )
+
     saida = registrar_movimento(
         produto=produto,
         unidade=unidade_origem,
@@ -270,40 +283,97 @@ def _avisar_estoque_baixo(estoque: Estoque) -> None:
         )
 
 
+STATUS_RESERVAVEIS = frozenset(
+    {"rascunho", "aguardando_pagamento", "pagamento_pendente"}
+)
+
+
+def _quantidade_devida(pedido_id, produto_id) -> Decimal:
+    """Soma dos itens do pedido para o produto (fonte da reserva)."""
+    from sales.models import ItemPedido
+
+    total = ItemPedido.objects.filter(
+        pedido_id=pedido_id, produto_id=produto_id
+    ).aggregate(total=Sum("quantidade"))["total"]
+    return total or Decimal("0.00")
+
+
+@transaction.atomic
 def reservar(
     *, produto, unidade, quantidade, pedido=None, item_pedido=None
 ) -> ReservaEstoque:
-    """Cria reserva identificada pelo pedido e bloqueia o estoque."""
+    """Cria reserva identificada pelo pedido, validando o contrato do item."""
+    from sales.models import Pedido
+
     quantidade = _quantidade_positiva(quantidade)
     if pedido is None:
         raise ValidationError(
             "Reserva de estoque exige pedido identificado; "
             "reservas órfãs não são permitidas."
         )
-    if item_pedido is not None and item_pedido.pedido_id != pedido.pk:
-        raise ValidationError("Item do pedido não pertence ao pedido informado.")
+    if item_pedido is None:
+        raise ValidationError("Reserva de estoque exige item do pedido.")
 
-    with transaction.atomic():
-        estoque = (
-            Estoque.objects.select_for_update()
-            .filter(produto=produto, unidade=unidade)
-            .first()
+    pedido = Pedido.objects.select_for_update().get(pk=pedido.pk)
+    if pedido.status not in STATUS_RESERVAVEIS:
+        raise ValidationError(
+            f"Pedido em '{pedido.status}' não pode receber reserva."
         )
-        if estoque is None or estoque.disponivel < quantidade:
-            raise ValidationError("Quantidade indisponível na unidade.")
+    if pedido.status_financeiro != Pedido.StatusFinanceiro.PENDENTE:
+        raise ValidationError(
+            "Pedido com financeiro não pendente não pode receber reserva."
+        )
+    if unidade.pk != pedido.unidade_id:
+        raise ValidationError("Unidade da reserva difere da unidade do pedido.")
+    if item_pedido.pedido_id != pedido.pk:
+        raise ValidationError("Item do pedido não pertence ao pedido informado.")
+    if item_pedido.produto_id != produto.pk:
+        raise ValidationError("Produto da reserva difere do produto do item.")
 
-        reserva = ReservaEstoque.objects.create(
+    devido = _quantidade_devida(pedido.pk, produto.pk)
+    if devido != quantidade:
+        raise ValidationError(
+            "Quantidade da reserva difere da quantidade devida do pedido "
+            f"({quantidade} != {devido})."
+        )
+
+    existente = (
+        ReservaEstoque.objects.select_for_update()
+        .filter(
             pedido=pedido,
-            item_pedido=item_pedido,
             produto=produto,
             unidade=unidade,
-            quantidade=quantidade,
             status=ReservaEstoque.Status.ATIVA,
         )
-        Estoque.objects.filter(pk=estoque.pk).update(
-            quantidade_bloqueada=F("quantidade_bloqueada") + quantidade
+        .first()
+    )
+    if existente is not None:
+        if existente.quantidade == quantidade:
+            return existente
+        raise ValidationError(
+            "Já existe reserva ativa com quantidade divergente."
         )
-        return reserva
+
+    estoque = (
+        Estoque.objects.select_for_update()
+        .filter(produto=produto, unidade=unidade)
+        .first()
+    )
+    if estoque is None or estoque.disponivel < quantidade:
+        raise ValidationError("Quantidade indisponível na unidade.")
+
+    reserva = ReservaEstoque.objects.create(
+        pedido=pedido,
+        item_pedido=item_pedido,
+        produto=produto,
+        unidade=unidade,
+        quantidade=quantidade,
+        status=ReservaEstoque.Status.ATIVA,
+    )
+    Estoque.objects.filter(pk=estoque.pk).update(
+        quantidade_bloqueada=F("quantidade_bloqueada") + quantidade
+    )
+    return reserva
 
 
 def _estoque_bloqueado(produto, unidade) -> Estoque:
@@ -336,10 +406,31 @@ def consumir_reserva(
 ) -> ReservaEstoque:
     """Consome uma reserva ativa; idempotente para reserva já finalizada."""
     original = reserva
-    reserva = ReservaEstoque.objects.select_for_update().get(pk=reserva.pk)
+    reserva = (
+        ReservaEstoque.objects.select_for_update()
+        .select_related("pedido")
+        .get(pk=reserva.pk)
+    )
     if reserva.status != ReservaEstoque.Status.ATIVA:
         _sincronizar_reserva(original, reserva)
         return reserva
+
+    if reserva.unidade_id != reserva.pedido.unidade_id:
+        raise ValidationError(
+            "Reserva inconsistente: unidade difere da unidade do pedido."
+        )
+    devido = _quantidade_devida(reserva.pedido_id, reserva.produto_id)
+    ja_consumido = ReservaEstoque.objects.filter(
+        pedido_id=reserva.pedido_id,
+        produto_id=reserva.produto_id,
+        unidade_id=reserva.unidade_id,
+        status=ReservaEstoque.Status.CONSUMIDA,
+    ).aggregate(total=Sum("quantidade"))["total"] or Decimal("0.00")
+    if ja_consumido + reserva.quantidade > devido:
+        raise ValidationError(
+            "Reserva excede a quantidade devida do pedido; "
+            "baixa cancelada para revisão."
+        )
 
     estoque = _estoque_bloqueado(reserva.produto, reserva.unidade)
     _desbloquear(estoque, reserva.quantidade)
@@ -380,34 +471,63 @@ def liberar_reserva(reserva: ReservaEstoque) -> ReservaEstoque:
     return reserva
 
 
-def liberar_bloqueio_legado(*, produto, unidade, quantidade) -> None:
-    """Compatibilidade com bloqueios legados sem identidade de pedido."""
-    quantidade = _quantidade_positiva(quantidade)
-    with transaction.atomic():
-        estoque = (
-            Estoque.objects.select_for_update()
-            .filter(produto=produto, unidade=unidade)
-            .first()
-        )
-        if estoque is None:
-            return
-        novo_bloqueio = max(
-            estoque.quantidade_bloqueada - quantidade, Decimal("0.00")
-        )
-        Estoque.objects.filter(pk=estoque.pk).update(
-            quantidade_bloqueada=novo_bloqueio
-        )
+@transaction.atomic
+def resolver_bloqueio_legado(
+    bloqueio: BloqueioLegado, *, usuario=None, observacao: str = ""
+) -> BloqueioLegado:
+    """Resolve manualmente um bloqueio em quarentena, reduzindo o agregado."""
+    bloqueio = BloqueioLegado.objects.select_for_update().get(pk=bloqueio.pk)
+    if not bloqueio.ativo:
+        return bloqueio
+    estoque = _estoque_bloqueado(bloqueio.produto, bloqueio.unidade)
+    _desbloquear(estoque, bloqueio.quantidade)
+    bloqueio.resolvido_em = timezone.now()
+    bloqueio.resolvido_por = usuario
+    bloqueio.observacao_resolucao = observacao
+    bloqueio.save(
+        update_fields=[
+            "resolvido_em",
+            "resolvido_por",
+            "observacao_resolucao",
+        ]
+    )
+    return bloqueio
+
+
+def saldo_comprometido(produto, unidade) -> Decimal:
+    """Soma reservas ativas + bloqueios legados ativos."""
+    reservas = ReservaEstoque.objects.filter(
+        produto=produto,
+        unidade=unidade,
+        status=ReservaEstoque.Status.ATIVA,
+    ).aggregate(total=Sum("quantidade"))["total"] or Decimal("0.00")
+    legados = BloqueioLegado.objects.filter(
+        produto=produto,
+        unidade=unidade,
+        resolvido_em__isnull=True,
+    ).aggregate(total=Sum("quantidade"))["total"] or Decimal("0.00")
+    return reservas + legados
 
 
 @transaction.atomic
-def dar_baixa_definitiva(
+def baixar_saldo_livre(
     *, produto, unidade, quantidade, pedido=None, usuario=None, request=None
 ) -> None:
-    """Converte reserva agregada legada em saída definitiva."""
+    """Baixa apenas saldo livre; nunca reduz bloqueio de terceiros."""
     quantidade = _quantidade_positiva(quantidade)
-    liberar_bloqueio_legado(
-        produto=produto, unidade=unidade, quantidade=quantidade
+    estoque = (
+        Estoque.objects.select_for_update()
+        .filter(produto=produto, unidade=unidade)
+        .first()
     )
+    if estoque is None:
+        raise ValidationError("Estoque inexistente para baixa.")
+    livre = estoque.quantidade - estoque.quantidade_bloqueada
+    if livre < quantidade:
+        raise ValidationError(
+            "Saldo livre insuficiente para baixa; "
+            "o bloqueio de terceiros não será alterado."
+        )
     registrar_movimento(
         produto=produto,
         unidade=unidade,

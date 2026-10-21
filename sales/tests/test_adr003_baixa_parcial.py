@@ -2,7 +2,7 @@
 
 from decimal import Decimal
 
-from django.db.models import Sum
+from django.db.models import F, Sum
 from django.test import TestCase
 
 from catalog.factories import ProdutoFactory
@@ -19,7 +19,7 @@ class BaixaComReservaParcialTests(TestCase):
     def test_item_maior_que_reserva_baixa_a_diferenca(self):
         produto = ProdutoFactory()
         unidade = UnidadeFactory()
-        EstoqueFactory(
+        estoque = EstoqueFactory(
             produto=produto, unidade=unidade, quantidade="100.00"
         )
         pedido = PedidoFactory(
@@ -37,12 +37,18 @@ class BaixaComReservaParcialTests(TestCase):
             preco_unitario=Decimal("3.00"),
         )
         # Legado: apenas 5 das 10 unidades estavam bloqueadas/identificadas.
-        reserva = reservar(
+        # A criação direta simula a migration 0003, que pode alocar reserva
+        # parcial; o serviço novo rejeitaria essa incoerência.
+        reserva = ReservaEstoque.objects.create(
+            pedido=pedido,
+            item_pedido=item,
             produto=produto,
             unidade=unidade,
             quantidade=Decimal("5.00"),
-            pedido=pedido,
-            item_pedido=item,
+            status=ReservaEstoque.Status.ATIVA,
+        )
+        Estoque.objects.filter(pk=estoque.pk).update(
+            quantidade_bloqueada=F("quantidade_bloqueada") + Decimal("5.00")
         )
 
         marcar_pagamento_aprovado(pedido, id_externo="pay-parcial")

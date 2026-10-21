@@ -10,8 +10,8 @@ def migrar_reservas_legadas(apps, schema_editor):
     """Aloca o bloqueio legado aos pedidos pendentes identificáveis.
 
     O bloqueio da Fase 1 era um agregado sem identidade. Pedidos pendentes
-    provam a intenção de reserva; o que não puder ser atribuído a um pedido
-    é liberado ao final (a soma das reservas ativas passa a ser a verdade).
+    provam a intenção de reserva; o excedente sem dono permanece no agregado e
+    é levado à quarentena pela migration 0004 (não é liberado silenciosamente).
     """
     Estoque = apps.get_model("stock", "Estoque")
     Reserva = apps.get_model("stock", "ReservaEstoque")
@@ -57,14 +57,6 @@ def migrar_reservas_legadas(apps, schema_editor):
                 unidade_id=unidade_id,
                 quantidade=dados["quantidade"],
                 status="ativa",
-            )
-
-    # Sem identidade de pedido, o bloqueio remanescente não pode ser provado.
-    for chave, estoque in estoques.items():
-        alocado = Decimal(estoque.quantidade_bloqueada) - restante[chave]
-        if alocado != estoque.quantidade_bloqueada:
-            Estoque.objects.filter(pk=estoque.pk).update(
-                quantidade_bloqueada=alocado
             )
 
 

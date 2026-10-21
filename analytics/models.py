@@ -11,6 +11,7 @@ class Aviso(models.Model):
         POSSIVEL_RECOMPRA = "possivel_recompra", "Possível recompra"
         FISCAL_ERRO = "fiscal_erro", "Erro na emissão fiscal"
         FISCAL_DOCUMENTO = "fiscal_documento", "Documento fiscal inválido"
+        ESTOQUE_PENDENTE = "estoque_pendente", "Baixa de estoque pendente"
 
     class Severidade(models.TextChoices):
         INFO = "info", "Informativo"

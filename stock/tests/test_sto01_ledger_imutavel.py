@@ -14,7 +14,6 @@ from stock.factories import EstoqueFactory
 from stock.models import Estoque, MovimentoEstoque
 from stock.services import (
     ImutabilidadeViolation,
-    liberar_bloqueio_legado,
     registrar_ajuste,
     registrar_movimento,
     saldo_ledger,
@@ -173,6 +172,45 @@ class LedgerImutavelTests(TransactionTestCase):
                     [movimento.pk],
                 )
         assert MovimentoEstoque.objects.filter(pk=movimento.pk).exists()
+
+    @pytest.mark.postgres
+    def test_trigger_postgres_bloqueia_truncate_e_par_invalido(self):
+        if connection.vendor != "postgresql":  # pragma: no cover
+            pytest.skip("Trigger SQL existe apenas no PostgreSQL.")
+
+        movimento = registrar_movimento(
+            produto=self.produto,
+            unidade=self.unidade,
+            tipo=MovimentoEstoque.Tipo.ENTRADA,
+            delta=Decimal("5.00"),
+        )
+        with connection.cursor() as cursor:
+            cursor.execute("SET stock.permitir_truncate = 'off'")
+        with pytest.raises(DatabaseError):
+            with connection.cursor() as cursor:
+                cursor.execute("TRUNCATE stock_movimentoestoque CASCADE")
+        with connection.cursor() as cursor:
+            cursor.execute("SET stock.permitir_truncate = 'on'")
+        with pytest.raises(DatabaseError):
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE stock_movimentoestoque SET movimento_par_id = id "
+                    "WHERE id = %s",
+                    [movimento.pk],
+                )
+        assert MovimentoEstoque.objects.filter(pk=movimento.pk).exists()
+
+    def test_update_permitido_so_aceita_movimento_par(self):
+        movimento = registrar_movimento(
+            produto=self.produto,
+            unidade=self.unidade,
+            tipo=MovimentoEstoque.Tipo.ENTRADA,
+            delta=Decimal("5.00"),
+        )
+        with pytest.raises(ImutabilidadeViolation):
+            MovimentoEstoque.objects.filter(pk=movimento.pk)._update_permitido(
+                delta=Decimal("999.00")
+            )
 
 
 class DeltaCoerenciaTests(TestCase):
@@ -342,12 +380,3 @@ class ValidacaoServicoTests(TestCase):
                 unidade_destino=outra,
                 quantidade=Decimal("0.00"),
             )
-
-    def test_liberar_bloqueio_legado_sem_estoque_e_noop(self):
-        outro_produto = ProdutoFactory()
-        outra_unidade = UnidadeFactory(nome="Sem estoque")
-        liberar_bloqueio_legado(
-            produto=outro_produto,
-            unidade=outra_unidade,
-            quantidade=Decimal("1.00"),
-        )

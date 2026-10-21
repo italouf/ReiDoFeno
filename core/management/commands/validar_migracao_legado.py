@@ -131,6 +131,40 @@ class Command(BaseCommand):
                 quantidade="1.00",
                 motivo="Ajuste legado sem auditoria",
             )
+        if not Movimento.objects.filter(
+            produto_id=produto.pk,
+            unidade_id=unidade.pk,
+            motivo="Transferência legada ambígua",
+        ).exists():
+            Movimento.objects.create(
+                produto_id=produto.pk,
+                unidade_id=unidade.pk,
+                tipo="transferencia",
+                quantidade="1.00",
+                motivo="Transferência legada ambígua",
+            )
+
+        produto_quarentena, _ = Produto.objects.get_or_create(
+            nome="Feno Quarentena 2B",
+            defaults={
+                "categoria_id": categoria.pk,
+                "ncm": "12149000",
+                "unidade_medida": "fardo",
+                "custo": "1.00",
+                "preco_balcao": "2.00",
+                "preco_online": "3.00",
+                "ativo": True,
+            },
+        )
+        Estoque.objects.get_or_create(
+            produto_id=produto_quarentena.pk,
+            unidade_id=unidade.pk,
+            defaults={
+                "quantidade": "5.00",
+                "quantidade_minima": "0.00",
+                "quantidade_bloqueada": "3.00",
+            },
+        )
         pedido_pendente, _ = Pedido.objects.get_or_create(
             numero="PF900008",
             defaults={
@@ -163,7 +197,13 @@ class Command(BaseCommand):
         from django.db.models import Sum
 
         from sales.models import Pedido
-        from stock.models import Estoque, MovimentoEstoque, ReservaEstoque
+        from stock.models import (
+            BloqueioLegado,
+            Estoque,
+            MovimentoEstoque,
+            ReconciliacaoEstoqueLegado,
+            ReservaEstoque,
+        )
 
         encontrados = {
             pedido.numero: (pedido.status, pedido.status_financeiro)
@@ -179,18 +219,17 @@ class Command(BaseCommand):
                     f"{numero}: esperado financeiro={esperado}, atual={atual}"
                 )
 
-        estoque = Estoque.objects.filter(
-            produto__nome="Feno Migração 2B"
-        ).first()
-        if estoque is None:
-            falhas.append("estoque da migração não encontrado")
-        else:
+        for nome in ("Feno Migração 2B", "Feno Quarentena 2B"):
+            estoque = Estoque.objects.filter(produto__nome=nome).first()
+            if estoque is None:
+                falhas.append(f"estoque {nome} não encontrado")
+                continue
             total_ledger = MovimentoEstoque.objects.filter(
                 produto=estoque.produto, unidade=estoque.unidade
             ).aggregate(total=Sum("delta"))["total"]
             if total_ledger != estoque.quantidade:
                 falhas.append(
-                    "ledger divergente: "
+                    f"{nome}: ledger divergente: "
                     f"SUM(delta)={total_ledger}, saldo={estoque.quantidade}"
                 )
             ativas = ReservaEstoque.objects.filter(
@@ -198,26 +237,56 @@ class Command(BaseCommand):
                 unidade=estoque.unidade,
                 status=ReservaEstoque.Status.ATIVA,
             ).aggregate(total=Sum("quantidade"))["total"] or Decimal("0.00")
-            if ativas != estoque.quantidade_bloqueada:
+            quarentena = BloqueioLegado.objects.filter(
+                produto=estoque.produto,
+                unidade=estoque.unidade,
+                resolvido_em__isnull=True,
+            ).aggregate(total=Sum("quantidade"))["total"] or Decimal("0.00")
+            if ativas + quarentena != estoque.quantidade_bloqueada:
                 falhas.append(
-                    "reservas divergentes: "
-                    f"SUM(ativas)={ativas}, bloqueada={estoque.quantidade_bloqueada}"
+                    f"{nome}: bloqueio divergente: "
+                    f"ativas={ativas} + quarentena={quarentena} != "
+                    f"bloqueada={estoque.quantidade_bloqueada}"
                 )
-            reserva = ReservaEstoque.objects.filter(
-                pedido__numero="PF900008",
-                status=ReservaEstoque.Status.ATIVA,
-            ).first()
-            if reserva is None or reserva.quantidade != Decimal("2.00"):
+            if nome == "Feno Migração 2B" and quarentena != Decimal("0.00"):
+                falhas.append("bloqueio identificado foi parar na quarentena")
+            if nome == "Feno Quarentena 2B" and quarentena != Decimal("3.00"):
                 falhas.append(
-                    "reserva parcial do pedido PF900008 não foi alocada"
+                    "bloqueio sem dono não foi colocado em quarentena"
                 )
+
+        reserva = ReservaEstoque.objects.filter(
+            pedido__numero="PF900008",
+            status=ReservaEstoque.Status.ATIVA,
+        ).first()
+        if reserva is None or reserva.quantidade != Decimal("2.00"):
+            falhas.append(
+                "reserva parcial do pedido PF900008 não foi alocada"
+            )
+
+        tipos = set(
+            ReconciliacaoEstoqueLegado.objects.values_list("tipo", flat=True)
+        )
+        for tipo in (
+            "ajuste_sem_prova",
+            "transferencia_ambigua",
+            "baseline",
+            "reserva_parcial",
+            "bloqueio_quarentena",
+        ):
+            if tipo not in tipos:
+                falhas.append(f"evidência ausente: {tipo}")
+
         if MovimentoEstoque.objects.filter(delta__isnull=True).exists():
             falhas.append("existem movimentos com delta nulo após a migração")
+        if MovimentoEstoque.objects.filter(delta=0).exists():
+            falhas.append("existem movimentos com delta zero após a migração")
 
         if falhas:
             raise CommandError("; ".join(falhas))
         self.stdout.write(
             self.style.SUCCESS(
-                f"Migração validada para {len(CASOS)} cenários, ledger e reservas."
+                f"Migração validada para {len(CASOS)} cenários, ledger, "
+                "reservas, quarentena e evidências."
             )
         )

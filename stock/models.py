@@ -50,6 +50,10 @@ class MovimentoEstoqueQuerySet(models.QuerySet):
 
     def _update_permitido(self, **kwargs):
         """Operação interna restrita ao vínculo recíproco de transferência."""
+        if set(kwargs) != {"movimento_par"}:
+            raise ImutabilidadeViolation(
+                "Somente o vínculo de movimento_par pode ser atualizado."
+            )
         return super().update(**kwargs)
 
 
@@ -228,13 +232,13 @@ class ReservaEstoque(models.Model):
 
     pedido = models.ForeignKey(
         "sales.Pedido",
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="reservas",
         verbose_name="pedido",
     )
     item_pedido = models.ForeignKey(
         "sales.ItemPedido",
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="reservas",
         null=True,
         blank=True,
@@ -292,4 +296,133 @@ class ReservaEstoque(models.Model):
         return (
             f"Reserva {self.pk or '(nova)'} pedido={self.pedido_id} "
             f"{self.quantidade} {self.produto} @ {self.unidade} [{self.status}]"
+        )
+
+
+class BloqueioLegado(models.Model):
+    """Bloqueio sem pedido identificável, mantido em quarentena.
+
+    Reduz disponibilidade e é reconciliado manualmente; nunca é consumido por
+    cancelamento/aprovação de um pedido sem vínculo comprovado.
+    """
+
+    produto = models.ForeignKey(
+        "catalog.Produto",
+        on_delete=models.PROTECT,
+        related_name="bloqueios_legados",
+        verbose_name="produto",
+    )
+    unidade = models.ForeignKey(
+        "core.Unidade",
+        on_delete=models.PROTECT,
+        related_name="bloqueios_legados",
+        verbose_name="unidade",
+    )
+    quantidade = models.DecimalField(
+        "quantidade", max_digits=12, decimal_places=2
+    )
+    motivo = models.TextField("motivo")
+    criado_em = models.DateTimeField("criado em", auto_now_add=True)
+    resolvido_em = models.DateTimeField("resolvido em", null=True, blank=True)
+    resolvido_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="bloqueios_legados_resolvidos",
+        verbose_name="resolvido por",
+    )
+    observacao_resolucao = models.TextField("observação da resolução", blank=True)
+
+    class Meta:
+        verbose_name = "bloqueio legado"
+        verbose_name_plural = "bloqueios legados"
+        ordering = ["-criado_em"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(quantidade__gt=Decimal("0.00")),
+                name="bloqueio_legado_quantidade_positiva",
+            ),
+            models.UniqueConstraint(
+                fields=("produto", "unidade"),
+                condition=models.Q(resolvido_em__isnull=True),
+                name="bloqueio_legado_ativo_unico_por_produto_unidade",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=("produto", "unidade", "resolvido_em"),
+                name="bloqueio_legado_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return (
+            f"Bloqueio legado {self.pk} {self.quantidade} "
+            f"{self.produto} @ {self.unidade}"
+        )
+
+    @property
+    def ativo(self) -> bool:
+        return self.resolvido_em is None
+
+
+class ReconciliacaoEstoqueLegado(models.Model):
+    """Evidência de inferência/baseline/quarentena aplicada ao legado."""
+
+    class Tipo(models.TextChoices):
+        AJUSTE_SEM_PROVA = "ajuste_sem_prova", "Ajuste sem prova de sinal"
+        TRANSFERENCIA_AMBIGUA = (
+            "transferencia_ambigua",
+            "Transferência ambígua",
+        )
+        BASELINE = "baseline", "Baseline de abertura/reconciliação"
+        BLOQUEIO_QUARENTENA = (
+            "bloqueio_quarentena",
+            "Bloqueio em quarentena",
+        )
+        RESERVA_PARCIAL = "reserva_parcial", "Reserva legada parcial"
+
+    produto = models.ForeignKey(
+        "catalog.Produto",
+        on_delete=models.PROTECT,
+        related_name="reconciliacoes_legado",
+        verbose_name="produto",
+    )
+    unidade = models.ForeignKey(
+        "core.Unidade",
+        on_delete=models.PROTECT,
+        related_name="reconciliacoes_legado",
+        verbose_name="unidade",
+    )
+    movimento = models.ForeignKey(
+        "stock.MovimentoEstoque",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reconciliacoes_legado",
+        verbose_name="movimento",
+    )
+    tipo = models.CharField("tipo", max_length=30, choices=Tipo.choices)
+    quantidade = models.DecimalField(
+        "quantidade", max_digits=12, decimal_places=2
+    )
+    saldo_original = models.DecimalField(
+        "saldo original", max_digits=12, decimal_places=2, null=True, blank=True
+    )
+    saldo_calculado = models.DecimalField(
+        "saldo calculado", max_digits=12, decimal_places=2, null=True, blank=True
+    )
+    detalhe = models.JSONField("detalhe", default=dict, blank=True)
+    criado_em = models.DateTimeField("criado em", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "reconciliação de estoque legado"
+        verbose_name_plural = "reconciliações de estoque legado"
+        ordering = ["-criado_em"]
+
+    def __str__(self):
+        return (
+            f"{self.get_tipo_display()} {self.quantidade} "
+            f"{self.produto} @ {self.unidade}"
         )

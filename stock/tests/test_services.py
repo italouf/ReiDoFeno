@@ -13,7 +13,7 @@ from sales.factories import ItemPedidoFactory, PedidoFactory
 from stock.factories import EstoqueFactory
 from stock.models import Estoque, MovimentoEstoque
 from stock.services import (
-    dar_baixa_definitiva,
+    baixar_saldo_livre,
     liberar_reserva,
     registrar_movimento,
     reservar,
@@ -201,19 +201,34 @@ class ReservaTests(TestCase):
         estoque = Estoque.objects.get(produto=produto, unidade=unidade)
         self.assertEqual(estoque.disponivel, Decimal("10"))
 
-    def test_baixa_definitiva_apos_aprovacao(self):
+    def test_baixa_saldo_livre_nao_altera_bloqueio(self):
         produto = ProdutoFactory()
         unidade = UnidadeFactory()
         EstoqueFactory(
             produto=produto, unidade=unidade,
             quantidade="10", quantidade_bloqueada="4",
         )
-        dar_baixa_definitiva(
+        baixar_saldo_livre(
             produto=produto, unidade=unidade, quantidade=4, pedido="#123"
         )
         estoque = Estoque.objects.get(produto=produto, unidade=unidade)
         self.assertEqual(estoque.quantidade, Decimal("6"))
-        self.assertEqual(estoque.quantidade_bloqueada, Decimal("0"))
+        self.assertEqual(estoque.quantidade_bloqueada, Decimal("4"))
+
+    def test_baixa_saldo_livre_rejeita_se_livre_insuficiente(self):
+        produto = ProdutoFactory()
+        unidade = UnidadeFactory()
+        EstoqueFactory(
+            produto=produto, unidade=unidade,
+            quantidade="10", quantidade_bloqueada="8",
+        )
+        with self.assertRaises(ValidationError):
+            baixar_saldo_livre(
+                produto=produto, unidade=unidade, quantidade=3
+            )
+        estoque = Estoque.objects.get(produto=produto, unidade=unidade)
+        self.assertEqual(estoque.quantidade, Decimal("10"))
+        self.assertEqual(estoque.quantidade_bloqueada, Decimal("8"))
 
     def test_falha_no_movimento_reverte_liberacao_do_bloqueio(self):
         from unittest import mock
@@ -229,7 +244,7 @@ class ReservaTests(TestCase):
             side_effect=RuntimeError("falha no ledger"),
         ):
             with self.assertRaises(RuntimeError):
-                dar_baixa_definitiva(
+                baixar_saldo_livre(
                     produto=produto, unidade=unidade, quantidade=4
                 )
         estoque = Estoque.objects.get(produto=produto, unidade=unidade)
