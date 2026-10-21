@@ -27,6 +27,7 @@
 - **Validação:** SQLite 460 passed/10 skipped/241 subtests; PostgreSQL 15 (Neon) 42
   testes críticos + 19 de concorrência/DAT-01; migração histórica 0001 → HEAD verde;
   Ruff, Bandit (0 medium/high), pip-audit (0), check e migrations pendentes limpos.
+  Cobertura: stock/services 95,74%, sales/services 93,07%, total do escopo 91,39%.
   Rodada integral PostgreSQL local pendente de CI por latência do Neon.
 
 ## [Fase 2B — integridade financeira e estoque] — 2026-10-20

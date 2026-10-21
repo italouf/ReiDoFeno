@@ -84,6 +84,8 @@
   Neon; a CI do projeto deve executar a suíte completa no PostgreSQL 15 do workflow.
 - `ruff`, `manage.py check`, `makemigrations --check`, Bandit (0 medium/high) e
   pip-audit (0) aprovados.
+- Cobertura: `stock/services.py` 95,74%, `sales/services.py` 93,07%,
+  `customers/services.py` 94,55%, total do escopo 91,39%.
 - Invariantes verificados no banco local: nenhum ledger divergente, nenhum bloqueio
   divergente e nenhum `delta` nulo/zero.
 
