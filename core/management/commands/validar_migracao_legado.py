@@ -19,6 +19,8 @@ CASOS = {
     "PF900009": ("aguardando_pagamento", "aprovado", "pago"),
     # T01-B: pedido avançado no código antigo sem baixa física comprovada.
     # O financeiro pago é derivado do próprio status operacional pelo 0002.
+    # U04: uma base povoada exatamente na 0001 com Pagamento aprovado adicional
+    # não é suportada; ver docs/specs/fase-2b-remediation.md.
     "PF900010": ("em_separacao", None, "pago"),
 }
 
@@ -365,6 +367,7 @@ class Command(BaseCommand):
                 ObrigacaoEstoquePedido.Status.RESOLVIDA,
                 Decimal("3.00"),
                 Decimal("3.00"),
+                "",
                 2,
             ),
             "PF900010": (
@@ -372,6 +375,7 @@ class Command(BaseCommand):
                 ObrigacaoEstoquePedido.Status.PENDENTE,
                 Decimal("0.00"),
                 Decimal("0.00"),
+                "falta",
                 1,
             ),
         }
@@ -380,6 +384,7 @@ class Command(BaseCommand):
             status_esperado,
             baixada_esperada,
             evidencia_esperada,
+            tipo_esperado,
             movimentos_esperados,
         ) in t01.items():
             obrigacao_t01 = ObrigacaoEstoquePedido.objects.filter(
@@ -393,13 +398,15 @@ class Command(BaseCommand):
                 obrigacao_t01.quantidade_baixada != baixada_esperada
                 or obrigacao_t01.evidencia_baixada != evidencia_esperada
                 or obrigacao_t01.status != status_esperado
+                or obrigacao_t01.tipo_pendencia != tipo_esperado
             ):
                 falhas.append(
                     f"T01 {numero}: esperado status={status_esperado} "
-                    f"baixada={baixada_esperada} evidência={evidencia_esperada}, "
-                    f"atual status={obrigacao_t01.status} "
+                    f"baixada={baixada_esperada} evidência={evidencia_esperada} "
+                    f"tipo={tipo_esperado}, atual status={obrigacao_t01.status} "
                     f"baixada={obrigacao_t01.quantidade_baixada} "
-                    f"evidência={obrigacao_t01.evidencia_baixada}"
+                    f"evidência={obrigacao_t01.evidencia_baixada} "
+                    f"tipo={obrigacao_t01.tipo_pendencia}"
                 )
             produto_t01 = obrigacao_t01.produto
             movimentos = MovimentoEstoque.objects.filter(

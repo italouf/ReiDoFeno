@@ -42,6 +42,29 @@
 - `stock/0006`: constraints e trigger idempotentes (compatível com bancos que já
   aplicaram a 0002 antiga).
 - `sales/0008`: limites superiores para rejeitar NaN/Infinity.
+- `sales/0011`: reconstrói obrigações a partir de movimentos atribuíveis, sem
+  escrever no ledger.
+- `sales/0012`: adiciona `tipo_pendencia` e reclassifica falta, ambiguidade e
+  excesso; preserva decisões de conciliação já registradas.
+- `stock/0010`: troca a FK de atribuição para `PROTECT` e atualiza o trigger
+  imutável para incluir `obrigacao_id`; cobre bancos que já aplicaram `stock/0006`.
+
+## Pontos de partida e limite U04
+
+- **Suportados:** banco vazio até HEAD; banco em `817d1e8` (que já tem `sales/0002`
+  aplicada) até HEAD; banco já em `sales/0009`/`0011` recebendo `sales/0012` e
+  `stock/0010`. O validador cobre 0001 vazio e a base histórica com fixtures.
+- **Não suportado como atualização automática:** base **povoada exatamente na
+  `sales/0001`** com pedido em separação e `Pagamento` aprovado. A `sales/0002`
+  pode falhar com `cannot CREATE INDEX ... pending trigger events`; é uma
+  limitação pré-existente, não uma regressão deste commit. Não execute
+  `0001 → HEAD` nesse estado. O caminho suportado é atualizar a partir de
+  `817d1e8`/`0009`/`0011`; uma base 0001 povoada exige procedimento DBA ou
+  exportação/importação específico, que **não** é validado automaticamente por
+  este fluxo. Não há promessa de compatibilidade universal para 0001 povoada.
+- O fixture T01-B do validador usa financeiro pago derivado do status operacional;
+  ele não representa a limitação U04 nem deve ser lido como suporte a 0001
+  povoada com pagamento aprovado.
 
 ## Decisões de negócio pendentes
 
@@ -76,15 +99,18 @@
 
 ## Resultado da validação
 
-- SQLite local: **490 passed, 12 skipped, 241 subtests**.
-- PostgreSQL 15.8 local: **501 passed, 1 skipped (cache Redis), 241 subtests**,
-  incluindo B01/B03/R01/T01-T03, concorrência e constraints. Migração histórica
-  0001→HEAD com 9 cenários e T01-A/T01-B também passou. A CI integral do novo SHA
-  continua sendo o gate obrigatório; o Neon permaneceu indisponível para a rodada.
+- SQLite local: **496 passed, 14 skipped, 241 subtests**.
+- PostgreSQL 15.8 local: **509 passed, 1 skipped (cache Redis), 241 subtests**,
+  incluindo B01/B03/R01/T01-T03/U01-U03, concorrência e constraints. Migração
+  histórica 0001→HEAD com 9 cenários e T01-A/T01-B também passou. A CI integral do
+  novo SHA continua sendo o gate remoto; o Neon permaneceu indisponível para a rodada.
+- O PostgreSQL local emitiu o aviso de teardown por conexões remanescentes de testes
+  concorrentes; o pytest terminou com exit 0. Os testes U01 novos fecham suas
+  conexões explicitamente. O aviso não é ocultado nem tratado como falha de negócio.
 - `ruff`, `manage.py check`, `manage.py check --deploy`, `makemigrations --check`,
   Bandit (0 medium/high) e pip-audit (0) aprovados.
-- Cobertura anterior à remediação residual: `stock/services.py` 95,74%,
-  `sales/services.py` 93,07%, `customers/services.py` 94,55%, total 91,39%.
+- Cobertura desta rodada não foi usada como gate; os números de cobertura anteriores
+  não foram reaproveitados como prova das novas invariantes.
 - Invariantes verificados no banco local: nenhum ledger divergente, nenhum bloqueio
   divergente e nenhum `delta` nulo/zero.
 
@@ -138,6 +164,15 @@
 | T02 | `resolver_pendencia_estoque` recebe uma obrigação existente; valida pedido/produto/unidade, financeiro pago/conciliado e pedido não cancelado/estornado; consome reservas ativas do mesmo produto/unidade ou recusa; não cria obrigação; usa saldo livre para o restante. A aprovação repetida libera reserva órfã de obrigação resolvida. | `sales/tests/test_r01_obrigacao_estoque.py` (unidade/produto divergente, não pago, cancelado, reserva ativa/órfã) |
 | T03 | Resolver exige usuário ativo, persistido em `resolvido_por`, com perfil Administrador/Gestor; justificativa obrigatória; auditoria na mesma transação e rollback em falha. | testes de usuário/None/inativo/sem grupo e falha de auditoria |
 
+## Correções U01-U03 (b725a2a)
+
+| ID | Invariante | Implementação | Evidência |
+|---|---|---|---|
+| U01 | Reconstrução não sobrescreve baixa/obrigação confirmada concorrentemente. | `reconstruir_obrigacoes_estoque --aplicar` executa uma transação por obrigação, `select_for_update`, relê a obrigação/movimentos depois do lock, grava somente campos calculados e registra `LogAuditoria` antes/depois. Dry-run não escreve. | `RebuildRaceTests` em `sales/tests/test_evidence_safety.py` (duas conexões PostgreSQL) |
+| U02 | Movimento persistido não muda de obrigação; atribuição é evidência protegida. | `stock/0010` faz `AlterField` para `on_delete=PROTECT` e substitui a função/trigger PostgreSQL incluindo `NEW.obrigacao_id IS NOT DISTINCT FROM OLD.obrigacao_id`. INSERT válido continua permitido; UPDATE/NULL/reatribuição e DELETE da obrigação referenciada são recusados. | `ImmutableAssignmentTests` (SQL direto, remoção e `ProtectedError`) |
+| U03 | Falta comprovada, ambiguidade pertinente e excesso são distintos; conciliação é explícita e auditável. | `tipo_pendencia` (`falta`/`ambigua`/`excesso`), helper preserva decisões em `evidencia_detalhe`, resolvedor/`_baixar` recusam ambígua/excesso, e `conciliar_obrigacao_historica` registra `atribuir`/`descartar`/`aceitar_excesso` sem criar movimento. Ambiguidades sem o pedido atual não bloqueiam. | `EvidenceSemanticsTests` (ambiguidade, excesso, não pertinente, atribuição, aceite idempotente) |
+| U04 | Limite de atualização delimitado. | Base **povoada na 0001** com pagamento aprovado + separação não é suportada devido à fragilidade pré-existente da `sales/0002`; pontos suportados e caminho de backup/importação documentados. Não é regressão de b725a2a. | ADR-015, runbook e seção “Pontos de partida e limite U04” |
+
 ### Decisões e limites adicionais
 
 - O trigger de `TRUNCATE` continua sendo proteção contra acidente; o GUC é contornável por
@@ -148,5 +183,5 @@
   integral deve rodar no PostgreSQL local da CI; Neon foi usado para sondagens dirigidas
   por latência/suspensão do compute.
 - A execução integral PostgreSQL foi concluída localmente em PostgreSQL 15.8
-  (501 passed/1 skipped); o Neon permaneceu indisponível. A CI integral do novo SHA
+  (509 passed/1 skipped); o Neon permaneceu indisponível. A CI integral do novo SHA
   ainda é o gate remoto.

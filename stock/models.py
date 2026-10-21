@@ -196,7 +196,7 @@ class MovimentoEstoque(models.Model):
     )
     obrigacao = models.ForeignKey(
         "sales.ObrigacaoEstoquePedido",
-        on_delete=models.SET_NULL,
+        on_delete=models.PROTECT,
         null=True,
         blank=True,
         related_name="movimentos",

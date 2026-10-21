@@ -85,12 +85,16 @@ já aplicaram a versão anterior da 0002/0003 é tratada por 0004–0006 idempot
 ## Gate de saída
 
 - [x] STO-01, ADR-003, DAT-01, CUS-01, ADR-005 e atacado implementados e testados.
-- [x] Suíte SQLite local: 490 passed, 12 skipped (11 PostgreSQL + 1 cache), 241
+- [x] Suíte SQLite local: 496 passed, 14 skipped (13 PostgreSQL + 1 cache), 241
       subtests.
 - [x] Migração histórica 0001 → HEAD validada em SQLite e PostgreSQL 15.8,
       incluindo T01-A/T01-B (ledger, reservas, quarentena e evidências).
-- [x] PostgreSQL 15.8 local: 501 passed, 1 skipped (cache Redis), 241 subtests,
-      incluindo B01/B03/R01/T01-T03, concorrência e constraints.
+- [x] PostgreSQL 15.8 local: 509 passed, 1 skipped (cache Redis), 241 subtests,
+      incluindo B01/B03/R01/T01-T03/U01-U03, concorrência e constraints.
+- [x] U01/U02/U03: reconstrução concorrente, atribuição imutável e conciliação
+      explícita de ambígua/excesso cobertos por testes PostgreSQL.
+- [x] U04: limite de base povoada na 0001 documentado; não é regressão e não há
+      promessa de compatibilidade universal.
 - [ ] Rodada integral PostgreSQL no novo SHA/CI.
 - [x] `ruff check`, `manage.py check`, `makemigrations --check --dry-run`.
 - [x] Migration completa em banco SQLite vazio.

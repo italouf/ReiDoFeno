@@ -25,6 +25,17 @@
    segredos do quadro da seção 3.
 3. Executar `python manage.py migrate --noinput`,
    `python manage.py collectstatic --noinput` e `python manage.py seed_groups`.
+   Depois, rodar `python manage.py reconstruir_obrigacoes_estoque` em dry-run;
+   usar `--aplicar` somente após revisar o relatório. Pendências `ambigua` ou
+   `excesso` não podem ser resolvidas pelo serviço de faltante: usar
+   `python manage.py conciliar_obrigacao_historica <id> --decisao ... --movimento <id>
+   --usuario <username> --justificativa "..."` (primeiro sem `--confirmar`) com ator
+   Administrador/Gestor. A conciliação registra antes/depois e não cria movimento.
+   O comando de reconstrução relê e trava cada obrigação antes de gravar.
+   Bases **povoadas exatamente na `sales/0001`** não são suportadas para
+   atualização automática (limitação pré-existente da `sales/0002`); usar backup
+   e importação para um ponto suportado ou intervenção DBA autorizada, com
+   validação específica do procedimento.
 4. Subir Gunicorn atrás de Nginx/HTTPS, garantindo que o proxy preserve o
    IP real em `REMOTE_ADDR` e bloqueie acesso direto ao backend.
 5. Configurar os jobs da seção 6 em systemd timers (ou cron) e o webhook do

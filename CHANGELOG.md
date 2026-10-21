@@ -46,10 +46,23 @@
   consome reservas ativas do mesmo produto/unidade ou recusa, e não cria obrigação.
 - **T03:** resolvedor exige usuário ativo Administrador/Gestor, persiste `resolvido_por`,
   justificativa e auditoria transacional com rollback.
-- **Validação:** SQLite 490 passed/12 skipped/241 subtests; PostgreSQL 15.8 local
-  501 passed/1 skipped (cache Redis)/241 subtests, incluindo concorrência e constraints.
-  Migração histórica 0001→HEAD validada em SQLite e PostgreSQL 15.8 com 9 cenários e as
-  fixtures T01-A/T01-B (baixa comprovada não duplica; status sem saída não resolve).
+- **U01:** reparo de obrigações roda em transação por unidade, com lock e releitura
+  após o lock; não sobrescreve baixa concorrente e registra antes/depois.
+- **U02:** `stock/0010` torna a atribuição `MovimentoEstoque.obrigacao` imutável
+  (`PROTECT` + trigger PostgreSQL com `obrigacao_id`); SQL direto não reatribui/remove
+  a prova. Bancos que já aplicaram `stock/0006` recebem a atualização.
+- **U03:** `tipo_pendencia` separa falta, ambiguidade e excesso; o resolvedor não
+  decide ambiguidade/excesso incidentalmente. `conciliar_obrigacao_historica` registra
+  atribuição, descarte ou aceite de excesso com ator/justificativa/auditoria, sem criar
+  movimento. Ambiguidades alheias ao pedido não bloqueiam.
+- **U04:** base povoada exatamente na `sales/0001` com pagamento aprovado não é
+  suportada para atualização automática (limitação pré-existente da `sales/0002`);
+  caminhos suportados e restrição documentados. Não é regressão deste commit.
+- **Validação:** SQLite 496 passed/14 skipped/241 subtests; PostgreSQL 15.8 local
+  509 passed/1 skipped (cache Redis)/241 subtests, incluindo U01-U03, concorrência e
+  constraints. Migração histórica 0001→HEAD validada em SQLite e PostgreSQL 15.8 com
+  9 cenários e T01-A/T01-B. O aviso de teardown por conexões remanescentes dos testes
+  concorrentes permanece visível e não é tratado como falha de negócio.
   Ruff, Bandit (0 medium/high), pip-audit (0), check, check --deploy e
   `makemigrations --check` limpos. A CI integral do novo SHA ainda não foi executada.
 

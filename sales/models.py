@@ -522,6 +522,12 @@ class ObrigacaoEstoquePedido(models.Model):
         RESOLVIDA = "resolvida", "Resolvida"
         CANCELADA = "cancelada", "Cancelada"
 
+    class TipoPendencia(models.TextChoices):
+        NENHUMA = "", "Nenhuma"
+        FALTA = "falta", "Falta comprovada"
+        AMBIGUA = "ambigua", "Atribuição ambígua"
+        EXCESSO = "excesso", "Excesso histórico"
+
     pedido = models.ForeignKey(
         Pedido,
         on_delete=models.PROTECT,
@@ -564,6 +570,14 @@ class ObrigacaoEstoquePedido(models.Model):
         max_length=12,
         choices=Status.choices,
         default=Status.PENDENTE,
+        db_index=True,
+    )
+    tipo_pendencia = models.CharField(
+        "tipo de pendência",
+        max_length=10,
+        choices=TipoPendencia.choices,
+        default=TipoPendencia.NENHUMA,
+        blank=True,
         db_index=True,
     )
     motivo_pendencia = models.TextField("motivo da pendência", blank=True)

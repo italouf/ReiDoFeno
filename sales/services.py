@@ -3,7 +3,7 @@ import logging
 from decimal import Decimal, InvalidOperation
 
 from django.conf import settings
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import Sum
 from django.shortcuts import get_object_or_404
@@ -45,6 +45,41 @@ def _travar_reservas(queryset):
     return queryset.select_for_update()
 
 
+def _validar_ator_estoque(usuario):
+    """Ator humano persistido, ativo e autorizado para baixa/evidência."""
+    if (
+        usuario is None
+        or getattr(usuario, "pk", None) is None
+        or not getattr(usuario, "is_active", False)
+    ):
+        raise PermissionDenied("Usuário ativo é obrigatório para resolver.")
+    if not (
+        usuario.is_superuser
+        or usuario.groups.filter(
+            name__in=("Administrador", "Gestor")
+        ).exists()
+    ):
+        raise PermissionDenied(
+            "Somente Administrador/Gestor pode resolver pendência de estoque."
+        )
+
+
+def _requer_conciliacao_historica(obrigacao) -> bool:
+    """Bloqueia nova baixa quando falta atribuição ou há excesso pendente."""
+    tipo = getattr(obrigacao, "tipo_pendencia", "")
+    if tipo in (
+        ObrigacaoEstoquePedido.TipoPendencia.AMBIGUA,
+        ObrigacaoEstoquePedido.TipoPendencia.EXCESSO,
+    ):
+        return True
+    detalhe = getattr(obrigacao, "evidencia_detalhe", {}) or {}
+    if detalhe.get("ambiguos"):
+        return True
+    return Decimal(obrigacao.evidencia_baixada or "0.00") > Decimal(
+        obrigacao.quantidade_devida
+    )
+
+
 def _quantidade_devida_pedido(pedido, produto, unidade) -> Decimal:
     from .models import ItemPedido
 
@@ -65,6 +100,7 @@ def _obter_obrigacao(pedido, produto, unidade):
             ),
             "quantidade_baixada": Decimal("0.00"),
             "status": ObrigacaoEstoquePedido.Status.PENDENTE,
+            "tipo_pendencia": ObrigacaoEstoquePedido.TipoPendencia.FALTA,
         },
     )[0]
 
@@ -91,6 +127,10 @@ def registrar_baixa_obrigacao(
     if obrigacao.status == ObrigacaoEstoquePedido.Status.CANCELADA:
         raise ValidationError(
             "Obrigação de estoque cancelada não pode receber baixa."
+        )
+    if _requer_conciliacao_historica(obrigacao):
+        raise ValidationError(
+            "Obrigação exige conciliação histórica antes de nova baixa."
         )
     nova = obrigacao.quantidade_baixada + quantidade
     if nova > obrigacao.quantidade_devida:
@@ -124,7 +164,16 @@ def registrar_baixa_obrigacao(
         obrigacao.resolvido_em = timezone.now()
         obrigacao.resolvido_por = usuario
         obrigacao.motivo_pendencia = ""
-        campos += ["status", "resolvido_em", "resolvido_por", "motivo_pendencia"]
+        obrigacao.tipo_pendencia = (
+            ObrigacaoEstoquePedido.TipoPendencia.NENHUMA
+        )
+        campos += [
+            "status",
+            "resolvido_em",
+            "resolvido_por",
+            "motivo_pendencia",
+            "tipo_pendencia",
+        ]
     obrigacao.save(update_fields=campos)
     return obrigacao
 
@@ -141,25 +190,9 @@ def resolver_pendencia_estoque(
 
     Não cria obrigação, não aceita unidade divergente e exige ator autorizado.
     """
-    from django.core.exceptions import PermissionDenied
-
     if not justificativa.strip():
         raise ValidationError("Justificativa é obrigatória.")
-    if (
-        usuario is None
-        or getattr(usuario, "pk", None) is None
-        or not getattr(usuario, "is_active", False)
-    ):
-        raise PermissionDenied("Usuário ativo é obrigatório para resolver.")
-    if not (
-        usuario.is_superuser
-        or usuario.groups.filter(
-            name__in=("Administrador", "Gestor")
-        ).exists()
-    ):
-        raise PermissionDenied(
-            "Somente Administrador/Gestor pode resolver pendência de estoque."
-        )
+    _validar_ator_estoque(usuario)
 
     pedido_id = (
         ObrigacaoEstoquePedido.objects.filter(pk=obrigacao.pk)
@@ -203,6 +236,14 @@ def resolver_pendencia_estoque(
     ):
         raise ValidationError(
             "Só é possível resolver pendência de pedido pago e conciliado."
+        )
+    if (
+        obrigacao.status == ObrigacaoEstoquePedido.Status.PENDENTE
+        and _requer_conciliacao_historica(obrigacao)
+    ):
+        raise ValidationError(
+            "Obrigação pendente de conciliação histórica; "
+            "use conciliar_obrigacao_historica antes de nova baixa."
         )
     if obrigacao.status != ObrigacaoEstoquePedido.Status.PENDENTE:
         if pedido.reservas.filter(
@@ -312,6 +353,207 @@ def resolver_pendencia_estoque(
             "unidade_id": obrigacao.unidade_id,
             "quantidade": str(quantidade_resolvida),
             "quantidade_baixada": str(obrigacao.quantidade_baixada),
+            "justificativa": justificativa.strip()[:500],
+        },
+    )
+    return obrigacao
+
+
+@transaction.atomic
+def conciliar_obrigacao_historica(
+    obrigacao: ObrigacaoEstoquePedido,
+    *,
+    decisao: str,
+    usuario,
+    justificativa: str,
+    movimento_id=None,
+    request=None,
+) -> ObrigacaoEstoquePedido:
+    """Concilia ambiguidade/excesso sem criar movimento compensatório."""
+    from stock.models import MovimentoEstoque
+
+    from .obrigacoes import reconstruir_obrigacao_evidencia
+
+    if not justificativa.strip():
+        raise ValidationError("Justificativa é obrigatória.")
+    _validar_ator_estoque(usuario)
+    decisoes_validas = {"atribuir", "descartar", "aceitar_excesso"}
+    if decisao not in decisoes_validas:
+        raise ValidationError("Decisão de conciliação inválida.")
+
+    pedido_id = (
+        ObrigacaoEstoquePedido.objects.filter(pk=obrigacao.pk)
+        .values_list("pedido_id", flat=True)
+        .first()
+    )
+    if pedido_id is None:
+        raise ValidationError("Obrigação de estoque inexistente.")
+    pedido = Pedido.objects.select_for_update().get(pk=pedido_id)
+    obrigacao = ObrigacaoEstoquePedido.objects.select_for_update().get(
+        pk=obrigacao.pk
+    )
+    if obrigacao.pedido_id != pedido.pk:
+        raise ValidationError("Obrigação não pertence ao pedido informado.")
+    if pedido.status == Pedido.Status.CANCELADO or pedido.status_financeiro in (
+        Pedido.StatusFinanceiro.CANCELADO,
+        Pedido.StatusFinanceiro.ESTORNADO,
+    ):
+        raise ValidationError(
+            "Pedido cancelado/estornado não pode ter evidência conciliada."
+        )
+    if obrigacao.status != ObrigacaoEstoquePedido.Status.PENDENTE:
+        raise ValidationError(
+            "Somente obrigação pendente pode ser conciliada."
+        )
+    if (
+        pedido.status_financeiro != Pedido.StatusFinanceiro.PAGO
+        or not pedido.tem_prova_financeira()
+    ):
+        raise ValidationError(
+            "Só é possível conciliar evidência de pedido pago e conciliado."
+        )
+    total_item = pedido.itens.filter(
+        produto_id=obrigacao.produto_id
+    ).aggregate(total=Sum("quantidade"))["total"]
+    if total_item is None or Decimal(total_item) != Decimal(
+        obrigacao.quantidade_devida
+    ):
+        raise ValidationError(
+            "Obrigação não corresponde à quantidade devida do item do pedido."
+        )
+    if obrigacao.unidade_id != pedido.unidade_id:
+        raise ValidationError(
+            "Obrigação em unidade diferente da unidade do pedido."
+        )
+
+    dados_antes = reconstruir_obrigacao_evidencia(
+        obrigacao, Pedido=Pedido, Movimento=MovimentoEstoque
+    )
+    detalhe = dict(obrigacao.evidencia_detalhe or {})
+    conciliacoes = list(detalhe.get("conciliacoes", []))
+    quantidade_conciliada = Decimal("0.00")
+    movimento = None
+
+    if decisao in ("atribuir", "descartar"):
+        if movimento_id is None:
+            raise ValidationError(
+                "Movimento é obrigatório para decidir a ambiguidade."
+            )
+        movimento = MovimentoEstoque.objects.select_for_update().get(
+            pk=movimento_id
+        )
+        if (
+            movimento.produto_id != obrigacao.produto_id
+            or movimento.unidade_id != obrigacao.unidade_id
+            or movimento.tipo
+            not in (
+                MovimentoEstoque.Tipo.BAIXA_DEFINITIVA,
+                MovimentoEstoque.Tipo.SAIDA,
+            )
+            or movimento.delta >= 0
+        ):
+            raise ValidationError(
+                "Movimento não é uma baixa compatível com a obrigação."
+            )
+        if movimento.obrigacao_id not in (None, obrigacao.pk):
+            raise ValidationError(
+                "Movimento já pertence a outra obrigação; não pode ser "
+                "reatribuído."
+            )
+        if movimento.pk not in dados_antes["evidencia_detalhe"].get(
+            "ambiguos", []
+        ):
+            raise ValidationError(
+                "Movimento não está entre as ambiguidades pertinentes."
+            )
+        quantidade_conciliada = abs(Decimal(movimento.delta))
+        conciliacoes.append(
+            {
+                "decisao": decisao,
+                "movimento_id": movimento.pk,
+                "quantidade": str(quantidade_conciliada),
+                "usuario_id": usuario.pk,
+                "justificativa": justificativa.strip()[:1000],
+                "criado_em": timezone.now().isoformat(),
+            }
+        )
+    else:
+        if dados_antes.get("tipo_pendencia") != "excesso":
+            raise ValidationError(
+                "Aceite de excesso exige uma pendência de excesso."
+            )
+        if dados_antes["evidencia_detalhe"].get("ambiguos"):
+            raise ValidationError(
+                "Resolva a ambiguidade de atribuição antes de aceitar excesso."
+            )
+        if Decimal(dados_antes["evidencia_baixada"]) <= Decimal(
+            obrigacao.quantidade_devida
+        ):
+            raise ValidationError("Não há excesso de evidência para aceitar.")
+        conciliacoes.append(
+            {
+                "decisao": "aceitar_excesso",
+                "evidencia_baixada": str(
+                    dados_antes["evidencia_baixada"]
+                ),
+                "quantidade_devida": str(obrigacao.quantidade_devida),
+                "usuario_id": usuario.pk,
+                "justificativa": justificativa.strip()[:1000],
+                "criado_em": timezone.now().isoformat(),
+            }
+        )
+
+    detalhe["conciliacoes"] = conciliacoes
+    obrigacao.evidencia_detalhe = detalhe
+    dados = reconstruir_obrigacao_evidencia(
+        obrigacao, Pedido=Pedido, Movimento=MovimentoEstoque
+    )
+    campos = [
+        "quantidade_baixada",
+        "evidencia_baixada",
+        "evidencia_detalhe",
+        "status",
+        "motivo_pendencia",
+        "tipo_pendencia",
+        "atualizado_em",
+    ]
+    for campo in ("quantidade_baixada", "evidencia_baixada", "evidencia_detalhe"):
+        setattr(obrigacao, campo, dados[campo])
+    obrigacao.status = dados["status"]
+    obrigacao.motivo_pendencia = dados["motivo_pendencia"]
+    obrigacao.tipo_pendencia = dados["tipo_pendencia"]
+    if dados["status"] == ObrigacaoEstoquePedido.Status.RESOLVIDA:
+        obrigacao.resolvido_em = timezone.now()
+        obrigacao.resolvido_por = usuario
+        campos += ["resolvido_em", "resolvido_por"]
+    else:
+        obrigacao.resolvido_em = None
+        obrigacao.resolvido_por = None
+        campos += ["resolvido_em", "resolvido_por"]
+    obrigacao.save(update_fields=campos)
+
+    from core.auditoria import registrar_auditoria
+
+    registrar_auditoria(
+        acao="pedido.estoque_evidencia_conciliada",
+        instancia=pedido,
+        request=request,
+        usuario=usuario,
+        antes={
+            "status": dados_antes["status"],
+            "quantidade_baixada": str(dados_antes["quantidade_baixada"]),
+            "evidencia_baixada": str(dados_antes["evidencia_baixada"]),
+            "tipo_pendencia": dados_antes.get("tipo_pendencia", ""),
+            "motivo_pendencia": dados_antes["motivo_pendencia"],
+        },
+        depois={
+            "decisao": decisao,
+            "movimento_id": movimento.pk if movimento is not None else None,
+            "quantidade_conciliada": str(quantidade_conciliada),
+            "status": dados["status"],
+            "quantidade_baixada": str(dados["quantidade_baixada"]),
+            "evidencia_baixada": str(dados["evidencia_baixada"]),
+            "tipo_pendencia": dados.get("tipo_pendencia", ""),
             "justificativa": justificativa.strip()[:500],
         },
     )
@@ -474,6 +716,9 @@ def criar_pedido_do_carrinho(request, formulario) -> Pedido:
             defaults={
                 "quantidade_devida": item["quantidade"],
                 "status": ObrigacaoEstoquePedido.Status.PENDENTE,
+                "tipo_pendencia": (
+                    ObrigacaoEstoquePedido.TipoPendencia.FALTA
+                ),
             },
         )
         if not criada:
@@ -640,6 +885,18 @@ def _baixar_estoque_do_pedido(pedido: Pedido, *, request=None) -> None:
                 # bloqueios órfãos e devem ser liberadas, não consumidas.
                 for reserva in ativas:
                     liberar_reserva(reserva)
+            continue
+        if _requer_conciliacao_historica(obrigacao):
+            _registrar_pendencia_estoque(
+                pedido,
+                produto=dados["produto"],
+                quantidade=obrigacao.quantidade_devida,
+                motivo=(
+                    "obrigação exige conciliação histórica "
+                    f"({obrigacao.tipo_pendencia})"
+                ),
+                request=request,
+            )
             continue
         devido = obrigacao.quantidade_devida
 
@@ -1074,6 +1331,7 @@ def _cancelar_obrigacoes_estoque(pedido: Pedido) -> None:
         status=ObrigacaoEstoquePedido.Status.PENDENTE
     ).update(
         status=ObrigacaoEstoquePedido.Status.CANCELADA,
+        tipo_pendencia=ObrigacaoEstoquePedido.TipoPendencia.NENHUMA,
         motivo_pendencia="pedido cancelado antes da baixa",
     )
 
