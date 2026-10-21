@@ -76,16 +76,16 @@
 
 ## Resultado da validação
 
-- SQLite local: **460 passed, 10 skipped, 241 subtests**.
-- PostgreSQL 15 (Neon): **42 testes críticos** (B01/B03/STO-01) + **19 testes** de
-  concorrência/DAT-01 passaram; migração histórica 0001 → HEAD passou com
-  `validar_migracao_legado --criar/--verificar` e constraints de finitude (0007).
-- A rodada integral PostgreSQL local não terminou dentro do limite por latência do
+- SQLite local: **467 passed, 12 skipped, 241 subtests**.
+- PostgreSQL 15 (Neon, conexão direta): **29 testes de obrigação/isolamento/contrato/seed**
+  + **2 concorrência** (pagamento×transferência, A→B/B→A/cancelamento) + **1 finitude**
+  + **1 STO-01** passaram; migração histórica 0001 → HEAD verde.
+- A rodada integral PostgreSQL local não terminou dentro do limite por latência/flush do
   Neon; a CI do projeto deve executar a suíte completa no PostgreSQL 15 do workflow.
 - `ruff`, `manage.py check`, `makemigrations --check`, Bandit (0 medium/high) e
   pip-audit (0) aprovados.
-- Cobertura: `stock/services.py` 95,74%, `sales/services.py` 93,07%,
-  `customers/services.py` 94,55%, total do escopo 91,39%.
+- Cobertura anterior à remediação residual: `stock/services.py` 95,74%,
+  `sales/services.py` 93,07%, `customers/services.py` 94,55%, total 91,39%.
 - Invariantes verificados no banco local: nenhum ledger divergente, nenhum bloqueio
   divergente e nenhum `delta` nulo/zero.
 
@@ -119,3 +119,26 @@
   isso é intencional e observável em `Aviso.Tipo.ESTOQUE_PENDENTE` e na auditoria.
 - A regra comercial de atacado continua pendente de confirmação formal da operação.
 
+## Correções residuais da reauditoria (817d1e8)
+
+| ID | Correção | Evidência |
+|---|---|---|
+| R01 | `ObrigacaoEstoquePedido` persistente por pedido/produto/unidade; transições operacionais bloqueadas com pendência; resolução autorizada/idempotente por saldo livre; baixa complementar vinculada | `sales/tests/test_r01_obrigacao_estoque.py` (SQLite e PostgreSQL); migração `sales/0009`; ADR-015 |
+| R02 | `select_for_update(of=("self",))` nas reservas, sem travar produto/pedido via join; locks ordenados por produto/unidade; teste pagamento × transferência | `sales/tests/test_concurrency_postgres.py::test_pagamento_e_transferencia_nao_geram_deadlock` |
+| R03 | Testes positivos de seed autorizam `ALLOW_DEMO_SEED=1` com `patch.dict`; teste negativo restaura ambiente; guarda exige confirmação explícita mesmo em SQLite | `stock/tests/test_seed_estoque.py` |
+| R04 | `reservar` desconta reservas já consumidas e exige a obrigação restante; não recria compromisso total | `stock/tests/test_b03_contrato_reserva.py` |
+| R05 | `resolver_bloqueio_legado` exige justificativa, valida cobertura de reservas/outros bloqueios e audita | teste de cobertura insuficiente + serviço |
+| R06 | `seed_demo` classifica pedidos inteiros e exclui pagamento/item/pedido em transação por pedido; falha PROTECT reverte tudo; exige `ALLOW_DEMO_SEED=1` | código + Ruff; execução depende de ambiente demo |
+| R07 | Limites superiores de finitude em `ReservaEstoque`, `BloqueioLegado`, `ReconciliacaoEstoqueLegado` (migration `stock/0008`); testes SQL PostgreSQL | `stock/tests/test_b03_contrato_reserva.py` |
+
+### Decisões e limites adicionais
+
+- O trigger de `TRUNCATE` continua sendo proteção contra acidente; o GUC é contornável por
+  role com privilégio de truncate. Separação de roles runtime/migrations é requisito
+  operacional, não garantia do código.
+- O projeto Neon `twilight-silence-34012623` é mantido como QA temporário. Testes que
+  dependem de GUC/sessão usam conexão **direta**, não o pooler transacional. A suíte
+  integral deve rodar no PostgreSQL local da CI; Neon foi usado para sondagens dirigidas
+  por latência/suspensão do compute.
+- A execução integral PostgreSQL local no Neon não foi concluída por latência/flush;
+  os grupos críticos foram executados em PostgreSQL 15 direto. A CI do novo SHA é o gate.

@@ -20,7 +20,7 @@ Revisão final inline (substituição divulgada: harness sem os subagentes shipp
 ## Correções da auditoria
 
 1. Overlay do hero 0.78 → 0.68 (foto real respirando; contraste do texto mantido).
-2. Fluxo de compra travado no dev por falta de estoque demo - semeado estoque nas duas unidades via comando transacional `semear_estoque_demo` (wrapper `scripts/seed_estoque.py`); validado: adicionar → badge "1" → carrinho → checkout. Fora do SQLite, o comando exige `ALLOW_DEMO_SEED=1` e ajusta via ledger, sem zerar bloqueios.
+2. Fluxo de compra travado no dev por falta de estoque demo - semeado estoque nas duas unidades via comando transacional `semear_estoque_demo` (wrapper `scripts/seed_estoque.py`); validado: adicionar → badge "1" → carrinho → checkout. O comando exige `ALLOW_DEMO_SEED=1` em qualquer banco, ajusta via ledger e não zera bloqueios.
 3. Script de captura clicava o botão errado (busca do header) — corrigido; não era defeito do produto.
 
 ## Checklist anti-AI-SLOP

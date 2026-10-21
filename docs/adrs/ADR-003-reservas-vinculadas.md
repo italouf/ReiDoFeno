@@ -42,6 +42,8 @@ Regras:
   existe fallback que reduza `quantidade_bloqueada` sem dono.
 - Bloqueios legados sem pedido identificável ficam em `BloqueioLegado` (quarentena),
   reduzem disponibilidade e são resolvidos por operação explícita.
+- A baixa efetiva é acompanhada por `ObrigacaoEstoquePedido` (ADR-015); enquanto houver
+  obrigação pendente, o pedido não avança para separação/entrega/conclusão.
 
 ## Migração de dados
 

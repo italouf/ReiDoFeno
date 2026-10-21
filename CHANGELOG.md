@@ -24,11 +24,25 @@
   por limites no banco.
 - **H06:** cotação do carrinho movida para `sales/pricing.py`, compartilhada com o
   checkout e exibindo o preço final para atacadista verificado.
-- **Validação:** SQLite 460 passed/10 skipped/241 subtests; PostgreSQL 15 (Neon) 42
-  testes críticos + 19 de concorrência/DAT-01; migração histórica 0001 → HEAD verde;
-  Ruff, Bandit (0 medium/high), pip-audit (0), check e migrations pendentes limpos.
-  Cobertura: stock/services 95,74%, sales/services 93,07%, total do escopo 91,39%.
-  Rodada integral PostgreSQL local pendente de CI por latência do Neon.
+- **R01:** `ObrigacaoEstoquePedido` persistente por pedido/produto/unidade; transições
+  para separação/entrega/conclusão bloqueadas enquanto houver baixa pendente; resolução
+  autorizada, auditada e idempotente por saldo livre (ADR-015, migration `sales/0009`).
+- **R02:** `select_for_update(of=("self",))` nas reservas e locks ordenados; teste
+  PostgreSQL de pagamento × transferência sem deadlock.
+- **R03:** testes de seed autorizam `ALLOW_DEMO_SEED=1` localmente; teste negativo
+  restaura o ambiente; a guarda exige confirmação explícita em qualquer banco.
+- **R04:** nova reserva desconta o que já foi consumido e respeita a obrigação restante.
+- **R05:** resolução de quarentena exige justificativa e recusa estado sem cobertura de
+  reservas/bloqueios.
+- **R06:** limpeza do `seed_demo` é atômica por pedido/produto e não apaga pagamento antes
+  de falhar em PROTECT.
+- **R07:** limites de finitude em reserva, quarentena e evidências (migration
+  `stock/0008`), com testes SQL no PostgreSQL.
+- **Validação:** SQLite 467 passed/12 skipped/241 subtests; PostgreSQL 15 (Neon)
+  29 testes de obrigação/contrato/seed + 2 concorrência + 2 finitude/STO; migração
+  histórica 0001 → HEAD verde; Ruff, Bandit (0 medium/high), pip-audit (0), check e
+  migrations pendentes limpos. Rodada integral PostgreSQL local pendente de CI por
+  latência/flush do Neon.
 
 ## [Fase 2B — integridade financeira e estoque] — 2026-10-20
 
