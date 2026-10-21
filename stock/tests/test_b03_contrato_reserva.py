@@ -4,6 +4,7 @@ from decimal import Decimal
 
 import pytest
 from django.core.exceptions import ValidationError
+from django.db import DatabaseError, connection
 from django.db.models.deletion import ProtectedError
 from django.test import TestCase
 
@@ -148,6 +149,29 @@ class ContratoReservaTests(TestCase):
             1,
         )
 
+    def test_reservar_apos_consumo_total_e_rejeitado(self):
+        reserva = self._reservar()
+        consumir_reserva(reserva)
+        with pytest.raises(ValidationError):
+            self._reservar()
+
+    def test_reservar_restante_apos_consumo_parcial(self):
+        reserva = ReservaEstoque.objects.create(
+            pedido=self.pedido,
+            item_pedido=self.item,
+            produto=self.produto,
+            unidade=self.unidade,
+            quantidade=Decimal("2.00"),
+            status=ReservaEstoque.Status.ATIVA,
+        )
+        Estoque.objects.filter(
+            produto=self.produto, unidade=self.unidade
+        ).update(quantidade_bloqueada=Decimal("2.00"))
+        consumir_reserva(reserva)
+
+        nova = self._reservar(quantidade=Decimal("3.00"))
+        self.assertEqual(nova.quantidade, Decimal("3.00"))
+
     def test_item_com_reserva_nao_pode_ser_excluido(self):
         self._reservar()
         with pytest.raises(ProtectedError):
@@ -171,7 +195,7 @@ class ContratoReservaTests(TestCase):
         )
 
         resolver_bloqueio_legado(
-            bloqueio, observacao="reconciliação manual"
+            bloqueio, justificativa="reconciliação manual"
         )
 
         bloqueio.refresh_from_db()
@@ -184,3 +208,63 @@ class ContratoReservaTests(TestCase):
             saldo_comprometido(self.produto, self.unidade),
             Decimal("0.00"),
         )
+
+    def test_resolver_bloqueio_recusa_cobertura_insuficiente(self):
+        # Estado inconsistente: reserva ativa 8, bloqueio agregado 8 e
+        # quarentena 3 não coberta pelo agregado.
+        reserva = ReservaEstoque.objects.create(
+            pedido=self.pedido,
+            item_pedido=self.item,
+            produto=self.produto,
+            unidade=self.unidade,
+            quantidade=Decimal("8.00"),
+            status=ReservaEstoque.Status.ATIVA,
+        )
+        Estoque.objects.filter(
+            produto=self.produto, unidade=self.unidade
+        ).update(quantidade_bloqueada=Decimal("8.00"))
+        bloqueio = BloqueioLegado.objects.create(
+            produto=self.produto,
+            unidade=self.unidade,
+            quantidade=Decimal("3.00"),
+            motivo="quarentena divergente",
+        )
+        with pytest.raises(ValidationError):
+            resolver_bloqueio_legado(
+                bloqueio, justificativa="tentativa"
+            )
+        bloqueio.refresh_from_db()
+        estoque = Estoque.objects.get(
+            produto=self.produto, unidade=self.unidade
+        )
+        self.assertIsNone(bloqueio.resolvido_em)
+        self.assertEqual(estoque.quantidade_bloqueada, Decimal("8.00"))
+        reserva.refresh_from_db()
+        self.assertEqual(reserva.status, ReservaEstoque.Status.ATIVA)
+
+    @pytest.mark.postgres
+    def test_postgres_rejeita_nan_em_reserva_e_quarentena(self):
+        if connection.vendor != "postgresql":  # pragma: no cover
+            pytest.skip("Limites testados apenas no PostgreSQL.")
+
+        reserva = self._reservar()
+        bloqueio = BloqueioLegado.objects.create(
+            produto=self.produto,
+            unidade=self.unidade,
+            quantidade=Decimal("1.00"),
+            motivo="teste",
+        )
+        with pytest.raises(DatabaseError):
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE stock_reservaestoque SET quantidade = 'NaN' "
+                    "WHERE id = %s",
+                    [reserva.pk],
+                )
+        with pytest.raises(DatabaseError):
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE stock_bloqueiolegado SET quantidade = 'NaN' "
+                    "WHERE id = %s",
+                    [bloqueio.pk],
+                )

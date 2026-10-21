@@ -3,7 +3,6 @@
 import os
 from decimal import Decimal
 
-from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.management.base import BaseCommand, CommandError
 
@@ -25,14 +24,10 @@ class Command(BaseCommand):
     )
 
     def handle(self, *args, **options):
-        engine = settings.DATABASES["default"]["ENGINE"]
-        if (
-            engine != "django.db.backends.sqlite3"
-            and os.environ.get("ALLOW_DEMO_SEED") != "1"
-        ):
+        if os.environ.get("ALLOW_DEMO_SEED") != "1":
             raise CommandError(
-                "Recusando semear estoque em banco não descartável. "
-                "Defina ALLOW_DEMO_SEED=1 apenas em ambiente demo."
+                "Recusando semear estoque sem confirmação explícita. "
+                "Defina ALLOW_DEMO_SEED=1 apenas em ambiente demo descartável."
             )
 
         unidades = {unidade.nome: unidade for unidade in Unidade.objects.all()}

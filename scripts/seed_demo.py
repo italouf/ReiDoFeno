@@ -10,54 +10,99 @@ import django
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.development")
 django.setup()
 
-from django.conf import settings  # noqa: E402
 from django.db.models.deletion import ProtectedError  # noqa: E402
 
-if (
-    settings.DATABASES["default"]["ENGINE"]
-    != "django.db.backends.sqlite3"
-    and os.environ.get("ALLOW_DEMO_SEED") != "1"
-):
+if os.environ.get("ALLOW_DEMO_SEED") != "1":
     raise SystemExit(
-        "Recusando semear demo em banco não descartável. "
-        "Defina ALLOW_DEMO_SEED=1 apenas em ambiente demo."
+        "Recusando semear demo sem confirmação explícita. "
+        "Defina ALLOW_DEMO_SEED=1 apenas em ambiente demo descartável."
     )
-
-from catalog.models import Categoria, Produto  # noqa: E402
-from core.models import Unidade  # noqa: E402
 
 # Limpa dados de debug
 # (cadeia: pedidos/pagamentos → itens → movimentos → estoque → produto → unidade)
-from sales.models import ItemPedido, Pagamento, Pedido  # noqa: E402
+from django.db import models, transaction  # noqa: E402
+
+from catalog.models import Categoria, Produto  # noqa: E402
+from core.models import Unidade  # noqa: E402
+from sales.models import (  # noqa: E402
+    ItemPedido,
+    ObrigacaoEstoquePedido,
+    Pagamento,
+    Pedido,
+)
 from stock.models import Estoque  # noqa: E402
 
-debug_prods = Produto.objects.filter(nome__startswith="Debug")
-itens_debug = ItemPedido.objects.filter(produto__in=debug_prods)
-itens_com_reserva = itens_debug.filter(reservas__isnull=False).distinct()
-pedido_ids = list(
-    itens_debug.exclude(pk__in=itens_com_reserva.values("pk")).values_list(
-        "pedido_id", flat=True
+debug_prods = list(Produto.objects.filter(nome__startswith="Debug"))
+ids_debug = {produto.pk for produto in debug_prods}
+
+
+def _classificar_pedidos_debug():
+    pedidos = list(
+        Pedido.objects.filter(itens__produto__in=debug_prods).distinct()
     )
-)
-Pagamento.objects.filter(pedido_id__in=pedido_ids).delete()
-ItemPedido.objects.filter(pedido_id__in=pedido_ids).delete()
-try:
-    Pedido.objects.filter(id__in=pedido_ids).delete()
-except ProtectedError:
-    print("pedidos com reservas ou financeiro preservados")
+    remover, preservar = [], []
+    for pedido in pedidos:
+        itens = list(pedido.itens.values_list("produto_id", flat=True))
+        if (
+            itens
+            and set(itens).issubset(ids_debug)
+            and not pedido.reservas.exists()
+        ):
+            remover.append(pedido)
+        else:
+            preservar.append(pedido)
+    return remover, preservar
+
+
+remover, preservar = _classificar_pedidos_debug()
+for pedido in remover:
+    try:
+        with transaction.atomic():
+            ObrigacaoEstoquePedido.objects.filter(pedido=pedido).delete()
+            Pagamento.objects.filter(pedido=pedido).delete()
+            ItemPedido.objects.filter(pedido=pedido).delete()
+            pedido.delete()
+    except ProtectedError:
+        # Nada foi apagado: pagamento/item/pedido permanecem juntos.
+        preservar.append(pedido)
+        print(f"pedido protegido preservado: {pedido.numero}")
+
 # O ledger é imutável (STO-01): não excluímos movimentos. Produtos de debug
-# com movimentos/reservas são apenas desativados.
-com_movimentos = debug_prods.filter(movimentos__isnull=False).distinct()
-com_reservas = debug_prods.filter(reservas__isnull=False).distinct()
-preservados = (com_movimentos | com_reservas).distinct()
-sem_movimentos = debug_prods.exclude(pk__in=preservados.values("pk"))
-Estoque.objects.filter(produto__in=sem_movimentos).delete()
-removidos, _ = sem_movimentos.delete()
-if preservados.exists():
-    preservados.update(ativo=False)
+# com movimentos/reservas/pedidos preservados são apenas desativados.
+preservados = list(
+    Produto.objects.filter(pk__in=ids_debug)
+    .filter(
+        models.Q(movimentos__isnull=False) | models.Q(reservas__isnull=False)
+    )
+    .distinct()
+)
+if preservar:
+    preservados += list(
+        Produto.objects.filter(
+            pk__in=ids_debug, itens_pedido__pedido__in=preservar
+        ).distinct()
+    )
+ids_preservados = {produto.pk for produto in preservados}
+removidos = 0
+for produto in debug_prods:
+    if produto.pk in ids_preservados:
+        continue
+    try:
+        with transaction.atomic():
+            Estoque.objects.filter(produto=produto).delete()
+            produto.delete()
+        removidos += 1
+    except ProtectedError:
+        preservados.append(produto)
+        print(f"produto debug protegido preservado: {produto.nome}")
+preservados = list({produto.pk: produto for produto in preservados}.values())
+if preservados:
+    Produto.objects.filter(
+        pk__in=[produto.pk for produto in preservados]
+    ).update(ativo=False)
     print(
-        "debug com movimentos/reservas desativado:",
-        list(preservados.values_list("nome", flat=True)),
+        "debug protegido desativado:",
+        [produto.nome for produto in preservados],
     )
 try:
     Categoria.objects.filter(nome__startswith="Categoria").delete()

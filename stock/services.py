@@ -331,10 +331,21 @@ def reservar(
         raise ValidationError("Produto da reserva difere do produto do item.")
 
     devido = _quantidade_devida(pedido.pk, produto.pk)
-    if devido != quantidade:
+    ja_consumido = ReservaEstoque.objects.filter(
+        pedido_id=pedido.pk,
+        produto_id=produto.pk,
+        unidade_id=unidade.pk,
+        status=ReservaEstoque.Status.CONSUMIDA,
+    ).aggregate(total=Sum("quantidade"))["total"] or Decimal("0.00")
+    devido_restante = devido - ja_consumido
+    if devido_restante <= 0:
         raise ValidationError(
-            "Quantidade da reserva difere da quantidade devida do pedido "
-            f"({quantidade} != {devido})."
+            "A obrigação de estoque deste produto já foi consumida."
+        )
+    if devido_restante != quantidade:
+        raise ValidationError(
+            "Quantidade da reserva difere da obrigação restante do pedido "
+            f"({quantidade} != {devido_restante})."
         )
 
     existente = (
@@ -382,6 +393,14 @@ def _estoque_bloqueado(produto, unidade) -> Estoque:
     )
 
 
+def _travar_reserva(queryset):
+    from django.db import connection
+
+    if connection.features.has_select_for_update_of:
+        return queryset.select_for_update(of=("self",))
+    return queryset.select_for_update()
+
+
 def _desbloquear(estoque: Estoque, quantidade) -> None:
     if estoque.quantidade_bloqueada < quantidade:
         raise ValidationError(
@@ -406,11 +425,9 @@ def consumir_reserva(
 ) -> ReservaEstoque:
     """Consome uma reserva ativa; idempotente para reserva já finalizada."""
     original = reserva
-    reserva = (
-        ReservaEstoque.objects.select_for_update()
-        .select_related("pedido")
-        .get(pk=reserva.pk)
-    )
+    reserva = _travar_reserva(
+        ReservaEstoque.objects.select_related("pedido")
+    ).get(pk=reserva.pk)
     if reserva.status != ReservaEstoque.Status.ATIVA:
         _sincronizar_reserva(original, reserva)
         return reserva
@@ -444,6 +461,15 @@ def consumir_reserva(
         usuario=usuario,
         request=request,
     )
+    from sales.services import registrar_baixa_obrigacao
+
+    registrar_baixa_obrigacao(
+        reserva.pedido,
+        produto=reserva.produto,
+        unidade=reserva.unidade,
+        quantidade=reserva.quantidade,
+        usuario=usuario,
+    )
 
     reserva.status = ReservaEstoque.Status.CONSUMIDA
     reserva.consumida_em = timezone.now()
@@ -473,23 +499,53 @@ def liberar_reserva(reserva: ReservaEstoque) -> ReservaEstoque:
 
 @transaction.atomic
 def resolver_bloqueio_legado(
-    bloqueio: BloqueioLegado, *, usuario=None, observacao: str = ""
+    bloqueio: BloqueioLegado,
+    *,
+    usuario=None,
+    justificativa: str,
+    request=None,
 ) -> BloqueioLegado:
-    """Resolve manualmente um bloqueio em quarentena, reduzindo o agregado."""
+    """Resolve manualmente um bloqueio em quarentena, com cobertura provada."""
+    if not justificativa.strip():
+        raise ValidationError("Justificativa é obrigatória.")
     bloqueio = BloqueioLegado.objects.select_for_update().get(pk=bloqueio.pk)
     if not bloqueio.ativo:
         return bloqueio
     estoque = _estoque_bloqueado(bloqueio.produto, bloqueio.unidade)
+    outros = saldo_comprometido(
+        bloqueio.produto, bloqueio.unidade
+    ) - bloqueio.quantidade
+    if estoque.quantidade_bloqueada - bloqueio.quantidade < outros:
+        raise ValidationError(
+            "Reconciliação recusada: o bloqueio agregado não cobre as "
+            "reservas e demais bloqueios ativos."
+        )
     _desbloquear(estoque, bloqueio.quantidade)
     bloqueio.resolvido_em = timezone.now()
     bloqueio.resolvido_por = usuario
-    bloqueio.observacao_resolucao = observacao
+    bloqueio.observacao_resolucao = justificativa.strip()[:1000]
     bloqueio.save(
         update_fields=[
             "resolvido_em",
             "resolvido_por",
             "observacao_resolucao",
         ]
+    )
+    from core.auditoria import registrar_auditoria
+
+    registrar_auditoria(
+        acao="estoque.bloqueio_legado_resolvido",
+        instancia=bloqueio,
+        request=request,
+        usuario=usuario,
+        antes={"quantidade_bloqueada": str(estoque.quantidade_bloqueada)},
+        depois={
+            "quantidade_bloqueada": str(
+                estoque.quantidade_bloqueada - bloqueio.quantidade
+            ),
+            "quantidade_resolvida": str(bloqueio.quantidade),
+            "justificativa": justificativa.strip()[:500],
+        },
     )
     return bloqueio
 
@@ -537,3 +593,13 @@ def baixar_saldo_livre(
         motivo=f"Baixa definitiva por pedido {pedido}",
         request=request,
     )
+    if pedido is not None and hasattr(pedido, "pk"):
+        from sales.services import registrar_baixa_obrigacao
+
+        registrar_baixa_obrigacao(
+            pedido,
+            produto=produto,
+            unidade=unidade,
+            quantidade=quantidade,
+            usuario=usuario,
+        )

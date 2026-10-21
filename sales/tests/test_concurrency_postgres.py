@@ -25,7 +25,7 @@ from sales.services import (
 )
 from stock.factories import EstoqueFactory
 from stock.models import Estoque, MovimentoEstoque, ReservaEstoque
-from stock.services import reservar
+from stock.services import reservar, transferir_estoque
 
 pytestmark = pytest.mark.postgres
 
@@ -219,6 +219,55 @@ class PostgresConcurrencyTests(TransactionTestCase):
                 produto=produto, unidade=unidade
             ).count(),
             1,
+        )
+
+    def test_pagamento_e_transferencia_nao_geram_deadlock(self):
+        outra_unidade = UnidadeFactory(nome="Unidade B Pagamento")
+        EstoqueFactory(
+            produto=self.produto,
+            unidade=outra_unidade,
+            quantidade="10.00",
+        )
+        pedido = self._pedido()
+        barreira = threading.Barrier(2)
+        erros = []
+
+        def aprovar():
+            close_old_connections()
+            try:
+                barreira.wait(timeout=10)
+                marcar_pagamento_aprovado(pedido, id_externo="pay-transfer")
+            except Exception as erro:
+                erros.append(erro)
+            finally:
+                close_old_connections()
+
+        def transferir():
+            close_old_connections()
+            try:
+                barreira.wait(timeout=10)
+                transferir_estoque(
+                    produto=self.produto,
+                    unidade_origem=self.unidade,
+                    unidade_destino=outra_unidade,
+                    quantidade=1,
+                )
+            except Exception as erro:
+                erros.append(erro)
+            finally:
+                close_old_connections()
+
+        self._rodar(
+            [
+                threading.Thread(target=aprovar),
+                threading.Thread(target=transferir),
+            ]
+        )
+
+        self.assertFalse(erros, erros)
+        pedido.refresh_from_db()
+        self.assertEqual(
+            pedido.status_financeiro, Pedido.StatusFinanceiro.PAGO
         )
 
     def test_avanco_vs_estorno_nao_libera_apos_estorno(self):

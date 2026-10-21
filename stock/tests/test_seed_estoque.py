@@ -1,6 +1,8 @@
 """B04: semeadura de estoque via ledger e guarda de ambiente."""
 
+import os
 from decimal import Decimal
+from unittest import mock
 
 import pytest
 from django.core.management import call_command
@@ -53,6 +55,7 @@ class SemearEstoqueDemoTests(TestCase):
             item_pedido=item,
         )
 
+    @mock.patch.dict(os.environ, {"ALLOW_DEMO_SEED": "1"})
     def test_seed_usa_ledger_e_preserva_bloqueio(self):
         call_command("semear_estoque_demo", verbosity=0)
 
@@ -75,22 +78,15 @@ class SemearEstoqueDemoTests(TestCase):
             ).exists()
         )
 
+    @mock.patch.dict(os.environ, {"ALLOW_DEMO_SEED": "1"})
     def test_seed_e_idempotente(self):
         call_command("semear_estoque_demo", verbosity=0)
         movimentos = MovimentoEstoque.objects.count()
         call_command("semear_estoque_demo", verbosity=0)
         self.assertEqual(MovimentoEstoque.objects.count(), movimentos)
 
-    def test_seed_recusa_banco_nao_sqlite_sem_autorizacao(self):
-        import os
-        from unittest import mock
-
-        os.environ.pop("ALLOW_DEMO_SEED", None)
-        with mock.patch(
-            "stock.management.commands.semear_estoque_demo.settings"
-        ) as settings_fake:
-            settings_fake.DATABASES = {
-                "default": {"ENGINE": "django.db.backends.postgresql"}
-            }
+    def test_seed_recusa_sem_autorizacao(self):
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("ALLOW_DEMO_SEED", None)
             with pytest.raises(CommandError):
                 call_command("semear_estoque_demo", verbosity=0)

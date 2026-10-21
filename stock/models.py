@@ -326,6 +326,10 @@ class ReservaEstoque(models.Model):
                 condition=models.Q(quantidade__gt=Decimal("0.00")),
                 name="reserva_quantidade_positiva",
             ),
+            models.CheckConstraint(
+                condition=models.Q(quantidade__lt=Decimal("10000000000.00")),
+                name="reserva_quantidade_dentro_do_limite",
+            ),
         ]
         indexes = [
             models.Index(
@@ -339,6 +343,13 @@ class ReservaEstoque(models.Model):
             f"Reserva {self.pk or '(nova)'} pedido={self.pedido_id} "
             f"{self.quantidade} {self.produto} @ {self.unidade} [{self.status}]"
         )
+
+    def clean(self):
+        super().clean()
+        if self.quantidade is not None and not Decimal(
+            self.quantidade
+        ).is_finite():
+            raise ValidationError({"quantidade": "Valor deve ser finito."})
 
 
 class BloqueioLegado(models.Model):
@@ -385,6 +396,10 @@ class BloqueioLegado(models.Model):
                 condition=models.Q(quantidade__gt=Decimal("0.00")),
                 name="bloqueio_legado_quantidade_positiva",
             ),
+            models.CheckConstraint(
+                condition=models.Q(quantidade__lt=Decimal("10000000000.00")),
+                name="bloqueio_legado_quantidade_dentro_do_limite",
+            ),
             models.UniqueConstraint(
                 fields=("produto", "unidade"),
                 condition=models.Q(resolvido_em__isnull=True),
@@ -403,6 +418,13 @@ class BloqueioLegado(models.Model):
             f"Bloqueio legado {self.pk} {self.quantidade} "
             f"{self.produto} @ {self.unidade}"
         )
+
+    def clean(self):
+        super().clean()
+        if self.quantidade is not None and not Decimal(
+            self.quantidade
+        ).is_finite():
+            raise ValidationError({"quantidade": "Valor deve ser finito."})
 
     @property
     def ativo(self) -> bool:
@@ -462,6 +484,26 @@ class ReconciliacaoEstoqueLegado(models.Model):
         verbose_name = "reconciliação de estoque legado"
         verbose_name_plural = "reconciliações de estoque legado"
         ordering = ["-criado_em"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(quantidade__lt=Decimal("10000000000.00")),
+                name="reconciliacao_quantidade_dentro_do_limite",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(saldo_original__lt=Decimal("10000000000.00"))
+                    | models.Q(saldo_original__isnull=True)
+                ),
+                name="reconciliacao_saldo_original_dentro_do_limite",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(saldo_calculado__lt=Decimal("10000000000.00"))
+                    | models.Q(saldo_calculado__isnull=True)
+                ),
+                name="reconciliacao_saldo_calculado_dentro_do_limite",
+            ),
+        ]
 
     def __str__(self):
         return (

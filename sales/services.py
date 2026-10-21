@@ -7,6 +7,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Sum
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 
 from customers.models import Cliente
 from stock.models import Estoque, ReservaEstoque
@@ -18,7 +19,7 @@ from stock.services import (
 )
 
 from .cart import Carrinho
-from .models import Pagamento, Pedido
+from .models import ObrigacaoEstoquePedido, Pagamento, Pedido
 from .pricing import (  # noqa: F401 - reexportado para compatibilidade
     LIMIAR_ATACADO,
     calcular_item_pedido,
@@ -33,6 +34,156 @@ GRUPOS_INTERNOS = ("Administrador", "Gestor", "Vendedor")
 def _pedido_bloqueado(pedido: Pedido) -> Pedido:
     """Re-lê o pedido sob row lock para evitar decisões com instância stale."""
     return Pedido.objects.select_for_update().get(pk=pedido.pk)
+
+
+def _travar_reservas(queryset):
+    """Trava só a tabela de reservas; não trava produto/pedido via join."""
+    from django.db import connection
+
+    if connection.features.has_select_for_update_of:
+        return queryset.select_for_update(of=("self",))
+    return queryset.select_for_update()
+
+
+def _quantidade_devida_pedido(pedido, produto, unidade) -> Decimal:
+    from .models import ItemPedido
+
+    total = ItemPedido.objects.filter(
+        pedido=pedido, produto=produto
+    ).aggregate(total=Sum("quantidade"))["total"]
+    return Decimal(total or "0.00")
+
+
+def _obter_obrigacao(pedido, produto, unidade):
+    return ObrigacaoEstoquePedido.objects.select_for_update().get_or_create(
+        pedido=pedido,
+        produto=produto,
+        unidade=unidade,
+        defaults={
+            "quantidade_devida": _quantidade_devida_pedido(
+                pedido, produto, unidade
+            ),
+            "quantidade_baixada": Decimal("0.00"),
+            "status": ObrigacaoEstoquePedido.Status.PENDENTE,
+        },
+    )[0]
+
+
+def registrar_baixa_obrigacao(
+    pedido: Pedido,
+    *,
+    produto,
+    unidade,
+    quantidade,
+    usuario=None,
+) -> ObrigacaoEstoquePedido | None:
+    """Atualiza a obrigação na mesma transação do movimento de baixa."""
+    if pedido is None or not hasattr(pedido, "pk"):
+        return None
+    quantidade = Decimal(str(quantidade))
+    obrigacao = _obter_obrigacao(pedido, produto, unidade)
+    if obrigacao.status == ObrigacaoEstoquePedido.Status.CANCELADA:
+        raise ValidationError(
+            "Obrigação de estoque cancelada não pode receber baixa."
+        )
+    nova = obrigacao.quantidade_baixada + quantidade
+    if nova > obrigacao.quantidade_devida:
+        raise ValidationError(
+            "Baixa acumulada excede a obrigação de estoque do pedido."
+        )
+    obrigacao.quantidade_baixada = nova
+    campos = ["quantidade_baixada", "atualizado_em"]
+    if nova == obrigacao.quantidade_devida:
+        obrigacao.status = ObrigacaoEstoquePedido.Status.RESOLVIDA
+        obrigacao.resolvido_em = timezone.now()
+        obrigacao.resolvido_por = usuario
+        obrigacao.motivo_pendencia = ""
+        campos += ["status", "resolvido_em", "resolvido_por", "motivo_pendencia"]
+    obrigacao.save(update_fields=campos)
+    return obrigacao
+
+
+@transaction.atomic
+def resolver_pendencia_estoque(
+    pedido: Pedido,
+    *,
+    produto,
+    unidade,
+    usuario,
+    justificativa: str,
+    request=None,
+) -> ObrigacaoEstoquePedido:
+    """Baixa o restante da obrigação usando saldo livre, com auditoria."""
+    if not justificativa.strip():
+        raise ValidationError("Justificativa é obrigatória.")
+    pedido = _pedido_bloqueado(pedido)
+    obrigacao = _obter_obrigacao(pedido, produto, unidade)
+    if obrigacao.status != ObrigacaoEstoquePedido.Status.PENDENTE:
+        return obrigacao
+    restante = obrigacao.quantidade_devida - obrigacao.quantidade_baixada
+    if restante <= 0:
+        obrigacao.status = ObrigacaoEstoquePedido.Status.RESOLVIDA
+        obrigacao.resolvido_em = timezone.now()
+        obrigacao.resolvido_por = usuario
+        obrigacao.motivo_pendencia = ""
+        obrigacao.save(
+            update_fields=[
+                "status",
+                "resolvido_em",
+                "resolvido_por",
+                "motivo_pendencia",
+                "atualizado_em",
+            ]
+        )
+        from core.auditoria import registrar_auditoria
+
+        registrar_auditoria(
+            acao="pedido.estoque_pendente_resolvido",
+            instancia=pedido,
+            request=request,
+            usuario=usuario,
+            depois={
+                "produto_id": produto.pk,
+                "quantidade": "0.00",
+                "justificativa": justificativa.strip()[:500],
+            },
+        )
+        return obrigacao
+    estoque = Estoque.objects.select_for_update().get(
+        produto=produto, unidade=unidade
+    )
+    livre = estoque.quantidade - estoque.quantidade_bloqueada
+    if livre < restante:
+        raise ValidationError(
+            "Saldo livre insuficiente para resolver a pendência; "
+            f"livre={livre}, necessário={restante}."
+        )
+    baixar_saldo_livre(
+        produto=produto,
+        unidade=unidade,
+        quantidade=restante,
+        pedido=pedido,
+        usuario=usuario,
+        request=request,
+    )
+    obrigacao.refresh_from_db()
+    if obrigacao.status == ObrigacaoEstoquePedido.Status.RESOLVIDA:
+        obrigacao.resolvido_por = usuario
+        obrigacao.save(update_fields=["resolvido_por"])
+    from core.auditoria import registrar_auditoria
+
+    registrar_auditoria(
+        acao="pedido.estoque_pendente_resolvido",
+        instancia=pedido,
+        request=request,
+        usuario=usuario,
+        depois={
+            "produto_id": produto.pk,
+            "quantidade": str(restante),
+            "justificativa": justificativa.strip()[:500],
+        },
+    )
+    return obrigacao
 
 
 def pedidos_visiveis_para(usuario):
@@ -184,6 +335,18 @@ def criar_pedido_do_carrinho(request, formulario) -> Pedido:
             pedido=pedido,
             item_pedido=item_pedido,
         )
+        obrigacao, criada = ObrigacaoEstoquePedido.objects.get_or_create(
+            pedido=pedido,
+            produto=produto,
+            unidade=unidade,
+            defaults={
+                "quantidade_devida": item["quantidade"],
+                "status": ObrigacaoEstoquePedido.Status.PENDENTE,
+            },
+        )
+        if not criada:
+            obrigacao.quantidade_devida += Decimal(item["quantidade"])
+            obrigacao.save(update_fields=["quantidade_devida", "atualizado_em"])
 
     pedido.recalcular_totais()
 
@@ -265,6 +428,15 @@ def _registrar_pendencia_estoque(
         objeto=pedido,
         severidade=Aviso.Severidade.ERRO,
     )
+    obrigacao = ObrigacaoEstoquePedido.objects.filter(
+        pedido=pedido, produto=produto, unidade=pedido.unidade
+    ).first()
+    if (
+        obrigacao is not None
+        and obrigacao.status == ObrigacaoEstoquePedido.Status.PENDENTE
+    ):
+        obrigacao.motivo_pendencia = motivo[:1000]
+        obrigacao.save(update_fields=["motivo_pendencia", "atualizado_em"])
     registrar_auditoria(
         acao="pedido.estoque_pendente",
         instancia=pedido,
@@ -278,12 +450,11 @@ def _registrar_pendencia_estoque(
 
 
 def _baixar_estoque_do_pedido(pedido: Pedido, *, request=None) -> None:
-    """Baixa o devido de cada item sem reduzir bloqueio sem identidade.
+    """Baixa o devido usando obrigação persistente e saldo livre.
 
-    Reservas ativas são consumidas; reservas já consumidas entram no cálculo.
-    A diferença é baixada apenas se houver saldo livre. Caso contrário, a
-    aprovação financeira permanece registrada e uma pendência auditada é criada.
-    Reservas ativas sem item correspondente não são liberadas por engano.
+    Reservas ativas são consumidas; reservas já consumidas são reconciliadas
+    com a obrigação. A diferença é baixada apenas se houver saldo livre. Caso
+    contrário, a obrigação fica pendente e bloqueia o avanço operacional.
     """
     itens = {}
     for item in pedido.itens.select_related("produto"):
@@ -294,15 +465,16 @@ def _baixar_estoque_do_pedido(pedido: Pedido, *, request=None) -> None:
         dados["quantidade"] += Decimal(item.quantidade)
 
     reservas = list(
-        pedido.reservas.select_for_update()
-        .filter(
-            status__in=(
-                ReservaEstoque.Status.ATIVA,
-                ReservaEstoque.Status.CONSUMIDA,
+        _travar_reservas(
+            pedido.reservas.filter(
+                status__in=(
+                    ReservaEstoque.Status.ATIVA,
+                    ReservaEstoque.Status.CONSUMIDA,
+                )
             )
+            .select_related("produto")
+            .order_by("produto_id", "pk")
         )
-        .select_related("produto")
-        .order_by("produto_id", "pk")
     )
     por_produto = {}
     for reserva in reservas:
@@ -324,34 +496,59 @@ def _baixar_estoque_do_pedido(pedido: Pedido, *, request=None) -> None:
             ),
             Decimal("0.00"),
         )
-        devido = dados["quantidade"]
-        total_ativo = sum(
-            (reserva.quantidade for reserva in ativas), Decimal("0.00")
+        obrigacao = _obter_obrigacao(
+            pedido, dados["produto"], pedido.unidade
         )
-
-        if consumidas > devido:
-            _registrar_pendencia_estoque(
-                pedido,
-                produto=dados["produto"],
-                quantidade=consumidas - devido,
-                motivo="reservas já consumidas excedem a quantidade do item",
-                request=request,
-            )
+        if obrigacao.status != ObrigacaoEstoquePedido.Status.PENDENTE:
             continue
-        if consumidas + total_ativo > devido:
-            _registrar_pendencia_estoque(
-                pedido,
-                produto=dados["produto"],
-                quantidade=consumidas + total_ativo - devido,
-                motivo="reserva ativa excede a quantidade devida",
-                request=request,
+        devido = obrigacao.quantidade_devida
+
+        if consumidas > obrigacao.quantidade_baixada:
+            # Legado: reserva consumida antes da obrigação existir.
+            obrigacao.quantidade_baixada = min(devido, consumidas)
+            if obrigacao.quantidade_baixada >= devido:
+                if consumidas > devido:
+                    _registrar_pendencia_estoque(
+                        pedido,
+                        produto=dados["produto"],
+                        quantidade=consumidas - devido,
+                        motivo="reservas consumidas excedem a quantidade devida",
+                        request=request,
+                    )
+                else:
+                    obrigacao.status = (
+                        ObrigacaoEstoquePedido.Status.RESOLVIDA
+                    )
+                    obrigacao.resolvido_em = timezone.now()
+            obrigacao.save(
+                update_fields=[
+                    "quantidade_baixada",
+                    "status",
+                    "resolvido_em",
+                    "atualizado_em",
+                ]
             )
+            if obrigacao.status != ObrigacaoEstoquePedido.Status.PENDENTE:
+                continue
+
+        restante = devido - obrigacao.quantidade_baixada
+        if restante <= 0:
             continue
 
         for reserva in ativas:
+            if reserva.quantidade > restante:
+                _registrar_pendencia_estoque(
+                    pedido,
+                    produto=dados["produto"],
+                    quantidade=reserva.quantidade - restante,
+                    motivo="reserva ativa excede a quantidade devida",
+                    request=request,
+                )
+                restante = Decimal("-1.00")
+                break
             consumir_reserva(reserva, request=request)
+            restante -= reserva.quantidade
 
-        restante = devido - consumidas - total_ativo
         if restante <= 0:
             continue
 
@@ -381,7 +578,7 @@ def _baixar_estoque_do_pedido(pedido: Pedido, *, request=None) -> None:
             produto=dados["produto"],
             unidade=pedido.unidade,
             quantidade=restante,
-            pedido=pedido.numero,
+            pedido=pedido,
             request=request,
         )
 
@@ -669,10 +866,13 @@ def _liberar_reservas_do_pedido(
 ) -> int:
     """Libera somente reservas ativas do próprio pedido."""
     reservas = list(
-        pedido.reservas.select_for_update()
-        .filter(status=ReservaEstoque.Status.ATIVA)
-        .select_related("produto")
-        .order_by("produto_id", "pk")
+        _travar_reservas(
+            pedido.reservas.filter(
+                status=ReservaEstoque.Status.ATIVA
+            )
+            .select_related("produto")
+            .order_by("produto_id", "pk")
+        )
     )
     itens_liberados = []
     for reserva in reservas:
@@ -698,6 +898,15 @@ def _liberar_reservas_do_pedido(
             },
         )
     return len(itens_liberados)
+
+
+def _cancelar_obrigacoes_estoque(pedido: Pedido) -> None:
+    pedido.obrigacoes_estoque.filter(
+        status=ObrigacaoEstoquePedido.Status.PENDENTE
+    ).update(
+        status=ObrigacaoEstoquePedido.Status.CANCELADA,
+        motivo_pendencia="pedido cancelado antes da baixa",
+    )
 
 
 @transaction.atomic
@@ -731,6 +940,7 @@ def cancelar_pedido(
                 usuario=usuario,
                 motivo="reparo de pedido já cancelado",
             )
+            _cancelar_obrigacoes_estoque(pedido)
         logger.info(
             "Pedido %s não pode ser cancelado a partir de %s.",
             pedido.numero,
@@ -796,6 +1006,7 @@ def cancelar_pedido(
             usuario=usuario,
             motivo="cancelamento antes do pagamento",
         )
+        _cancelar_obrigacoes_estoque(pedido)
 
     from .emails import email_pedido_cancelado
 

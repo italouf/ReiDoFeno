@@ -264,6 +264,23 @@ class Command(BaseCommand):
                 "reserva parcial do pedido PF900008 não foi alocada"
             )
 
+        from sales.models import ObrigacaoEstoquePedido
+
+        obrigacao = ObrigacaoEstoquePedido.objects.filter(
+            pedido__numero="PF900008",
+            produto__nome="Feno Migração 2B",
+        ).first()
+        if (
+            obrigacao is None
+            or obrigacao.quantidade_devida != Decimal("10.00")
+            or obrigacao.quantidade_baixada != Decimal("0.00")
+            or obrigacao.status != ObrigacaoEstoquePedido.Status.PENDENTE
+        ):
+            falhas.append(
+                "obrigação de estoque do pedido PF900008 não foi criada "
+                "como pendente"
+            )
+
         tipos = set(
             ReconciliacaoEstoqueLegado.objects.values_list("tipo", flat=True)
         )

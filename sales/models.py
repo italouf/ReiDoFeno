@@ -267,6 +267,16 @@ class Pedido(models.Model):
                 "O andamento só pode avançar com pagamento confirmado e "
                 "prova financeira conciliada."
             )
+        if (
+            novo_status in self.EXIGE_FINANCEIRO_PAGO
+            and self.obrigacoes_estoque.filter(
+                status=ObrigacaoEstoquePedido.Status.PENDENTE
+            ).exists()
+        ):
+            raise ValidationError(
+                "O andamento só pode avançar após a baixa de estoque; "
+                "existem obrigações pendentes para este pedido."
+            )
         status_anterior = self.status
         self.status = novo_status
 
@@ -497,3 +507,124 @@ class PagamentoWebhookEvento(models.Model):
             f"{self.provedor}:{self.referencia_externa} "
             f"({'ok' if self.processado else 'pendente'})"
         )
+
+
+class ObrigacaoEstoquePedido(models.Model):
+    """Obrigação persistente de baixa de estoque por pedido/produto.
+
+    Protege a transição operacional quando o pagamento foi reconhecido, mas a
+    baixa não pôde ser concluída. A baixa complementar atualiza
+    ``quantidade_baixada`` na mesma transação do movimento.
+    """
+
+    class Status(models.TextChoices):
+        PENDENTE = "pendente", "Pendente"
+        RESOLVIDA = "resolvida", "Resolvida"
+        CANCELADA = "cancelada", "Cancelada"
+
+    pedido = models.ForeignKey(
+        Pedido,
+        on_delete=models.PROTECT,
+        related_name="obrigacoes_estoque",
+        verbose_name="pedido",
+    )
+    produto = models.ForeignKey(
+        Produto,
+        on_delete=models.PROTECT,
+        related_name="obrigacoes_estoque",
+        verbose_name="produto",
+    )
+    unidade = models.ForeignKey(
+        Unidade,
+        on_delete=models.PROTECT,
+        related_name="obrigacoes_estoque",
+        verbose_name="unidade",
+    )
+    quantidade_devida = models.DecimalField(
+        "quantidade devida", max_digits=12, decimal_places=2
+    )
+    quantidade_baixada = models.DecimalField(
+        "quantidade baixada",
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+    status = models.CharField(
+        "status",
+        max_length=12,
+        choices=Status.choices,
+        default=Status.PENDENTE,
+        db_index=True,
+    )
+    motivo_pendencia = models.TextField("motivo da pendência", blank=True)
+    criado_em = models.DateTimeField("criado em", auto_now_add=True)
+    atualizado_em = models.DateTimeField("atualizado em", auto_now=True)
+    resolvido_em = models.DateTimeField("resolvido em", null=True, blank=True)
+    resolvido_por = models.ForeignKey(
+        Usuario,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="obrigacoes_estoque_resolvidas",
+        verbose_name="resolvido por",
+    )
+
+    class Meta:
+        verbose_name = "obrigação de estoque do pedido"
+        verbose_name_plural = "obrigações de estoque do pedido"
+        constraints = [
+            models.UniqueConstraint(
+                fields=("pedido", "produto", "unidade"),
+                name="obrigacao_estoque_unica_por_pedido_produto_unidade",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(quantidade_devida__gt=Decimal("0.00")),
+                name="obrigacao_estoque_devida_positiva",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    quantidade_baixada__gte=Decimal("0.00")
+                ),
+                name="obrigacao_estoque_baixada_nao_negativa",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    quantidade_baixada__lte=models.F("quantidade_devida")
+                ),
+                name="obrigacao_estoque_baixada_dentro_da_devida",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    quantidade_devida__lt=Decimal("10000000000.00")
+                ),
+                name="obrigacao_estoque_devida_dentro_do_limite",
+            ),
+        ]
+
+    def __str__(self):
+        return (
+            f"Obrigação {self.pedido.numero}/{self.produto.nome}@"
+            f"{self.unidade.nome}: {self.quantidade_baixada}/"
+            f"{self.quantidade_devida} [{self.status}]"
+        )
+
+    @property
+    def pendente(self) -> bool:
+        return self.status == self.Status.PENDENTE
+
+    def clean(self):
+        super().clean()
+        erros = {}
+        for campo in ("quantidade_devida", "quantidade_baixada"):
+            valor = getattr(self, campo)
+            if valor is None:
+                continue
+            try:
+                numero = Decimal(valor)
+            except (ArithmeticError, TypeError, ValueError):
+                erros[campo] = "Valor inválido."
+                continue
+            if not numero.is_finite():
+                erros[campo] = "Valor deve ser finito."
+        if erros:
+            raise ValidationError(erros)
