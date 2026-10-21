@@ -85,18 +85,17 @@ já aplicaram a versão anterior da 0002/0003 é tratada por 0004–0006 idempot
 ## Gate de saída
 
 - [x] STO-01, ADR-003, DAT-01, CUS-01, ADR-005 e atacado implementados e testados.
-- [x] Suíte local: 467 passed, 12 skipped (11 PostgreSQL + 1 cache), 241
+- [x] Suíte SQLite local: 490 passed, 12 skipped (11 PostgreSQL + 1 cache), 241
       subtests.
-- [x] Migração histórica 0001 → HEAD validada em SQLite e PostgreSQL 15 (ledger,
-      reservas, quarentena e evidências).
-- [x] PostgreSQL real: 34 testes críticos B01/B03/R01/R07 + concorrência
-      (pagamento×transferência, A→B/B→A, cancelamento×aprovação) passaram em Neon
-      PostgreSQL 15 via conexão direta; migração histórica 0001 → HEAD validada.
+- [x] Migração histórica 0001 → HEAD validada em SQLite e PostgreSQL 15.8,
+      incluindo T01-A/T01-B (ledger, reservas, quarentena e evidências).
+- [x] PostgreSQL 15.8 local: 501 passed, 1 skipped (cache Redis), 241 subtests,
+      incluindo B01/B03/R01/T01-T03, concorrência e constraints.
 - [ ] Rodada integral PostgreSQL no novo SHA/CI.
 - [x] `ruff check`, `manage.py check`, `makemigrations --check --dry-run`.
 - [x] Migration completa em banco SQLite vazio.
 - [ ] Trigger/concorrência PostgreSQL validados na CI (workflow inclui o branch).
 - [x] Specs em `docs/specs/fase-2b/` e ADRs 003/013/014.
-- [x] Cobertura: `stock/services.py` 99,02%, `sales/services.py` 93,89%,
-      `customers/services.py` 94,55%, total do escopo 91,41%.
-- [x] Bandit: 0 medium/high; pip-audit: 0 vulnerabilidades; `ruff`: limpo.
+- [ ] Cobertura atualizada deste SHA; não é usada como gate. Os números anteriores
+      (R01-R07) não foram reaproveitados como prova desta rodada.
+- [x] Bandit: 0 medium/high no escopo de código; pip-audit: 0; `ruff`: limpo.

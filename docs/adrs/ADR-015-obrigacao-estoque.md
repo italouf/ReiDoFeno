@@ -2,7 +2,7 @@
 
 **Status:** Aceito
 **Data:** 2026-10-21
-**Fase:** 2B — remediação R01
+**Fase:** 2B — remediação R01 e T01-T03
 **Relaciona-se:** ADR-003 (reservas), ADR-013 (ledger)
 
 ## Contexto
@@ -24,10 +24,45 @@ Criar `sales.ObrigacaoEstoquePedido`, uma obrigação persistente por
 - `Pedido.transicionar()` bloqueia `EM_SEPARACAO`, `PRONTO_PARA_ENTREGA`, `ENVIADO` e
   `CONCLUIDO` enquanto existir obrigação pendente;
 - o financeiro permanece fiel ao provedor: a pendência não reverte `status_financeiro`;
-- `resolver_pendencia_estoque()` exige justificativa/usuário, usa somente saldo livre,
-  cria movimento e auditoria, e é idempotente;
+- `resolver_pendencia_estoque()` recebe uma obrigação existente (não cria
+  obrigação), exige usuário ativo com perfil Administrador/Gestor, justificativa,
+  pedido pago/conciliado, não cancelado/estornado, produto na lista de itens e
+  unidade do pedido; consome reservas ativas do mesmo produto/unidade e usa saldo
+  livre para o restante, com auditoria e rollback; a aprovação repetida libera
+  reservas órfãs de obrigação já resolvida;
 - cancelamento antes do pagamento marca as obrigações como `cancelada`; pedido pago com
   reserva/obrigação ativa registra pendência para revisão.
+
+## Backfill e evidência
+
+A migration 0009 não pode usar apenas status pago/avançado nem soma de reservas
+consumidas. A migration 0011 reconstrói `quantidade_baixada` por evidência atribuível:
+
+- FK `MovimentoEstoque.obrigacao` para lançamentos novos;
+- para o legado, movimento `baixa_definitiva`/`saida` cujo motivo contenha exatamente
+  um número de pedido igual ao da obrigação;
+- motivo com múltiplos pedidos é ambíguo e não é contado;
+- sem evidência, a obrigação permanece pendente e bloqueia avanço; não se inventa baixa;
+- evidência maior que a obrigação é limitada e sinalizada para revisão;
+- o comando `reconstruir_obrigacoes_estoque --aplicar` repete a reconstrução de forma
+  idempotente em bases que já aplicaram a 0009. O dry-run é o padrão.
+
+`evidencia_baixada` e `evidencia_detalhe` preservam os IDs, deltas e origem da prova.
+
+## Procedimento de atualização e conciliação
+
+1. Aplicar as migrations. A `sales/0011` corrige automaticamente bases que já
+   aplicaram a `0009` e bases que ainda vão aplicá-la; não há escrita no ledger.
+2. Executar `python manage.py reconstruir_obrigacoes_estoque` (dry-run) e revisar o
+   relatório; usar `--aplicar` somente após conferir os candidatos. A operação é
+   idempotente e pode ser repetida.
+3. Se `evidencia_baixada < quantidade_devida`, a obrigação fica pendente e bloqueia
+   o avanço. Não registrar baixa sem prova física. Quando houver saldo/estoque
+   conferido e pedido pago, resolver a obrigação existente com ator
+   Administrador/Gestor e justificativa; o serviço consome reservas do próprio
+   pedido e/ou saldo livre, com movimento e auditoria.
+4. Pedido cancelado/estornado tem a obrigação cancelada; reservas ativas órfãs de
+   obrigação já resolvida são liberadas na aprovação, sem consumo duplicado.
 
 ## Alternativas rejeitadas
 
@@ -43,5 +78,6 @@ Criar `sales.ObrigacaoEstoquePedido`, uma obrigação persistente por
 - Positivas: transições operacionais refletem a baixa real; retomada auditável e
   idempotente; baixa complementar vinculada ao pedido/produto.
 - Negativas: mais uma tabela e um passo operacional para resolver pendências; pedidos
-  legados pagos são tratados como resolvidos no backfill.
-- Limite: o serviço de resolução exige saldo livre; repor estoque é decisão operacional.
+  legados sem evidência atribuível permanecem pendentes até conciliação explícita.
+- Limite: o serviço de resolução consome reservas ativas do próprio pedido e exige
+  saldo livre para o restante; repor estoque é decisão operacional.

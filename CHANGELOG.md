@@ -38,11 +38,20 @@
   de falhar em PROTECT.
 - **R07:** limites de finitude em reserva, quarentena e evidências (migration
   `stock/0008`), com testes SQL no PostgreSQL.
-- **Validação:** SQLite 467 passed/12 skipped/241 subtests; PostgreSQL 15 (Neon)
-  29 testes de obrigação/contrato/seed + 2 concorrência + 2 finitude/STO; migração
-  histórica 0001 → HEAD verde; Ruff, Bandit (0 medium/high), pip-audit (0), check e
-  migrations pendentes limpos. Rodada integral PostgreSQL local pendente de CI por
-  latência/flush do Neon.
+- **T01:** reconstrução de obrigações por evidência (FK ou motivo com exatamente um
+  pedido), com `sales/0011`, `evidencia_baixada`/`evidencia_detalhe` e comando
+  `reconstruir_obrigacoes_estoque`; status pago não presume baixa e motivo ambíguo fica
+  pendente.
+- **T02:** resolvedor recebe obrigação existente, valida pedido/unidade/financeiro,
+  consome reservas ativas do mesmo produto/unidade ou recusa, e não cria obrigação.
+- **T03:** resolvedor exige usuário ativo Administrador/Gestor, persiste `resolvido_por`,
+  justificativa e auditoria transacional com rollback.
+- **Validação:** SQLite 490 passed/12 skipped/241 subtests; PostgreSQL 15.8 local
+  501 passed/1 skipped (cache Redis)/241 subtests, incluindo concorrência e constraints.
+  Migração histórica 0001→HEAD validada em SQLite e PostgreSQL 15.8 com 9 cenários e as
+  fixtures T01-A/T01-B (baixa comprovada não duplica; status sem saída não resolve).
+  Ruff, Bandit (0 medium/high), pip-audit (0), check, check --deploy e
+  `makemigrations --check` limpos. A CI integral do novo SHA ainda não foi executada.
 
 ## [Fase 2B — integridade financeira e estoque] — 2026-10-20
 

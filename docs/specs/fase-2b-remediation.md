@@ -9,9 +9,9 @@
 | Achado | Invariante | Teste de aceite | Implementação | Evidência |
 |---|---|---|---|---|
 | B01 fallback sem dono | Cancelar/aprovar/expirar A nunca altera bloqueio de B; sem prova, só saldo livre ou pendência auditada | Estoque 10, B reserva 10, A legado item 3; cancelar/aprovar A mantém bloqueio 10 e registra pendência | `_baixar_estoque_do_pedido` sem fallback de bloqueio; `cancelar_pedido` só libera reservas; `Aviso`/`LogAuditoria` de pendência | Testes `test_b01_*` SQLite/PostgreSQL |
-| B02 migração histórica | Base histórica migra com segurança e repetibilidade; nenhuma migration posterior esconde passo anterior | Sequência CI `sales 0001 → stock 0001 → fixtures → migrate → verificar` em PostgreSQL 15 | 0002 só schema + delta default 0; 0004 quarentena; 0005 dados/evidência; 0006 constraints/trigger idempotentes | Comando `validar_migracao_legado --criar/--verificar` em Neon PostgreSQL 15 |
+| B02 migração histórica | Base histórica migra com segurança e repetibilidade; nenhuma migration posterior esconde passo anterior | Sequência CI `sales 0001 → stock 0001 → fixtures → migrate → verificar` em PostgreSQL 15 | 0002 só schema + delta default 0; 0004 quarentena; 0005 dados/evidência; 0006 constraints/trigger idempotentes | Comando `validar_migracao_legado --criar/--verificar` em SQLite e PostgreSQL 15.8 local; CI pendente |
 | B03 contrato de reserva | Reserva respeita pedido, produto, unidade, quantidade agregada e estado; baixa nunca excede o devido | Reserva cancelada/produto divergente/quantidade maior rejeitadas; reserva consumida não baixa de novo; over-reserva não baixa | `reservar` valida contrato sob lock; `consumir_reserva` valida devido; `_baixar_estoque...` considera consumidas e registra pendência | Testes `test_b03_*` |
-| B04 escritores alternativos | Toda alteração de saldo passa por serviço/ledger; seed não zera bloqueio nem altera saldo sem evento | Rodar seed com estoque/ledger/reserva; saldo e ledger reconciliam; seed recusa ambiente não descartável | Comando `semear_estoque_demo` via `registrar_ajuste`; guarda `ALLOW_DEMO_SEED=1` para não-SQLite | Teste do comando + docs |
+| B04 escritores alternativos | Toda alteração de saldo passa por serviço/ledger; seed não zera bloqueio nem altera saldo sem evento | Rodar seed com estoque/ledger/reserva; saldo e ledger reconciliam; seed recusa ambiente não descartável | Comando `semear_estoque_demo` via `registrar_ajuste`; guarda `ALLOW_DEMO_SEED=1` em qualquer banco | Teste do comando + docs |
 | B05 evidência histórica | Não inventar 0,01; preservar dados/proveniência; baseline e quarentena explícitas | Fixtures com ajuste sem auditoria, transferência ambígua, zero, reserva parcial e bloqueio sem dono | `ReconciliacaoEstoqueLegado`, `BloqueioLegado`, delta 0 como sentinela, falha diagnosticada para zero | `validar_migracao_legado` + testes de migração |
 | H02 deadlock | Ordem global de locks em transferências e múltiplos produtos | Duas transferências A→B/B→A e checkouts inversos terminam sem deadlock | Prelock ordenado por `(produto_id, unidade_id)`; retry só na borda transacional | Teste `@pytest.mark.postgres` |
 | H03 defesa do ledger | `_update_permitido` só altera `movimento_par`; par válido, sem auto-vínculo; TRUNCATE bloqueado | SQL direto TRUNCATE/par inválido rejeitado; Python rejeita outros campos | QuerySet restrito; trigger valida tipo/par e `BEFORE TRUNCATE` | Teste PostgreSQL |
@@ -55,9 +55,9 @@
   aprovação e reserva parcial com terceiro; reserva de B permanece ativa e bloqueio
   intacto; aprovação gera `Aviso` e `pedido.estoque_pendente`.
 - **B02:** sequência `migrate sales 0001 → stock 0001 → validar_migracao_legado --criar
-  → migrate → --verificar` passou em SQLite e PostgreSQL 15 (Neon), incluindo
-  quarentena, baseline, reserva parcial e evidências. Reaplicação de 0005/0006 em banco
-  já migrado é idempotente.
+  → migrate → --verificar` passou em SQLite e PostgreSQL 15.8 local, incluindo
+  quarentena, baseline, reserva parcial, evidências e as fixtures T01-A/T01-B.
+  Reaplicação de 0005/0006 em banco já migrado é idempotente.
 - **B03:** `stock/tests/test_b03_contrato_reserva.py` — estados, produto, unidade,
   quantidade, over-reserva, reserva consumida e PROTECT de item/pedido.
 - **B04:** `stock/tests/test_seed_estoque.py` — seed via ledger, bloqueio preservado,
@@ -76,14 +76,13 @@
 
 ## Resultado da validação
 
-- SQLite local: **467 passed, 12 skipped, 241 subtests**.
-- PostgreSQL 15 (Neon, conexão direta): **29 testes de obrigação/isolamento/contrato/seed**
-  + **2 concorrência** (pagamento×transferência, A→B/B→A/cancelamento) + **1 finitude**
-  + **1 STO-01** passaram; migração histórica 0001 → HEAD verde.
-- A rodada integral PostgreSQL local não terminou dentro do limite por latência/flush do
-  Neon; a CI do projeto deve executar a suíte completa no PostgreSQL 15 do workflow.
-- `ruff`, `manage.py check`, `makemigrations --check`, Bandit (0 medium/high) e
-  pip-audit (0) aprovados.
+- SQLite local: **490 passed, 12 skipped, 241 subtests**.
+- PostgreSQL 15.8 local: **501 passed, 1 skipped (cache Redis), 241 subtests**,
+  incluindo B01/B03/R01/T01-T03, concorrência e constraints. Migração histórica
+  0001→HEAD com 9 cenários e T01-A/T01-B também passou. A CI integral do novo SHA
+  continua sendo o gate obrigatório; o Neon permaneceu indisponível para a rodada.
+- `ruff`, `manage.py check`, `manage.py check --deploy`, `makemigrations --check`,
+  Bandit (0 medium/high) e pip-audit (0) aprovados.
 - Cobertura anterior à remediação residual: `stock/services.py` 95,74%,
   `sales/services.py` 93,07%, `customers/services.py` 94,55%, total 91,39%.
 - Invariantes verificados no banco local: nenhum ledger divergente, nenhum bloqueio
@@ -131,6 +130,14 @@
 | R06 | `seed_demo` classifica pedidos inteiros e exclui pagamento/item/pedido em transação por pedido; falha PROTECT reverte tudo; exige `ALLOW_DEMO_SEED=1` | código + Ruff; execução depende de ambiente demo |
 | R07 | Limites superiores de finitude em `ReservaEstoque`, `BloqueioLegado`, `ReconciliacaoEstoqueLegado` (migration `stock/0008`); testes SQL PostgreSQL | `stock/tests/test_b03_contrato_reserva.py` |
 
+## Correções da última reauditoria (00bf5cc)
+
+| ID | Correção | Evidência |
+|---|---|---|
+| T01 | `sales/obrigacoes.py` reconstrói a baixa por evidência (FK do movimento ou motivo com exatamente um número de pedido). Status pago/avançado não prova baixa; sem evidência fica pendente; excesso é sinalizado; `movimentos`/`ambiguos` ficam no JSON. Migration `sales/0011` corrige a 0009 e bases já migradas; comando `reconstruir_obrigacoes_estoque` reaplica idempotente (dry-run padrão). | `sales/tests/test_t01_reconstrucao_obrigacoes.py`; histórico SQLite/PostgreSQL 15.8 com T01-A/B |
+| T02 | `resolver_pendencia_estoque` recebe uma obrigação existente; valida pedido/produto/unidade, financeiro pago/conciliado e pedido não cancelado/estornado; consome reservas ativas do mesmo produto/unidade ou recusa; não cria obrigação; usa saldo livre para o restante. A aprovação repetida libera reserva órfã de obrigação resolvida. | `sales/tests/test_r01_obrigacao_estoque.py` (unidade/produto divergente, não pago, cancelado, reserva ativa/órfã) |
+| T03 | Resolver exige usuário ativo, persistido em `resolvido_por`, com perfil Administrador/Gestor; justificativa obrigatória; auditoria na mesma transação e rollback em falha. | testes de usuário/None/inativo/sem grupo e falha de auditoria |
+
 ### Decisões e limites adicionais
 
 - O trigger de `TRUNCATE` continua sendo proteção contra acidente; o GUC é contornável por
@@ -140,5 +147,6 @@
   dependem de GUC/sessão usam conexão **direta**, não o pooler transacional. A suíte
   integral deve rodar no PostgreSQL local da CI; Neon foi usado para sondagens dirigidas
   por latência/suspensão do compute.
-- A execução integral PostgreSQL local no Neon não foi concluída por latência/flush;
-  os grupos críticos foram executados em PostgreSQL 15 direto. A CI do novo SHA é o gate.
+- A execução integral PostgreSQL foi concluída localmente em PostgreSQL 15.8
+  (501 passed/1 skipped); o Neon permaneceu indisponível. A CI integral do novo SHA
+  ainda é o gate remoto.

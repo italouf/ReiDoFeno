@@ -127,9 +127,7 @@ def criar_trigger_postgres(schema_editor):
 
 
 def criar_constraints_e_trigger(apps, schema_editor):
-    from django.apps import apps as global_apps
-
-    Movimento = global_apps.get_model("stock", "MovimentoEstoque")
+    Movimento = apps.get_model("stock", "MovimentoEstoque")
     with schema_editor.connection.cursor() as cursor:
         existentes = schema_editor.connection.introspection.get_constraints(
             cursor, Movimento._meta.db_table
@@ -139,20 +137,28 @@ def criar_constraints_e_trigger(apps, schema_editor):
         for constraint in (_constraint_delta(), _constraint_coerencia())
         if constraint.name not in existentes
     ]
-    if schema_editor.connection.vendor == "sqlite":
-        # O rebuild do SQLite usa todas as constraints do modelo atual.
-        if faltantes:
-            schema_editor.add_constraint(Movimento, faltantes[0])
-    else:
-        for constraint in faltantes:
-            schema_editor.add_constraint(Movimento, constraint)
+    # O estado histórico não carrega as constraints; o schema editor do SQLite
+    # usa _meta.constraints no rebuild. Anexa temporariamente, sem importar o
+    # modelo de runtime (que poderia carregar campos de fases futuras).
+    constraints_originais = list(Movimento._meta.constraints)
+    Movimento._meta.constraints = constraints_originais + [
+        _constraint_delta(),
+        _constraint_coerencia(),
+    ]
+    try:
+        if schema_editor.connection.vendor == "sqlite":
+            if faltantes:
+                schema_editor.add_constraint(Movimento, faltantes[0])
+        else:
+            for constraint in faltantes:
+                schema_editor.add_constraint(Movimento, constraint)
+    finally:
+        Movimento._meta.constraints = constraints_originais
     criar_trigger_postgres(schema_editor)
 
 
 def remover_constraints_e_trigger(apps, schema_editor):
-    from django.apps import apps as global_apps
-
-    Movimento = global_apps.get_model("stock", "MovimentoEstoque")
+    Movimento = apps.get_model("stock", "MovimentoEstoque")
     with schema_editor.connection.cursor() as cursor:
         existentes = schema_editor.connection.introspection.get_constraints(
             cursor, Movimento._meta.db_table

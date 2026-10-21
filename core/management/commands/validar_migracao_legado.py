@@ -15,6 +15,11 @@ CASOS = {
     "PF900005": ("aguardando_pagamento", "recusado", "cancelado"),
     "PF900006": ("em_separacao", None, "pago"),
     "PF900007": ("concluido", "recusado", "pago"),
+    # T01-A: pagamento aprovado + baixa por saldo livre sem reserva.
+    "PF900009": ("aguardando_pagamento", "aprovado", "pago"),
+    # T01-B: pedido avançado no código antigo sem baixa física comprovada.
+    # O financeiro pago é derivado do próprio status operacional pelo 0002.
+    "PF900010": ("em_separacao", None, "pago"),
 }
 
 
@@ -165,6 +170,76 @@ class Command(BaseCommand):
                 "quantidade_bloqueada": "3.00",
             },
         )
+
+        # T01: dois produtos com ledger coerente, mas com evidência de baixa
+        # distinta. O primeiro teve saída física; o segundo só avançou de status.
+        cenarios_t01 = (
+            (
+                "PF900009",
+                "Feno T01 Evidência",
+                "7.00",
+                (
+                    ("entrada", "10.00", "Entrada T01 A"),
+                    (
+                        "saida",
+                        "3.00",
+                        "Baixa definitiva por pedido PF900009",
+                    ),
+                ),
+            ),
+            (
+                "PF900010",
+                "Feno T01 Sem Evidência",
+                "10.00",
+                (("entrada", "10.00", "Entrada T01 B"),),
+            ),
+        )
+        for numero, nome_produto, saldo, movimentos in cenarios_t01:
+            produto_t01, _ = Produto.objects.get_or_create(
+                nome=nome_produto,
+                defaults={
+                    "categoria_id": categoria.pk,
+                    "ncm": "12149000",
+                    "unidade_medida": "fardo",
+                    "custo": "1.00",
+                    "preco_balcao": "2.00",
+                    "preco_online": "3.00",
+                    "ativo": True,
+                },
+            )
+            Estoque.objects.get_or_create(
+                produto_id=produto_t01.pk,
+                unidade_id=unidade.pk,
+                defaults={
+                    "quantidade": saldo,
+                    "quantidade_minima": "0.00",
+                    "quantidade_bloqueada": "0.00",
+                },
+            )
+            for tipo, quantidade, motivo in movimentos:
+                if not Movimento.objects.filter(
+                    produto_id=produto_t01.pk,
+                    unidade_id=unidade.pk,
+                    motivo=motivo,
+                ).exists():
+                    Movimento.objects.create(
+                        produto_id=produto_t01.pk,
+                        unidade_id=unidade.pk,
+                        tipo=tipo,
+                        quantidade=quantidade,
+                        motivo=motivo,
+                    )
+            pedido_t01 = Pedido.objects.get(numero=numero)
+            ItemPedido.objects.get_or_create(
+                pedido_id=pedido_t01.pk,
+                produto_id=produto_t01.pk,
+                defaults={
+                    "produto_nome": nome_produto,
+                    "quantidade": "3.00",
+                    "preco_unitario": "3.00",
+                },
+            )
+
         pedido_pendente, _ = Pedido.objects.get_or_create(
             numero="PF900008",
             defaults={
@@ -280,6 +355,62 @@ class Command(BaseCommand):
                 "obrigação de estoque do pedido PF900008 não foi criada "
                 "como pendente"
             )
+
+        # T01-A: a baixa histórica por saldo livre deve ser reconhecida sem
+        # criar um segundo movimento; T01-B: status avançado sem movimento não
+        # pode ser convertido em baixa.
+        t01 = {
+            "PF900009": (
+                "Feno T01 Evidência",
+                ObrigacaoEstoquePedido.Status.RESOLVIDA,
+                Decimal("3.00"),
+                Decimal("3.00"),
+                2,
+            ),
+            "PF900010": (
+                "Feno T01 Sem Evidência",
+                ObrigacaoEstoquePedido.Status.PENDENTE,
+                Decimal("0.00"),
+                Decimal("0.00"),
+                1,
+            ),
+        }
+        for numero, (
+            nome_produto,
+            status_esperado,
+            baixada_esperada,
+            evidencia_esperada,
+            movimentos_esperados,
+        ) in t01.items():
+            obrigacao_t01 = ObrigacaoEstoquePedido.objects.filter(
+                pedido__numero=numero,
+                produto__nome=nome_produto,
+            ).first()
+            if obrigacao_t01 is None:
+                falhas.append(f"obrigação T01 ausente para {numero}")
+                continue
+            if (
+                obrigacao_t01.quantidade_baixada != baixada_esperada
+                or obrigacao_t01.evidencia_baixada != evidencia_esperada
+                or obrigacao_t01.status != status_esperado
+            ):
+                falhas.append(
+                    f"T01 {numero}: esperado status={status_esperado} "
+                    f"baixada={baixada_esperada} evidência={evidencia_esperada}, "
+                    f"atual status={obrigacao_t01.status} "
+                    f"baixada={obrigacao_t01.quantidade_baixada} "
+                    f"evidência={obrigacao_t01.evidencia_baixada}"
+                )
+            produto_t01 = obrigacao_t01.produto
+            movimentos = MovimentoEstoque.objects.filter(
+                produto=produto_t01,
+                unidade=obrigacao_t01.unidade,
+            ).count()
+            if movimentos != movimentos_esperados:
+                falhas.append(
+                    f"T01 {numero}: movimentos esperados={movimentos_esperados}, "
+                    f"atuais={movimentos}"
+                )
 
         tipos = set(
             ReconciliacaoEstoqueLegado.objects.values_list("tipo", flat=True)

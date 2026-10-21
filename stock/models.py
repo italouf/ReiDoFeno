@@ -194,6 +194,15 @@ class MovimentoEstoque(models.Model):
         related_name="contrapartes",
         help_text="Movimento vinculado (saída/entrada de uma transferência).",
     )
+    obrigacao = models.ForeignKey(
+        "sales.ObrigacaoEstoquePedido",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="movimentos",
+        verbose_name="obrigação de estoque",
+        help_text="Obrigação do pedido que esta baixa atende, quando aplicável.",
+    )
     criado_em = models.DateTimeField("criado em", auto_now_add=True)
 
     objects = MovimentoEstoqueQuerySet.as_manager()

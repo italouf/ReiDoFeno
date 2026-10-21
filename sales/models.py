@@ -549,6 +549,16 @@ class ObrigacaoEstoquePedido(models.Model):
         decimal_places=2,
         default=Decimal("0.00"),
     )
+    evidencia_baixada = models.DecimalField(
+        "quantidade com evidência",
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal("0.00"),
+        help_text="Soma das saídas atribuíveis ao pedido/produto/unidade.",
+    )
+    evidencia_detalhe = models.JSONField(
+        "detalhe da evidência", default=dict, blank=True
+    )
     status = models.CharField(
         "status",
         max_length=12,
@@ -599,6 +609,18 @@ class ObrigacaoEstoquePedido(models.Model):
                 ),
                 name="obrigacao_estoque_devida_dentro_do_limite",
             ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    evidencia_baixada__gte=Decimal("0.00")
+                ),
+                name="obrigacao_estoque_evidencia_nao_negativa",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    evidencia_baixada__lt=Decimal("10000000000.00")
+                ),
+                name="obrigacao_estoque_evidencia_dentro_do_limite",
+            ),
         ]
 
     def __str__(self):
@@ -615,7 +637,7 @@ class ObrigacaoEstoquePedido(models.Model):
     def clean(self):
         super().clean()
         erros = {}
-        for campo in ("quantidade_devida", "quantidade_baixada"):
+        for campo in ("quantidade_devida", "quantidade_baixada", "evidencia_baixada"):
             valor = getattr(self, campo)
             if valor is None:
                 continue

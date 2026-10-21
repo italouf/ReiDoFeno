@@ -114,6 +114,7 @@ def registrar_movimento(
     quantidade_minima=None,
     request=None,
     movimento_par=None,
+    obrigacao=None,
     _transferencia_interna: bool = False,
 ) -> MovimentoEstoque:
     """Registra um movimento com sinal e atualiza o saldo atomicamente.
@@ -135,6 +136,13 @@ def registrar_movimento(
     ):
         raise ValidationError(
             "Movimento de transferência exige movimento_par."
+        )
+    if obrigacao is not None and (
+        obrigacao.produto_id != produto.pk
+        or obrigacao.unidade_id != unidade.pk
+    ):
+        raise ValidationError(
+            "Movimento e obrigação de estoque divergem em produto/unidade."
         )
 
     estoque, _ = Estoque.objects.select_for_update().get_or_create(
@@ -171,6 +179,7 @@ def registrar_movimento(
         motivo=motivo,
         usuario=usuario,
         movimento_par=movimento_par,
+        obrigacao=obrigacao,
     )
 
     if tipo in _TIPOS_AJUSTE:
@@ -461,7 +470,12 @@ def consumir_reserva(
     estoque = _estoque_bloqueado(reserva.produto, reserva.unidade)
     _desbloquear(estoque, reserva.quantidade)
 
-    registrar_movimento(
+    from sales.services import obter_obrigacao, registrar_baixa_obrigacao
+
+    obrigacao = obter_obrigacao(
+        reserva.pedido, reserva.produto, reserva.unidade
+    )
+    movimento = registrar_movimento(
         produto=reserva.produto,
         unidade=reserva.unidade,
         tipo=MovimentoEstoque.Tipo.BAIXA_DEFINITIVA,
@@ -469,15 +483,15 @@ def consumir_reserva(
         motivo=f"Consumo da reserva do pedido {reserva.pedido.numero}",
         usuario=usuario,
         request=request,
+        obrigacao=obrigacao,
     )
-    from sales.services import registrar_baixa_obrigacao
-
     registrar_baixa_obrigacao(
         reserva.pedido,
         produto=reserva.produto,
         unidade=reserva.unidade,
         quantidade=reserva.quantidade,
         usuario=usuario,
+        movimento=movimento,
     )
 
     reserva.status = ReservaEstoque.Status.CONSUMIDA
@@ -593,7 +607,12 @@ def baixar_saldo_livre(
             "Saldo livre insuficiente para baixa; "
             "o bloqueio de terceiros não será alterado."
         )
-    registrar_movimento(
+    obrigacao = None
+    if pedido is not None and hasattr(pedido, "pk"):
+        from sales.services import obter_obrigacao
+
+        obrigacao = obter_obrigacao(pedido, produto, unidade)
+    movimento = registrar_movimento(
         produto=produto,
         unidade=unidade,
         tipo=MovimentoEstoque.Tipo.BAIXA_DEFINITIVA,
@@ -601,8 +620,9 @@ def baixar_saldo_livre(
         usuario=usuario,
         motivo=f"Baixa definitiva por pedido {pedido}",
         request=request,
+        obrigacao=obrigacao,
     )
-    if pedido is not None and hasattr(pedido, "pk"):
+    if obrigacao is not None:
         from sales.services import registrar_baixa_obrigacao
 
         registrar_baixa_obrigacao(
@@ -611,4 +631,5 @@ def baixar_saldo_livre(
             unidade=unidade,
             quantidade=quantidade,
             usuario=usuario,
+            movimento=movimento,
         )
