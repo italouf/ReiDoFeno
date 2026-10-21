@@ -49,4 +49,7 @@ em `ReconciliacaoEstoqueLegado`.
   estreitas (vínculo de par e SET NULL de usuário) e o `TRUNCATE` é bloqueado fora de
   bancos de teste que habilitam o GUC `stock.permitir_truncate`.
 - Banco: trigger criada apenas em PostgreSQL (CI). SQLite mantém a proteção de
-  aplicação e os testes de bypass.
+  aplicação e os testes de bypass. O bloqueio de `TRUNCATE` é proteção contra acidente,
+  não fronteira de privilégio: qualquer role com `TRUNCATE` pode habilitar o GUC
+  `stock.permitir_truncate`; a separação de roles de migration/runtime é requisito
+  operacional.

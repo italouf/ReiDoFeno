@@ -76,10 +76,10 @@
 
 ## Resultado da validação
 
-- SQLite local: **456 passed, 9 skipped, 238 subtests**.
-- PostgreSQL 15 (Neon): **51 testes críticos** (B01, B03, H02, H03, H05, STO-01)
-  + **5 testes de concorrência** passaram; migração histórica 0001 → HEAD passou com
-  `validar_migracao_legado --criar/--verificar`.
+- SQLite local: **460 passed, 10 skipped, 241 subtests**.
+- PostgreSQL 15 (Neon): **42 testes críticos** (B01/B03/STO-01) + **19 testes** de
+  concorrência/DAT-01 passaram; migração histórica 0001 → HEAD passou com
+  `validar_migracao_legado --criar/--verificar` e constraints de finitude (0007).
 - A rodada integral PostgreSQL local não terminou dentro do limite por latência do
   Neon; a CI do projeto deve executar a suíte completa no PostgreSQL 15 do workflow.
 - `ruff`, `manage.py check`, `makemigrations --check`, Bandit (0 medium/high) e
@@ -87,12 +87,29 @@
 - Invariantes verificados no banco local: nenhum ledger divergente, nenhum bloqueio
   divergente e nenhum `delta` nulo/zero.
 
+## Rodada de revisão fresca (pós-remediação)
+
+- **I1:** migrações 0003/0004/0005 validam `is_finite()` de quantidades, bloqueios e
+  residual antes de escrever; a migration 0007 adiciona limites superiores em
+  `Estoque` e `MovimentoEstoque`, rejeitando NaN/Infinity no PostgreSQL.
+- **I2:** cancelamento libera reservas ativas do próprio pedido sempre que o financeiro
+  é pendente, inclusive em `RASCUNHO` e em reparo de pedido já `CANCELADO`; pedido pago
+  com reserva ativa registra pendência e não libera bloqueio alheio.
+- **I3:** documentado que o GUC de `TRUNCATE` é contornável por qualquer role com
+  privilégio de truncate; o trigger é proteção contra acidente, não fronteira de
+  privilégio. Separação de roles de migration/runtime é requisito operacional.
+- **I4:** a 0005 detecta `0,01` sem evidência de baseline e aborta com IDs; cria
+  evidência para baselines antigas e documenta a limitação de bases que já aplicaram a
+  versão antiga da 0002/0003.
+
 ## Limitações e riscos residuais
 
-- O trigger de `TRUNCATE` é bloqueado em produção, mas testes habilitam o GUC
-  `stock.permitir_truncate` para o flush do Django. Superusuário/DBA com
-  `session_replication_role=replica` ainda pode contornar; o limite de confiança é o
-  papel de runtime, não o proprietário da base.
+- O trigger de `TRUNCATE` é proteção contra acidente, **não** fronteira de privilégio:
+  qualquer role com privilégio de `TRUNCATE` pode executar
+  `SET stock.permitir_truncate='on'` e truncar; o dono das tabelas também pode remover
+  o trigger. Produção exige separar o papel de migrations/owner do papel de runtime e
+  revogar `TRUNCATE`/DDL do runtime. Superusuário/DBA continua fora do modelo de
+  ameaça.
 - Bancos que já aplicaram a 0003 antiga tiveram bloqueios sem dono liberados antes desta
   correção; a 0004 só consegue quarentenar o excedente ainda presente. Bases novas
   preservam a evidência desde o início.

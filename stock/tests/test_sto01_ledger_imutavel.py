@@ -212,6 +212,35 @@ class LedgerImutavelTests(TransactionTestCase):
                 delta=Decimal("999.00")
             )
 
+    @pytest.mark.postgres
+    def test_postgres_rejeita_infinito_em_estoque_e_ledger(self):
+        if connection.vendor != "postgresql":  # pragma: no cover
+            pytest.skip("Limites testados apenas no PostgreSQL.")
+
+        estoque = EstoqueFactory(
+            produto=self.produto, unidade=self.unidade, quantidade="10.00"
+        )
+        movimento = registrar_movimento(
+            produto=self.produto,
+            unidade=self.unidade,
+            tipo=MovimentoEstoque.Tipo.ENTRADA,
+            delta=Decimal("1.00"),
+        )
+        with pytest.raises(DatabaseError):
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE stock_estoque SET quantidade = 'Infinity' "
+                    "WHERE id = %s",
+                    [estoque.pk],
+                )
+        with pytest.raises(DatabaseError):
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE stock_movimentoestoque SET delta = 'NaN' "
+                    "WHERE id = %s",
+                    [movimento.pk],
+                )
+
 
 class DeltaCoerenciaTests(TestCase):
     """Valida coerência entre tipo e sinal do delta."""
@@ -312,6 +341,19 @@ class ValidacaoServicoTests(TestCase):
                 tipo=MovimentoEstoque.Tipo.ENTRADA,
                 delta="abc",
             )
+
+    def test_delta_nao_finito_e_rejeitado(self):
+        from django.core.exceptions import ValidationError
+
+        for valor in (Decimal("NaN"), Decimal("Infinity"), Decimal("-Infinity")):
+            with self.subTest(valor=valor):
+                with pytest.raises(ValidationError):
+                    registrar_movimento(
+                        produto=self.produto,
+                        unidade=self.unidade,
+                        tipo=MovimentoEstoque.Tipo.ENTRADA,
+                        delta=valor,
+                    )
 
     def test_delta_e_quantidade_juntos_sao_rejeitados(self):
         from django.core.exceptions import ValidationError

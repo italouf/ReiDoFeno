@@ -85,12 +85,12 @@ já aplicaram a versão anterior da 0002/0003 é tratada por 0004–0006 idempot
 ## Gate de saída
 
 - [x] STO-01, ADR-003, DAT-01, CUS-01, ADR-005 e atacado implementados e testados.
-- [x] Suíte local: 456 passed, 9 skipped (6 PostgreSQL + 1 Redis + 1 cache), 238
+- [x] Suíte local: 460 passed, 10 skipped (9 PostgreSQL + 1 cache), 241
       subtests.
 - [x] Migração histórica 0001 → HEAD validada em SQLite e PostgreSQL 15 (ledger,
       reservas, quarentena e evidências).
-- [x] PostgreSQL real: 51 testes críticos (B01/B03/H02/H03/H05) + 5 concorrência
-      passaram em Neon PostgreSQL 15.
+- [x] PostgreSQL real: 42 testes críticos (B01/B03/STO-01) + 19 concorrência/DAT-01
+      passaram em Neon PostgreSQL 15; constraints de finitude 0007 aplicadas.
 - [ ] Rodada integral PostgreSQL no novo SHA/CI.
 - [x] `ruff check`, `manage.py check`, `makemigrations --check --dry-run`.
 - [x] Migration completa em banco SQLite vazio.

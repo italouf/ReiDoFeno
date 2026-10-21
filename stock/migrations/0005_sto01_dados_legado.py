@@ -21,6 +21,20 @@ MOTIVO_BASELINE = (
 )
 
 
+def _finito(valor, contexto):
+    try:
+        numero = Decimal(valor)
+    except (InvalidOperation, TypeError, ValueError) as erro:
+        raise RuntimeError(
+            f"STO-01: valor inválido em {contexto}: {valor}"
+        ) from erro
+    if not numero.is_finite():
+        raise RuntimeError(
+            f"STO-01: valor não finito em {contexto}: {valor}"
+        )
+    return numero
+
+
 def _decimal(valor):
     try:
         numero = Decimal(str(valor))
@@ -31,7 +45,9 @@ def _decimal(valor):
 
 def _delta_do_movimento(Movimento, LogAuditoria, movimento, Reconciliacao):
     tipo = movimento.tipo
-    quantidade = abs(Decimal(movimento.quantidade))
+    quantidade = abs(
+        _finito(movimento.quantidade, f"movimento {movimento.pk}")
+    )
     if tipo in TIPOS_POSITIVOS:
         return quantidade
     if tipo in TIPOS_NEGATIVOS:
@@ -109,6 +125,47 @@ def preparar_ledger(apps, schema_editor):
             f"ids={zeros[:20]}. Nenhum delta foi inventado."
         )
 
+    suspeitos = list(
+        Movimento.objects.filter(
+            delta=Decimal("0.01"),
+            quantidade=Decimal("0.01"),
+        )
+        .exclude(motivo__startswith=MOTIVO_BASELINE)
+        .exclude(motivo__startswith="[STO-01] Reconciliação automática")
+        .values_list("pk", flat=True)
+    )
+    if suspeitos:
+        raise RuntimeError(
+            "STO-01: movimentos de 0,01 sem evidência de baseline; possível "
+            "conversão de zero pela migration antiga. Audite antes de migrar; "
+            f"ids={suspeitos[:20]}."
+        )
+
+    antigos_baseline = Movimento.objects.filter(
+        motivo__startswith="[STO-01] Reconciliação automática"
+    )
+    for movimento in antigos_baseline.iterator():
+        Reconciliacao.objects.get_or_create(
+            tipo="baseline",
+            movimento_id=movimento.pk,
+            defaults={
+                "produto_id": movimento.produto_id,
+                "unidade_id": movimento.unidade_id,
+                "quantidade": abs(
+                    _finito(
+                        movimento.delta,
+                        f"baseline antiga {movimento.pk}",
+                    )
+                ),
+                "saldo_original": None,
+                "saldo_calculado": None,
+                "detalhe": {
+                    "origem": "migration_0002_anterior",
+                    "delta": str(movimento.delta),
+                },
+            },
+        )
+
     estoques_pares = set(
         Estoque.objects.values_list("produto_id", "unidade_id")
     )
@@ -128,6 +185,10 @@ def preparar_ledger(apps, schema_editor):
     tem_sentinela = Movimento.objects.filter(delta=0).exists()
 
     for estoque in Estoque.objects.all().iterator():
+        saldo_estoque = _finito(
+            estoque.quantidade,
+            f"estoque {estoque.produto_id}/{estoque.unidade_id}",
+        )
         movimentos = list(
             Movimento.objects.filter(
                 produto_id=estoque.produto_id,
@@ -145,9 +206,15 @@ def preparar_ledger(apps, schema_editor):
                 movimento.quantidade = abs(delta)
                 movimento.save(update_fields=["delta", "quantidade"])
                 processou = True
-            total += Decimal(movimento.delta)
+            total += _finito(
+                movimento.delta, f"delta do movimento {movimento.pk}"
+            )
 
-        residual = Decimal(estoque.quantidade) - total
+        residual = saldo_estoque - total
+        residual = _finito(
+            residual,
+            f"residual do estoque {estoque.produto_id}/{estoque.unidade_id}",
+        )
         if residual == 0:
             continue
         if not processou and movimentos and not tem_sentinela:

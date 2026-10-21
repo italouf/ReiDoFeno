@@ -664,6 +664,42 @@ def reconciliar_pedido_financeiro(
     return pedido
 
 
+def _liberar_reservas_do_pedido(
+    pedido: Pedido, *, request=None, usuario=None, motivo: str = "cancelamento"
+) -> int:
+    """Libera somente reservas ativas do próprio pedido."""
+    reservas = list(
+        pedido.reservas.select_for_update()
+        .filter(status=ReservaEstoque.Status.ATIVA)
+        .select_related("produto")
+        .order_by("produto_id", "pk")
+    )
+    itens_liberados = []
+    for reserva in reservas:
+        liberar_reserva(reserva)
+        itens_liberados.append(
+            {
+                "produto": reserva.produto.nome,
+                "quantidade": str(reserva.quantidade),
+            }
+        )
+    if itens_liberados:
+        from core.auditoria import registrar_auditoria
+
+        registrar_auditoria(
+            acao="pedido.reservas_liberadas",
+            instancia=pedido,
+            request=request,
+            usuario=usuario,
+            depois={
+                "status": pedido.status,
+                "motivo": motivo,
+                "itens": itens_liberados,
+            },
+        )
+    return len(itens_liberados)
+
+
 @transaction.atomic
 def cancelar_pedido(
     pedido: Pedido, *, request=None, usuario=None, permitir_pago: bool = True
@@ -685,6 +721,16 @@ def cancelar_pedido(
         )
         return pedido
     if pedido.status in (Pedido.Status.CANCELADO, Pedido.Status.CONCLUIDO):
+        if (
+            pedido.status == Pedido.Status.CANCELADO
+            and pedido.status_financeiro == Pedido.StatusFinanceiro.PENDENTE
+        ):
+            _liberar_reservas_do_pedido(
+                pedido,
+                request=request,
+                usuario=usuario,
+                motivo="reparo de pedido já cancelado",
+            )
         logger.info(
             "Pedido %s não pode ser cancelado a partir de %s.",
             pedido.numero,
@@ -692,7 +738,6 @@ def cancelar_pedido(
         )
         return pedido
 
-    status_anterior = pedido.status
     financeiro_anterior = pedido.status_financeiro
     pedido.transicionar(Pedido.Status.CANCELADO, request=request, usuario=usuario)
 
@@ -730,43 +775,27 @@ def cancelar_pedido(
                 "motivo": "cancelamento após pagamento exige conciliação",
             },
         )
-
-    if (
-        financeiro_anterior == Pedido.StatusFinanceiro.PENDENTE
-        and status_anterior
-        in (
-            Pedido.Status.AGUARDANDO_PAGAMENTO,
-            Pedido.Status.PAGAMENTO_PENDENTE,
-        )
-    ):
-        reservas = list(
-            pedido.reservas.select_for_update()
-            .filter(status=ReservaEstoque.Status.ATIVA)
+        reserva_ativa = (
+            pedido.reservas.filter(status=ReservaEstoque.Status.ATIVA)
             .select_related("produto")
-            .order_by("produto_id", "pk")
+            .first()
         )
-        itens_liberados = []
-        for reserva in reservas:
-            liberar_reserva(reserva)
-            itens_liberados.append(
-                {
-                    "produto": reserva.produto.nome,
-                    "quantidade": str(reserva.quantidade),
-                }
-            )
-        if itens_liberados:
-            from core.auditoria import registrar_auditoria
-
-            registrar_auditoria(
-                acao="pedido.reservas_liberadas",
-                instancia=pedido,
+        if reserva_ativa is not None:
+            _registrar_pendencia_estoque(
+                pedido,
+                produto=reserva_ativa.produto,
+                quantidade=reserva_ativa.quantidade,
+                motivo="cancelamento após pagamento com reserva ativa",
                 request=request,
-                usuario=usuario,
-                depois={
-                    "status_anterior": status_anterior,
-                    "itens": itens_liberados,
-                },
             )
+
+    if financeiro_anterior == Pedido.StatusFinanceiro.PENDENTE:
+        _liberar_reservas_do_pedido(
+            pedido,
+            request=request,
+            usuario=usuario,
+            motivo="cancelamento antes do pagamento",
+        )
 
     from .emails import email_pedido_cancelado
 

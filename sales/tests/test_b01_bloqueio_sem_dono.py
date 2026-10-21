@@ -149,3 +149,87 @@ class BloqueioSemDonoTests(TestCase):
                 tipo=Aviso.Tipo.ESTOQUE_PENDENTE, objeto_id=str(pedido_a.pk)
             ).exists()
         )
+
+    def _pedido_reservado_em_status(self, status, financeiro):
+        produto = ProdutoFactory()
+        unidade = UnidadeFactory()
+        EstoqueFactory(
+            produto=produto, unidade=unidade, quantidade="10.00"
+        )
+        pedido = PedidoFactory(
+            unidade=unidade,
+            status=status,
+            status_financeiro=financeiro,
+        )
+        item = ItemPedidoFactory(
+            pedido=pedido,
+            produto=produto,
+            quantidade=Decimal("3.00"),
+        )
+        if (
+            financeiro == Pedido.StatusFinanceiro.PENDENTE
+            and status
+            in (
+                Pedido.Status.RASCUNHO,
+                Pedido.Status.AGUARDANDO_PAGAMENTO,
+                Pedido.Status.PAGAMENTO_PENDENTE,
+            )
+        ):
+            reserva = reservar(
+                produto=produto,
+                unidade=unidade,
+                quantidade=Decimal("3.00"),
+                pedido=pedido,
+                item_pedido=item,
+            )
+        else:
+            reserva = ReservaEstoque.objects.create(
+                pedido=pedido,
+                item_pedido=item,
+                produto=produto,
+                unidade=unidade,
+                quantidade=Decimal("3.00"),
+                status=ReservaEstoque.Status.ATIVA,
+            )
+            Estoque.objects.filter(
+                produto=produto, unidade=unidade
+            ).update(quantidade_bloqueada=Decimal("3.00"))
+        return pedido, reserva, produto, unidade
+
+    def test_cancelar_rascunho_libera_reserva_propria(self):
+        pedido, reserva, produto, unidade = self._pedido_reservado_em_status(
+            Pedido.Status.RASCUNHO, Pedido.StatusFinanceiro.PENDENTE
+        )
+
+        cancelar_pedido(pedido)
+
+        reserva.refresh_from_db()
+        estoque = Estoque.objects.get(produto=produto, unidade=unidade)
+        self.assertEqual(reserva.status, ReservaEstoque.Status.LIBERADA)
+        self.assertEqual(estoque.quantidade_bloqueada, Decimal("0.00"))
+
+    def test_cancelar_pago_com_reserva_ativa_registra_pendencia(self):
+        pedido, reserva, _produto, _unidade = self._pedido_reservado_em_status(
+            Pedido.Status.AGUARDANDO_PAGAMENTO,
+            Pedido.StatusFinanceiro.PAGO,
+        )
+
+        cancelar_pedido(pedido)
+
+        reserva.refresh_from_db()
+        self.assertEqual(reserva.status, ReservaEstoque.Status.ATIVA)
+        self.assertTrue(
+            Aviso.objects.filter(
+                tipo=Aviso.Tipo.ESTOQUE_PENDENTE, objeto_id=str(pedido.pk)
+            ).exists()
+        )
+
+    def test_recancelar_cancelado_libera_reserva_propria_pendente(self):
+        pedido, reserva, _produto, _unidade = self._pedido_reservado_em_status(
+            Pedido.Status.CANCELADO, Pedido.StatusFinanceiro.PENDENTE
+        )
+
+        cancelar_pedido(pedido)
+
+        reserva.refresh_from_db()
+        self.assertEqual(reserva.status, ReservaEstoque.Status.LIBERADA)

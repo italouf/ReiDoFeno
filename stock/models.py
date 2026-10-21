@@ -102,10 +102,37 @@ class Estoque(models.Model):
                 condition=models.Q(quantidade__gte=models.F("quantidade_bloqueada")),
                 name="estoque_bloqueada_dentro_do_saldo",
             ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    quantidade__lt=Decimal("10000000000.00")
+                ),
+                name="estoque_quantidade_dentro_do_limite",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    quantidade_bloqueada__lt=Decimal("10000000000.00")
+                ),
+                name="estoque_bloqueada_dentro_do_limite",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    quantidade_minima__lt=Decimal("10000000000.00")
+                ),
+                name="estoque_minima_dentro_do_limite",
+            ),
         ]
 
     def __str__(self):
         return f"{self.produto} @ {self.unidade}: {self.quantidade}"
+
+    def clean(self):
+        super().clean()
+        for campo in ("quantidade", "quantidade_minima", "quantidade_bloqueada"):
+            valor = getattr(self, campo)
+            if valor is not None and not Decimal(valor).is_finite():
+                raise ValidationError(
+                    {campo: "Valor deve ser finito."}
+                )
 
     @property
     def disponivel(self) -> bool:
@@ -194,6 +221,19 @@ class MovimentoEstoque(models.Model):
                 ),
                 name="movimento_delta_coerente_com_tipo",
             ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    delta__gt=Decimal("-10000000000.00"),
+                    delta__lt=Decimal("10000000000.00"),
+                ),
+                name="movimento_delta_dentro_do_limite",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    quantidade__lt=Decimal("10000000000.00")
+                ),
+                name="movimento_quantidade_dentro_do_limite",
+            ),
         ]
 
     def __str__(self):
@@ -211,6 +251,8 @@ class MovimentoEstoque(models.Model):
         if self.delta is None:
             raise ValidationError("Delta é obrigatório.")
         self.delta = Decimal(self.delta)
+        if not self.delta.is_finite():
+            raise ValidationError("Delta deve ser finito.")
         self.quantidade = abs(self.delta)
         super().save(*args, **kwargs)
 
