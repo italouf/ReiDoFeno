@@ -21,6 +21,16 @@ python manage.py seed_groups
 python manage.py runserver
 ```
 
+Estoque demo (somente banco descartável):
+
+```bash
+python manage.py semear_estoque_demo
+# Fora do SQLite, exige confirmação explícita:
+ALLOW_DEMO_SEED=1 python manage.py semear_estoque_demo
+```
+
+O comando ajusta o saldo via ledger, preserva reservas/bloqueios e é idempotente.
+
 Testes e qualidade:
 
 ```bash

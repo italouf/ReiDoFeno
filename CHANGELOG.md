@@ -1,5 +1,30 @@
 # Changelog
 
+## [Fase 2B — remediação da auditoria independente] — 2026-10-20
+
+- **B01:** removido o fallback que reduzia `quantidade_bloqueada` sem identidade;
+  cancelamento/expiração só liberam reservas do próprio pedido e a aprovação baixa
+  somente reservas identificadas + saldo livre, registrando `Aviso`/auditoria quando
+  falta saldo. Operações de A não afetam reservas de B.
+- **B02:** migração histórica dividida em schema (0002), reservas (0003), quarentena/
+  evidência (0004), dados (0005) e constraints/trigger (0006); validada em PostgreSQL 15
+  com `validar_migracao_legado --criar/--verificar`.
+- **B03:** contrato de reserva valida pedido, estado, produto, unidade e quantidade
+  agregada; reserva consumida não baixa de novo; item/pedido com reserva usam PROTECT.
+- **B04:** `semear_estoque_demo` grava via ledger, preserva bloqueios e exige
+  `ALLOW_DEMO_SEED=1` fora do SQLite; `seed_demo` também tem guarda de ambiente.
+- **B05:** `ReconciliacaoEstoqueLegado` registra ajuste sem prova, transferência ambígua,
+  baseline e reserva parcial; `BloqueioLegado` mantém bloqueio sem dono em quarentena;
+  movimento de quantidade zero falha com diagnóstico em vez de virar 0,01.
+- **H02:** locks ordenados em transferências e checkouts de múltiplos produtos; teste
+  PostgreSQL de transferências inversas sem deadlock.
+- **H03:** `_update_permitido` só aceita `movimento_par`; trigger valida tipo/par e
+  bloqueia `TRUNCATE` fora do GUC de teste.
+- **H04/H05:** PII formatada/minúscula mascarada; NaN/Infinity rejeitados no serviço e
+  por limites no banco.
+- **H06:** cotação do carrinho movida para `sales/pricing.py`, compartilhada com o
+  checkout e exibindo o preço final para atacadista verificado.
+
 ## [Fase 2B — integridade financeira e estoque] — 2026-10-20
 
 - **STO-01:** `MovimentoEstoque.delta` assinado como fonte de verdade;

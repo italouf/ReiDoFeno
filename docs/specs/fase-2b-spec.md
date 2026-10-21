@@ -23,12 +23,16 @@ Fase 2A.
    após a migration; toda escrita nova passa pelo serviço transacional.
 2. `delta != 0` e o sinal é coerente com o tipo; movimentos existentes não podem ser
    alterados/excluídos por instância, QuerySet, bulk ou SQL direto no PostgreSQL.
-3. `SUM(ReservaEstoque.quantidade WHERE status='ativa') ==
-   Estoque.quantidade_bloqueada` para reservas criadas pela aplicação; consumir/liberar
-   são idempotentes.
-4. `Pedido.total == Pedido.subtotal + Pedido.frete`; valores financeiros e quantidades
+3. `SUM(ReservaEstoque.quantidade WHERE status='ativa') +
+   SUM(BloqueioLegado.quantidade WHERE resolvido_em IS NULL) ==
+   Estoque.quantidade_bloqueada`; consumir/liberar são idempotentes e bloqueios sem
+   dono ficam em quarentena explícita.
+4. Cancelar/aprovar/expirar A nunca reduz reserva/bloqueio de B; sem prova, a baixa usa
+   somente saldo livre e registra pendência auditada.
+5. `Pedido.total == Pedido.subtotal + Pedido.frete`; valores financeiros e quantidades
    não podem ser negativos (ou zero, no caso da quantidade). A igualdade é comparada
-   com arredondamento de 2 casas para ser portátil entre SQLite e PostgreSQL.
+   com arredondamento de 2 casas para ser portátil entre SQLite e PostgreSQL. NaN e
+   Infinity são rejeitados no serviço e por limites de coluna.
 5. CPF, CNPJ numérico e CNPJ alfanumérico são aceitos; letras são preservadas em
    maiúsculas e o DV oficial é validado.
 6. `meus-pedidos` e exportação LGPD exigem `vinculo_verificado` e pedido do próprio
@@ -39,15 +43,22 @@ Fase 2A.
 
 ## Migrations aditivas
 
-- `stock/0002_sto01_delta_assinado`: adiciona `delta`, preenche legado, reconcilia saldo
-  via ledger, adiciona constraints e trigger PostgreSQL.
-- `stock/0003_adr003_reservas`: cria `ReservaEstoque`, aloca bloqueio legado a pedidos
-  pendentes e libera bloqueios sem identidade.
-- `sales/0007_dat01_check_constraints`: valida dados existentes e adiciona checks de
-  Pedido/ItemPedido/Pagamento.
+- `stock/0002_sto01_delta_assinado`: schema do `delta` (default temporário 0), sem DML
+  posterior na mesma transação.
+- `stock/0003_adr003_reservas`: cria `ReservaEstoque` e aloca bloqueio legado; não libera
+  bloqueio sem dono.
+- `stock/0004_remediacao_quarentena`: cria `BloqueioLegado`/`ReconciliacaoEstoqueLegado`,
+  quarentena excedente e registra reservas parciais.
+- `stock/0005_sto01_dados_legado`: calcula `delta` do sentinela 0, registra evidências e
+  falha com diagnóstico para movimento zero.
+- `stock/0006_sto01_constraints_trigger`: constraints e trigger idempotentes para bancos
+  já migrados.
+- `sales/0007_dat01_check_constraints` + `sales/0008_limites_finitos`: checks
+  financeiros e limites contra NaN/Infinity.
 - `catalog/0002_produto_preco_atacado`: adiciona `preco_atacado` nulo.
 
-Nenhuma migration aplicada foi reescrita.
+Nenhuma migration aplicada em produção foi reescrita; a compatibilidade com bancos que
+já aplicaram a versão anterior da 0002/0003 é tratada por 0004–0006 idempotentes.
 
 ## Estratégia de testes
 
@@ -74,8 +85,13 @@ Nenhuma migration aplicada foi reescrita.
 ## Gate de saída
 
 - [x] STO-01, ADR-003, DAT-01, CUS-01, ADR-005 e atacado implementados e testados.
-- [x] Suíte local: 433 passed, 6 skipped (5 PostgreSQL + 1 Redis), 233 subtests.
-- [x] Migração histórica 0001 → HEAD validada em SQLite (ledger + reserva parcial).
+- [x] Suíte local: 455 passed, 9 skipped (6 PostgreSQL + 1 Redis + 1 cache), 238
+      subtests.
+- [x] Migração histórica 0001 → HEAD validada em SQLite e PostgreSQL 15 (ledger,
+      reservas, quarentena e evidências).
+- [x] PostgreSQL real: 51 testes críticos (B01/B03/H02/H03/H05) + 5 concorrência
+      passaram em Neon PostgreSQL 15.
+- [ ] Rodada integral PostgreSQL no novo SHA/CI.
 - [x] `ruff check`, `manage.py check`, `makemigrations --check --dry-run`.
 - [x] Migration completa em banco SQLite vazio.
 - [ ] Trigger/concorrência PostgreSQL validados na CI (workflow inclui o branch).

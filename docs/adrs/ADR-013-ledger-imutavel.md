@@ -23,6 +23,13 @@ Transferências usam `transferencia_saida`/`transferencia_entrada` com `moviment
 recíproco. O vínculo é a única mutação permitida após a criação, e é feita por operação
 interna que não altera valor, tipo, produto, unidade ou motivo.
 
+A migração foi dividida para ser segura no PostgreSQL: schema em 0002, reservas em 0003,
+quarentena/evidência em 0004, carga de `delta` em 0005 e constraints/trigger em 0006.
+Nenhum `ALTER TABLE` ocorre após DML na mesma transação. `delta` entra com default
+temporário 0; a 0005 só processa esse sentinela e falha com diagnóstico para movimento de
+quantidade zero, em vez de inventar `0,01`. Sinais inferidos e baselines ficam registrados
+em `ReconciliacaoEstoqueLegado`.
+
 ## Alternativas rejeitadas
 
 1. **Quantidade absoluta com flag de sinal (`positivo=True`)**: dois campos para o mesmo
@@ -35,9 +42,11 @@ interna que não altera valor, tipo, produto, unidade ou motivo.
 ## Consequências
 
 - Positivas: saldo auditável (`SUM(delta)`), ajustes com sinal preservado, defesa contra
-  mutação direta no PostgreSQL, trilha compatível com relatórios existentes.
+  mutação direta no PostgreSQL, trilha compatível com relatórios existentes e evidência
+  explícita de inferências/baselines.
 - Negativas: correções exigem movimento de compensação; a migração de ajustes legados
-  sem auditoria depende de heurística e pode gerar um lançamento de reconciliação;
-  o trigger permite duas exceções estreitas (vínculo de par e SET NULL de usuário).
+  sem auditoria depende de heurística registrada; o trigger permite duas exceções
+  estreitas (vínculo de par e SET NULL de usuário) e o `TRUNCATE` é bloqueado fora de
+  bancos de teste que habilitam o GUC `stock.permitir_truncate`.
 - Banco: trigger criada apenas em PostgreSQL (CI). SQLite mantém a proteção de
   aplicação e os testes de bypass.

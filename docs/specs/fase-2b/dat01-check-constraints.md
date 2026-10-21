@@ -23,10 +23,11 @@ serviços calculam os totais, mas não há defesa no banco.
 | `ItemPedido` | `quantidade` | `> 0` |
 | `ItemPedido` | `preco_unitario` | `>= 0` |
 | `Pagamento` | `valor` | `>= 0` |
+| Todos os valores | limite superior | `< 10.000.000.000,00` (rejeita NaN/Infinity no PostgreSQL) |
 
 `ItemPedido.subtotal` é uma `@property` (`quantidade × preco_unitario`) e não pode ser
 uma constraint de banco; a coerência é garantida pela aritmética da propriedade e pelos
-limites dos fatores.
+limites dos fatores. `clean()` rejeita valores não finitos antes de qualquer comparação.
 
 ## Compatibilidade SQLite/PostgreSQL
 
@@ -50,3 +51,4 @@ por ambos os backends. A igualdade `total = subtotal + frete` é comparada com
 - [ ] Testes de violação passam em SQLite e PostgreSQL.
 - [ ] Dados legados validados antes da migration.
 - [ ] `recalcular_totais()` continua produzindo `total = subtotal + frete`.
+- [ ] NaN/Infinity rejeitados pelo serviço e pelo banco.

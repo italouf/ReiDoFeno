@@ -34,21 +34,24 @@ Regras:
 ## Integração
 
 - Checkout: cria o `ItemPedido` e em seguida a reserva vinculada.
-- Pagamento aprovado: consome as reservas ativas do pedido e baixa diretamente a
-  diferença entre o item e o total reservado (reserva legada parcial). Se o produto não
-  tiver nenhuma reserva, mantém o caminho agregado anterior (`dar_baixa_definitiva`).
-- Cancelamento/expiração: libera as reservas ativas. Sem reservas, mantém o caminho
-  agregado legado apenas para pedidos pendentes.
+- Pagamento aprovado: consome as reservas ativas do pedido e baixa a diferença entre o
+  item e o total reservado somente se houver saldo **livre**. Se não houver, registra
+  pendência auditada e mantém o financeiro pago rastreável. Nunca reduz bloqueio de
+  terceiros.
+- Cancelamento/expiração: libera somente reservas ativas com identidade do pedido. Não
+  existe fallback que reduza `quantidade_bloqueada` sem dono.
+- Bloqueios legados sem pedido identificável ficam em `BloqueioLegado` (quarentena),
+  reduzem disponibilidade e são resolvidos por operação explícita.
 
 ## Migração de dados
 
 Reservas legadas não têm identidade. A migration 0003 aloca o bloqueio existente aos
 pedidos pendentes (`aguardando_pagamento`/`pagamento_pendente`, financeiro pendente),
-respeitando a ordem de criação e o saldo bloqueado. Bloqueios sem pedido identificável
-são liberados; ao final, `quantidade_bloqueada` é reescrita como a soma das reservas
-ativas. O saldo físico (`quantidade`) não é alterado. Quando o bloqueio legado é menor
-que o item, a reserva fica parcial e a aprovação baixa a diferença diretamente, sem
-tocar em bloqueio que nunca existiu.
+respeitando a ordem de criação e o saldo bloqueado. O excedente sem dono **não é
+liberado**: a migration 0004 o representa em `BloqueioLegado` (quarentena), que continua
+reduzindo a disponibilidade até resolução explícita. Quando o bloqueio legado é menor
+que o item, a reserva fica parcial; a aprovação consome a reserva e baixa a diferença
+apenas com saldo livre, registrando pendência auditada se não houver.
 
 ## Alternativas rejeitadas
 
@@ -62,6 +65,6 @@ tocar em bloqueio que nunca existiu.
 ## Consequências
 
 - Positivas: rastreabilidade por pedido, idempotência, reconciliação verificável,
-  concorrência segura com row-lock.
-- Negativas: N reservas por produto (overhead de storage) e necessidade de migration
-  para o legado; pedidos sem reserva usam caminho de compatibilidade até o fim da fase.
+  concorrência segura com row-lock e bloqueios sem dono preservados em quarentena.
+- Negativas: N reservas por produto (overhead de storage), necessidade de migration para
+  o legado e uma fila operacional de bloqueios em quarentena/pendências de baixa.
