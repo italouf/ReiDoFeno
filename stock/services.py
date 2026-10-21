@@ -331,12 +331,21 @@ def reservar(
         raise ValidationError("Produto da reserva difere do produto do item.")
 
     devido = _quantidade_devida(pedido.pk, produto.pk)
+    from sales.models import ObrigacaoEstoquePedido
+
+    obrigacao = ObrigacaoEstoquePedido.objects.filter(
+        pedido=pedido, produto=produto, unidade=unidade
+    ).first()
+    if obrigacao is not None:
+        devido = obrigacao.quantidade_devida
     ja_consumido = ReservaEstoque.objects.filter(
         pedido_id=pedido.pk,
         produto_id=produto.pk,
         unidade_id=unidade.pk,
         status=ReservaEstoque.Status.CONSUMIDA,
     ).aggregate(total=Sum("quantidade"))["total"] or Decimal("0.00")
+    if obrigacao is not None:
+        ja_consumido = max(ja_consumido, obrigacao.quantidade_baixada)
     devido_restante = devido - ja_consumido
     if devido_restante <= 0:
         raise ValidationError(
