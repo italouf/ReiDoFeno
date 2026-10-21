@@ -56,3 +56,16 @@ class SanitizePIIFilterTests(TestCase):
         )
         filtro.filter(record)
         self.assertEqual(record.args[0], "[DOC-REMOVIDO]")
+
+    def test_mascara_formatados_e_alfanumerico_minusculo(self):
+        from core.logging_filters import _mascarar
+
+        for documento in (
+            "529.982.247-25",
+            "11.222.333/0001-81",
+            "00.000.000/e08g-12",
+            "00000000e08g12",
+            "00.000.000/E08G-12",
+        ):
+            with self.subTest(documento=documento):
+                self.assertNotIn(documento, _mascarar(f"doc={documento} fim"))

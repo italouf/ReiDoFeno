@@ -3,7 +3,8 @@
 from decimal import Decimal
 
 import pytest
-from django.db import IntegrityError
+from django.core.exceptions import ValidationError
+from django.db import IntegrityError, connection
 from django.test import TransactionTestCase
 
 from core.factories import UnidadeFactory
@@ -13,7 +14,7 @@ from sales.factories import (
     PagamentoFactory,
     PedidoFactory,
 )
-from sales.models import ItemPedido, Pagamento
+from sales.models import ItemPedido, Pagamento, Pedido
 
 
 def _pedido(**kwargs):
@@ -159,3 +160,40 @@ class CheckConstraintsTests(TransactionTestCase):
         self.assertFalse(
             Pagamento.objects.filter(pedido=pedido, valor__lt=0).exists()
         )
+
+    def test_modelos_rejeitam_nan_na_validacao(self):
+        pedido = Pedido(
+            subtotal=Decimal("NaN"),
+            frete=Decimal("0.00"),
+            total=Decimal("NaN"),
+        )
+        with pytest.raises(ValidationError):
+            pedido.clean()
+
+        item = ItemPedido(
+            quantidade=Decimal("NaN"),
+            preco_unitario=Decimal("0.00"),
+        )
+        with pytest.raises(ValidationError):
+            item.clean()
+
+        pagamento = Pagamento(valor=Decimal("NaN"))
+        with pytest.raises(ValidationError):
+            pagamento.clean()
+
+    @pytest.mark.postgres
+    def test_postgres_rejeita_nan_em_sql_direto(self):
+        pedido = _pedido(
+            cliente=self.cliente,
+            unidade=self.unidade,
+            subtotal=Decimal("10.00"),
+            frete=Decimal("0.00"),
+            total=Decimal("10.00"),
+        )
+        with pytest.raises(IntegrityError):
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE sales_pedido SET subtotal = 'NaN', total = 'NaN' "
+                    "WHERE id = %s",
+                    [pedido.pk],
+                )

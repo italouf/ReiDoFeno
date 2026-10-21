@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from django.contrib.auth.models import Group
 from django.core.management import call_command
-from django.test import TestCase
+from django.test import RequestFactory, TestCase
 from django.urls import reverse
 
 from accounts.models import Usuario
@@ -14,6 +14,7 @@ from core.factories import UnidadeFactory
 from core.models import Unidade
 from customers.factories import ClienteFactory
 from customers.models import Cliente
+from sales.cart import Carrinho
 from sales.models import Pedido
 from sales.services import calcular_item_pedido, calcular_preco_unitario
 from stock.factories import EstoqueFactory
@@ -261,3 +262,29 @@ class CheckoutAtacadoTests(TestCase):
         assert pedido.canal == Pedido.Canal.VENDEDOR
         assert pedido.itens.get().preco_unitario == Decimal("80.00")
         assert cliente.categoria == Cliente.Categoria.ATACADO
+
+    def test_carrinho_de_atacadista_verificado_mostra_preco_final(self):
+        cliente, produto, _unidade = self._preparar(
+            categoria=Cliente.Categoria.ATACADO
+        )
+        request = RequestFactory().get("/carrinho/")
+        request.session = self.client.session
+        request.user = cliente.usuario
+        carrinho = Carrinho(request)
+        carrinho.adicionar(produto.pk, 51)
+        item = carrinho.itens()[0]
+        assert item["subtotal"] == Decimal("4080.00")
+
+    def test_carrinho_de_visitante_mostra_preco_online(self):
+        _cliente, produto, _unidade = self._preparar(
+            categoria=Cliente.Categoria.ATACADO, verificado=False
+        )
+        request = RequestFactory().get("/carrinho/")
+        request.session = self.client.session
+        request.user = type(
+            "Anonimo", (), {"is_authenticated": False}
+        )()
+        carrinho = Carrinho(request)
+        carrinho.adicionar(produto.pk, 51)
+        item = carrinho.itens()[0]
+        assert item["subtotal"] == Decimal("5610.00")

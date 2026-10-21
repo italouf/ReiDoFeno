@@ -181,6 +181,20 @@ class Pedido(models.Model):
                 ),
                 name="pedido_total_igual_subtotal_mais_frete",
             ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    subtotal__lt=Decimal("10000000000.00")
+                ),
+                name="pedido_subtotal_dentro_do_limite",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(frete__lt=Decimal("10000000000.00")),
+                name="pedido_frete_dentro_do_limite",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(total__lt=Decimal("10000000000.00")),
+                name="pedido_total_dentro_do_limite",
+            ),
         ]
 
     def __str__(self):
@@ -197,17 +211,24 @@ class Pedido(models.Model):
     def clean(self):
         super().clean()
         erros = {}
-        if self.subtotal is not None and self.subtotal < 0:
-            erros["subtotal"] = "Subtotal não pode ser negativo."
-        if self.frete is not None and self.frete < 0:
-            erros["frete"] = "Frete não pode ser negativo."
-        if self.total is not None and self.total < 0:
-            erros["total"] = "Total não pode ser negativo."
-        if (
-            self.subtotal is not None
-            and self.frete is not None
-            and self.total is not None
-            and self.total != self.subtotal + self.frete
+        valores = {}
+        for campo in ("subtotal", "frete", "total"):
+            valor = getattr(self, campo)
+            if valor is None:
+                continue
+            try:
+                numero = Decimal(valor)
+            except (ArithmeticError, TypeError, ValueError):
+                erros[campo] = "Valor inválido."
+                continue
+            if not numero.is_finite():
+                erros[campo] = "Valor deve ser finito."
+                continue
+            valores[campo] = numero
+            if numero < 0:
+                erros[campo] = "Valor não pode ser negativo."
+        if len(valores) == 3 and valores["total"] != (
+            valores["subtotal"] + valores["frete"]
         ):
             erros["total"] = "Total deve ser igual a subtotal + frete."
         if erros:
@@ -297,6 +318,8 @@ class Pedido(models.Model):
         )
 
     def recalcular_totais(self) -> None:
+        if not Decimal(self.frete).is_finite():
+            raise ValidationError("Frete deve ser finito.")
         if Decimal(self.frete) < 0:
             raise ValidationError("Frete não pode ser negativo.")
         self.subtotal = sum(
@@ -338,6 +361,18 @@ class ItemPedido(models.Model):
                 condition=models.Q(preco_unitario__gte=Decimal("0.00")),
                 name="item_preco_nao_negativo",
             ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    quantidade__lt=Decimal("10000000000.00")
+                ),
+                name="item_quantidade_dentro_do_limite",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    preco_unitario__lt=Decimal("10000000000.00")
+                ),
+                name="item_preco_dentro_do_limite",
+            ),
         ]
 
     def __str__(self):
@@ -346,10 +381,22 @@ class ItemPedido(models.Model):
     def clean(self):
         super().clean()
         erros = {}
-        if self.quantidade is not None and self.quantidade <= 0:
-            erros["quantidade"] = "Quantidade deve ser maior que zero."
-        if self.preco_unitario is not None and self.preco_unitario < 0:
-            erros["preco_unitario"] = "Preço unitário não pode ser negativo."
+        for campo in ("quantidade", "preco_unitario"):
+            valor = getattr(self, campo)
+            if valor is None:
+                continue
+            try:
+                numero = Decimal(valor)
+            except (ArithmeticError, TypeError, ValueError):
+                erros[campo] = "Valor inválido."
+                continue
+            if not numero.is_finite():
+                erros[campo] = "Valor deve ser finito."
+                continue
+            if campo == "quantidade" and numero <= 0:
+                erros[campo] = "Quantidade deve ser maior que zero."
+            if campo == "preco_unitario" and numero < 0:
+                erros[campo] = "Preço unitário não pode ser negativo."
         if erros:
             raise ValidationError(erros)
 
@@ -401,6 +448,10 @@ class Pagamento(models.Model):
                 condition=models.Q(valor__gte=Decimal("0.00")),
                 name="pagamento_valor_nao_negativo",
             ),
+            models.CheckConstraint(
+                condition=models.Q(valor__lt=Decimal("10000000000.00")),
+                name="pagamento_valor_dentro_do_limite",
+            ),
         ]
 
     def __str__(self):
@@ -408,7 +459,15 @@ class Pagamento(models.Model):
 
     def clean(self):
         super().clean()
-        if self.valor is not None and self.valor < 0:
+        if self.valor is None:
+            return
+        try:
+            valor = Decimal(self.valor)
+        except (ArithmeticError, TypeError, ValueError) as erro:
+            raise ValidationError({"valor": "Valor inválido."}) from erro
+        if not valor.is_finite():
+            raise ValidationError({"valor": "Valor deve ser finito."})
+        if valor < 0:
             raise ValidationError(
                 {"valor": "Valor do pagamento não pode ser negativo."}
             )
