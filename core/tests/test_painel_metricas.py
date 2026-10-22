@@ -34,7 +34,9 @@ class PainelMetricasTests(TestCase):
         cls.gestor.groups.add(Group.objects.get(name="Gestor"))
 
     def test_vendas_lucro_e_cancelados_fora_das_metricas(self):
-        produto = ProdutoFactory(preco_online="100.00")
+        produto = ProdutoFactory(
+            preco_online="100.00", custo=Decimal("0.00")
+        )
         pedido_bom = PedidoFactory(status=Pedido.Status.PAGO)
         ItemPedidoFactory(pedido=pedido_bom, produto=produto,
                           quantidade=2, preco_unitario=Decimal("100.00"))

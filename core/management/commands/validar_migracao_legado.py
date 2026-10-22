@@ -265,6 +265,7 @@ class Command(BaseCommand):
                 produto_nome="Feno Migração 2B",
                 quantidade="10.00",
                 preco_unitario="3.00",
+                custo_unitario=produto.custo,
             )
         self.stdout.write(
             self.style.SUCCESS("Fixtures históricas criadas no schema 0001.")

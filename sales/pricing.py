@@ -45,4 +45,5 @@ def calcular_item_pedido(
             quantidade=quantidade,
             preco_base=preco_base,
         ),
+        custo_unitario=produto.custo,
     )

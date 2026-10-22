@@ -86,7 +86,23 @@ def metricas_do_periodo(inicio: date, fim: date) -> dict:
         .order_by("-quantidade_vendida")[:5]
     )
 
+    cmv_total = (
+        ItemPedido.objects.filter(
+            pedido__pagamento__aprovado_em__range=(começo, término),
+            pedido__pagamento__aprovado_em__isnull=False,
+            pedido__status_financeiro=Pedido.StatusFinanceiro.PAGO,
+        )
+        .exclude(pedido__status__in=STATUS_EXCLUIDOS_VENDA)
+        .aggregate(
+            total=Sum(
+                F("custo_unitario") * F("quantidade"),
+                output_field=DecimalField(max_digits=14, decimal_places=2),
+            )
+        )["total"]
+        or Decimal("0.00")
+    )
     despesas_total = despesas_no_periodo(inicio, fim)
+    lucro_bruto = total_vendas - cmv_total
 
     aguardando = Pedido.objects.filter(
         status_financeiro=Pedido.StatusFinanceiro.PENDENTE,
@@ -101,8 +117,10 @@ def metricas_do_periodo(inicio: date, fim: date) -> dict:
         "total_vendas": total_vendas,
         "pedidos_vendidos": pedidos_vendidos,
         "top_produtos": top_produtos,
+        "cmv_total": cmv_total,
+        "lucro_bruto": lucro_bruto,
         "despesas_total": despesas_total,
-        "lucro_estimado": total_vendas - despesas_total,
+        "lucro_estimado": lucro_bruto - despesas_total,
         "aguardando_pagamento": aguardando.select_related("cliente", "unidade"),
         "aguardando_total": aguardando.count(),
     }

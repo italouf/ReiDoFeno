@@ -27,6 +27,10 @@
       <dd>R$ {{ metricas.total_vendas|floatformat:2 }} <small>({{ metricas.pedidos_vendidos }} pedidos)</small></dd>
     </div>
     <div class="numero-bloco">
+      <dt>CMV do período</dt>
+      <dd>R$ {{ metricas.cmv_total|floatformat:2 }}</dd>
+    </div>
+    <div class="numero-bloco">
       <dt>Despesas do período</dt>
       <dd>R$ {{ metricas.despesas_total|floatformat:2 }}</dd>
     </div>

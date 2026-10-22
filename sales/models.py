@@ -9,6 +9,7 @@ from accounts.models import Usuario
 from catalog.models import Produto
 from core.models import Unidade
 from customers.models import Cliente
+from stock.exceptions import ImutabilidadeViolation
 
 
 class Pedido(models.Model):
@@ -340,6 +341,40 @@ class Pedido(models.Model):
             update_fields=["subtotal", "frete", "total", "atualizado_em"]
         )
 
+    @property
+    def cmv(self) -> Decimal:
+        """Custo de mercadoria vendida, pelo snapshot de cada item."""
+        return sum(
+            (
+                item.custo_unitario * item.quantidade
+                for item in self.itens.all()
+            ),
+            Decimal("0.00"),
+        )
+
+    @property
+    def lucro_bruto(self) -> Decimal:
+        """Margem de mercadoria; frete não é receita de produto."""
+        return self.subtotal - self.cmv
+
+
+class ItemPedidoQuerySet(models.QuerySet):
+    """Protege o snapshot de custo contra mutações em massa."""
+
+    def update(self, **kwargs):
+        if "custo_unitario" in kwargs:
+            raise ImutabilidadeViolation(
+                "custo_unitario é imutável; registre uma correção auditada."
+            )
+        return super().update(**kwargs)
+
+    def bulk_update(self, objs, fields, *args, **kwargs):
+        if "custo_unitario" in fields:
+            raise ImutabilidadeViolation(
+                "custo_unitario é imutável; registre uma correção auditada."
+            )
+        return super().bulk_update(objs, fields, *args, **kwargs)
+
 
 class ItemPedido(models.Model):
     pedido = models.ForeignKey(
@@ -358,6 +393,14 @@ class ItemPedido(models.Model):
         "preço unitário", max_digits=12, decimal_places=2,
         help_text="Preço online capturado no momento do checkout.",
     )
+    custo_unitario = models.DecimalField(
+        "custo unitário (snapshot)",
+        max_digits=12,
+        decimal_places=2,
+        help_text="Custo do produto no momento da venda (imutável).",
+    )
+
+    objects = ItemPedidoQuerySet.as_manager()
 
     class Meta:
         verbose_name = "item do pedido"
@@ -383,15 +426,45 @@ class ItemPedido(models.Model):
                 ),
                 name="item_preco_dentro_do_limite",
             ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    custo_unitario__gte=Decimal("0.00")
+                ),
+                name="item_custo_nao_negativo",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    custo_unitario__lt=Decimal("10000000000.00")
+                ),
+                name="item_custo_dentro_do_limite",
+            ),
         ]
 
     def __str__(self):
         return f"{self.quantidade}× {self.produto_nome}"
 
+    def save(self, *args, **kwargs):
+        if self.pk is not None:
+            original = (
+                type(self)
+                .objects.filter(pk=self.pk)
+                .values_list("custo_unitario", flat=True)
+                .first()
+            )
+            if (
+                original is not None
+                and self.custo_unitario is not None
+                and Decimal(original) != Decimal(self.custo_unitario)
+            ):
+                raise ImutabilidadeViolation(
+                    "custo_unitario é imutável; registre uma correção auditada."
+                )
+        super().save(*args, **kwargs)
+
     def clean(self):
         super().clean()
         erros = {}
-        for campo in ("quantidade", "preco_unitario"):
+        for campo in ("quantidade", "preco_unitario", "custo_unitario"):
             valor = getattr(self, campo)
             if valor is None:
                 continue
@@ -405,14 +478,18 @@ class ItemPedido(models.Model):
                 continue
             if campo == "quantidade" and numero <= 0:
                 erros[campo] = "Quantidade deve ser maior que zero."
-            if campo == "preco_unitario" and numero < 0:
-                erros[campo] = "Preço unitário não pode ser negativo."
+            if campo in ("preco_unitario", "custo_unitario") and numero < 0:
+                erros[campo] = "Valor não pode ser negativo."
         if erros:
             raise ValidationError(erros)
 
     @property
     def subtotal(self) -> Decimal:
         return self.preco_unitario * self.quantidade
+
+    @property
+    def lucro_bruto(self) -> Decimal:
+        return (self.preco_unitario - self.custo_unitario) * self.quantidade
 
 
 class Pagamento(models.Model):

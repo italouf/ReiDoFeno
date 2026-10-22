@@ -82,6 +82,7 @@ class ItensTotaisTests(TestCase):
             produto_nome="X",
             quantidade=2,
             preco_unitario=Decimal("20.00"),
+            custo_unitario=Decimal("10.00"),
         )
         pedido.recalcular_totais()
         self.assertEqual(pedido.subtotal, Decimal("40.00"))

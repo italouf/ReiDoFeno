@@ -53,6 +53,7 @@ class ItemPedidoFactory(factory.django.DjangoModelFactory):
     produto_nome = factory.LazyAttribute(lambda o: o.produto.nome)
     quantidade = factory.LazyFunction(lambda: Decimal("2.00"))
     preco_unitario = factory.LazyAttribute(lambda o: o.produto.preco_online)
+    custo_unitario = factory.LazyAttribute(lambda o: o.produto.custo)
 
 
 class PagamentoFactory(factory.django.DjangoModelFactory):
