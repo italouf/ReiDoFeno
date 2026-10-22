@@ -27,11 +27,19 @@
 - **Emissor Fiscal:** grupo com permissões de NF-e e leitura de pedido, sem
   edição de pedido/cliente/produto/estoque; data migration atribui ao usuário
   `Caio`, se existente.
-- **Validação local:** SQLite 575 passed/15 skipped/240 subtests; cobertura
-  `analytics/services.py` 97,87% e `sales/services.py` 85,02%; Ruff, check,
+- **Revisão final:** corrigidos o gate histórico de migração (`validar_migracao_legado`),
+  a coerência receita/CMV em devoluções, o CFOP da saída emitida/manual, a
+  validação de NF-e de entrada, o redirect do Emissor, o bloqueio do
+  cancelamento pago pelo endpoint genérico, a nova rota de cancelamento, o
+  backfill de UF/interestadual, a atribuição de despesa e a ordem de locks
+  pedido→pagamento.
+- **Validação local:** SQLite 598 passed/16 skipped/240 subtests; cobertura
+  `analytics/services.py` 98,70% e `sales/services.py` 85,22%; Ruff, check,
   `makemigrations --check`, Bandit (0 medium/high) e pip-audit (0) limpos.
-  A suíte PostgreSQL/Redis de CI não foi executada neste ambiente local; os
-  testes marcados como PostgreSQL continuam pulados fora da CI.
+  Gate histórico `0001 → HEAD` validado em SQLite descartável com
+  `validar_migracao_legado --criar/--verificar`. A suíte PostgreSQL/Redis de
+  CI não foi executada neste ambiente local; os testes marcados como
+  PostgreSQL continuam pulados fora da CI.
 - **Documentação:** specs em `docs/specs/fase-2c/`; ADRs 007, 008, 010 e 016;
   relatório em `docs/audit/fase-2c-conclusao.md`.
 
