@@ -35,7 +35,9 @@ class RegistrarNotaManualView(
 
     def form_valid(self, form):
         with transaction.atomic():
-            nota, _criada = NotaFiscal.objects.get_or_create(pedido=self.pedido)
+            nota, _criada = NotaFiscal.objects.get_or_create(
+                pedido=self.pedido, tipo=NotaFiscal.Tipo.SAIDA
+            )
             nota.status = NotaFiscal.Status.AUTORIZADA
             nota.origem = NotaFiscal.Origem.MANUAL
             nota.numero = form.cleaned_data["numero"]

@@ -10,11 +10,12 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 
 from customers.models import Cliente
-from stock.models import Estoque, ReservaEstoque
+from stock.models import Estoque, MovimentoEstoque, ReservaEstoque
 from stock.services import (
     baixar_saldo_livre,
     consumir_reserva,
     liberar_reserva,
+    registrar_movimento,
     reservar,
 )
 
@@ -1367,6 +1368,313 @@ def _cancelar_obrigacoes_estoque(pedido: Pedido) -> None:
     )
 
 
+def _devolver_estoque_do_pedido(
+    pedido: Pedido, *, usuario=None, motivo: str, request=None
+) -> int:
+    """Compensa somente quantidades efetivamente baixadas.
+
+    Dados legados sem obrigação usam a quantidade do item como melhor
+    evidência. O saldo é alterado exclusivamente por movimento de ledger.
+    """
+    por_produto = {}
+    for item in pedido.itens.select_related("produto"):
+        dados = por_produto.setdefault(
+            item.produto_id,
+            {"produto": item.produto, "quantidade": Decimal("0.00")},
+        )
+        dados["quantidade"] += Decimal(item.quantidade)
+
+    devolvidos = 0
+    for produto_id in sorted(por_produto):
+        dados = por_produto[produto_id]
+        obrigacao = ObrigacaoEstoquePedido.objects.filter(
+            pedido=pedido,
+            produto_id=produto_id,
+            unidade_id=pedido.unidade_id,
+        ).first()
+        quantidade = (
+            obrigacao.quantidade_baixada
+            if obrigacao is not None
+            else dados["quantidade"]
+        )
+        if quantidade <= 0:
+            continue
+        registrar_movimento(
+            produto=dados["produto"],
+            unidade=pedido.unidade,
+            tipo=MovimentoEstoque.Tipo.ENTRADA_DEVOLUCAO,
+            delta=quantidade,
+            motivo=motivo,
+            usuario=usuario,
+            request=request,
+        )
+        devolvidos += 1
+    return devolvidos
+
+
+@transaction.atomic
+def estornar_pagamento(
+    pagamento: Pagamento,
+    *,
+    status_pedido: str = Pedido.StatusFinanceiro.ESTORNADO,
+    motivo: str = "",
+    usuario=None,
+    request=None,
+) -> Pedido:
+    """Estorna o pagamento e registra a data do evento financeiro."""
+    pagamento = Pagamento.objects.select_for_update().get(pk=pagamento.pk)
+    pedido = Pedido.objects.select_for_update().get(pk=pagamento.pedido_id)
+    if pagamento.status not in (
+        Pagamento.Status.APROVADO,
+        Pagamento.Status.CANCELADO,
+    ):
+        raise ValidationError("Somente pagamento aprovado pode ser estornado.")
+    if pagamento.status == Pagamento.Status.APROVADO:
+        pagamento.status = Pagamento.Status.CANCELADO
+        pagamento.estornado_em = timezone.now()
+        pagamento.save(update_fields=["status", "estornado_em"])
+    if pedido.status_financeiro != status_pedido:
+        pedido.definir_status_financeiro(
+            status_pedido,
+            request=request,
+            usuario=usuario,
+            motivo=motivo or "estorno do pagamento",
+        )
+    from core.auditoria import registrar_auditoria
+
+    registrar_auditoria(
+        acao="pedido.pagamento_estornado",
+        instancia=pedido,
+        request=request,
+        usuario=usuario,
+        depois={
+            "pagamento_id": pagamento.pk,
+            "status_pagamento": pagamento.status,
+            "estornado_em": (
+                pagamento.estornado_em.isoformat()
+                if pagamento.estornado_em
+                else None
+            ),
+            "status_financeiro": pedido.status_financeiro,
+            "motivo": (motivo or "")[:500],
+        },
+    )
+    return pedido
+
+
+@transaction.atomic
+def cancelar_pedido_padrao(
+    *, pedido: Pedido, justificativa: str, usuario, request=None
+) -> Pedido:
+    """Cancelamento em até 24h, sem mercadoria enviada."""
+    if not (justificativa or "").strip():
+        raise ValidationError("Justificativa é obrigatória.")
+    if usuario is None or getattr(usuario, "pk", None) is None:
+        raise ValidationError("Usuário responsável é obrigatório.")
+    pedido = _pedido_bloqueado(pedido)
+    if pedido.tipo_cancelamento == Pedido.TipoCancelamento.PADRAO:
+        return pedido
+    if pedido.tipo_cancelamento == Pedido.TipoCancelamento.DEVOLUCAO:
+        raise ValidationError("Pedido já possui devolução registrada.")
+    if pedido.status in (Pedido.Status.ENVIADO, Pedido.Status.CONCLUIDO):
+        raise ValidationError(
+            f"Pedido {pedido.status} não pode usar o cancelamento padrão."
+        )
+
+    pagamento = getattr(pedido, "pagamento", None)
+    if (
+        pedido.status_financeiro != Pedido.StatusFinanceiro.PAGO
+        or pagamento is None
+        or pagamento.status != Pagamento.Status.APROVADO
+        or pagamento.aprovado_em is None
+    ):
+        raise ValidationError(
+            "Cancelamento padrão exige pagamento aprovado e financeiro pago."
+        )
+    horas = (timezone.now() - pagamento.aprovado_em).total_seconds() / 3600
+    if horas > 24:
+        raise ValidationError(
+            "Cancelamento padrão só é permitido em até 24 horas da aprovação."
+        )
+
+    nota = pedido.nota_fiscal
+    if nota is not None and nota.status == "autorizada":
+        from fiscal.services import cancelar_nota_fiscal
+
+        cancelar_nota_fiscal(
+            nota,
+            motivo=f"Cancelamento padrão do pedido {pedido.numero}: "
+            f"{justificativa.strip()[:300]}",
+            usuario=usuario,
+            request=request,
+        )
+
+    _devolver_estoque_do_pedido(
+        pedido,
+        usuario=usuario,
+        motivo=f"Cancelamento padrão do pedido {pedido.numero}",
+        request=request,
+    )
+    _liberar_reservas_do_pedido(
+        pedido,
+        request=request,
+        usuario=usuario,
+        motivo="cancelamento padrão",
+    )
+    _cancelar_obrigacoes_estoque(pedido)
+    estornar_pagamento(
+        pagamento,
+        status_pedido=Pedido.StatusFinanceiro.CANCELADO,
+        motivo=f"cancelamento padrão: {justificativa.strip()[:300]}",
+        usuario=usuario,
+        request=request,
+    )
+
+    pedido.tipo_cancelamento = Pedido.TipoCancelamento.PADRAO
+    pedido.justificativa_cancelamento = justificativa.strip()
+    pedido.cancelado_em = timezone.now()
+    pedido.cancelado_por = usuario
+    pedido.save(
+        update_fields=[
+            "tipo_cancelamento",
+            "justificativa_cancelamento",
+            "cancelado_em",
+            "cancelado_por",
+            "atualizado_em",
+        ]
+    )
+    if pedido.status != Pedido.Status.CANCELADO:
+        permitidos = pedido.TRANSICOES_VALIDAS.get(pedido.status, set())
+        if Pedido.Status.CANCELADO in permitidos:
+            pedido.transicionar(
+                Pedido.Status.CANCELADO, request=request, usuario=usuario
+            )
+        else:
+            from core.auditoria import auditar_atomicamente
+
+            status_anterior = pedido.status
+            pedido.status = Pedido.Status.CANCELADO
+            auditar_atomicamente(
+                acao="pedido.status_alterado",
+                instancia=pedido,
+                request=request,
+                usuario=usuario,
+                antes={"status": status_anterior},
+                depois={"status": Pedido.Status.CANCELADO},
+                salvar=lambda: pedido.save(
+                    update_fields=["status", "atualizado_em"]
+                ),
+            )
+
+    from core.auditoria import registrar_auditoria
+
+    registrar_auditoria(
+        acao="pedido.cancelado_padrao",
+        instancia=pedido,
+        request=request,
+        usuario=usuario,
+        depois={
+            "status": pedido.status,
+            "status_financeiro": pedido.status_financeiro,
+            "tipo_cancelamento": pedido.tipo_cancelamento,
+            "justificativa": justificativa.strip()[:500],
+        },
+    )
+    return pedido
+
+
+@transaction.atomic
+def registrar_devolucao(
+    *, pedido: Pedido, justificativa: str, usuario, request=None
+):
+    """Devolução após entrega/24h, com NF-e de entrada e retorno físico."""
+    from fiscal.models import NotaFiscal
+    from fiscal.services import calcular_cfop_inverso
+
+    if not (justificativa or "").strip():
+        raise ValidationError("Justificativa é obrigatória.")
+    if usuario is None or getattr(usuario, "pk", None) is None:
+        raise ValidationError("Usuário responsável é obrigatório.")
+    pedido = _pedido_bloqueado(pedido)
+    existente = pedido.notas_fiscais.filter(
+        tipo=NotaFiscal.Tipo.ENTRADA
+    ).first()
+    if pedido.tipo_cancelamento == Pedido.TipoCancelamento.DEVOLUCAO:
+        return existente
+    if pedido.status_financeiro != Pedido.StatusFinanceiro.PAGO:
+        raise ValidationError("Só pedidos pagos podem ser devolvidos.")
+    nota_saida = pedido.nota_fiscal
+    if nota_saida is None or not nota_saida.chave_acesso:
+        raise ValidationError(
+            "NF-e de saída com chave é obrigatória para registrar devolução."
+        )
+    cfop_inverso = calcular_cfop_inverso(nota_saida.cfop)
+    nota_entrada, _criada = NotaFiscal.objects.get_or_create(
+        pedido=pedido,
+        tipo=NotaFiscal.Tipo.ENTRADA,
+        defaults={
+            "cfop": cfop_inverso,
+            "chave_referenciada": nota_saida.chave_acesso,
+            "status": NotaFiscal.Status.PENDENTE,
+        },
+    )
+
+    _devolver_estoque_do_pedido(
+        pedido,
+        usuario=usuario,
+        motivo=f"Devolução do pedido {pedido.numero}: "
+        f"{justificativa.strip()[:300]}",
+        request=request,
+    )
+    _liberar_reservas_do_pedido(
+        pedido,
+        request=request,
+        usuario=usuario,
+        motivo="devolução",
+    )
+    _cancelar_obrigacoes_estoque(pedido)
+    pagamento = getattr(pedido, "pagamento", None)
+    if pagamento is not None:
+        estornar_pagamento(
+            pagamento,
+            status_pedido=Pedido.StatusFinanceiro.ESTORNADO,
+            motivo=f"devolução: {justificativa.strip()[:300]}",
+            usuario=usuario,
+            request=request,
+        )
+
+    pedido.tipo_cancelamento = Pedido.TipoCancelamento.DEVOLUCAO
+    pedido.justificativa_cancelamento = justificativa.strip()
+    pedido.cancelado_em = timezone.now()
+    pedido.cancelado_por = usuario
+    pedido.save(
+        update_fields=[
+            "tipo_cancelamento",
+            "justificativa_cancelamento",
+            "cancelado_em",
+            "cancelado_por",
+            "atualizado_em",
+        ]
+    )
+
+    from core.auditoria import registrar_auditoria
+
+    registrar_auditoria(
+        acao="pedido.devolucao_registrada",
+        instancia=pedido,
+        request=request,
+        usuario=usuario,
+        depois={
+            "tipo_cancelamento": pedido.tipo_cancelamento,
+            "justificativa": justificativa.strip()[:500],
+            "nota_entrada_id": nota_entrada.pk,
+            "cfop": nota_entrada.cfop,
+            "chave_referenciada": nota_entrada.chave_referenciada,
+        },
+    )
+    return nota_entrada
+
+
 @transaction.atomic
 def cancelar_pedido(
     pedido: Pedido, *, request=None, usuario=None, permitir_pago: bool = True
@@ -1606,9 +1914,18 @@ def _atualizar_pagamento_resultado(
         Pagamento.Status.CANCELADO,
     ):
         return
+    estava_aprovado = pagamento.status == Pagamento.Status.APROVADO
     pagamento.status = novo_status
     pagamento.id_externo = id_externo or pagamento.id_externo
-    pagamento.save(update_fields=["status", "id_externo"])
+    campos = ["status", "id_externo"]
+    if (
+        novo_status == Pagamento.Status.CANCELADO
+        and estava_aprovado
+        and pagamento.estornado_em is None
+    ):
+        pagamento.estornado_em = timezone.now()
+        campos.append("estornado_em")
+    pagamento.save(update_fields=campos)
 
 
 def _registrar_resultado_financeiro(
@@ -1678,9 +1995,12 @@ def _aplicar_resultado_valido(
             request=request,
             motivo="chargeback do provedor",
         )
-        if pedido.status not in (
-            Pedido.Status.CANCELADO,
-            Pedido.Status.CONCLUIDO,
+        if pedido.status in (
+            Pedido.Status.RASCUNHO,
+            Pedido.Status.AGUARDANDO_PAGAMENTO,
+            Pedido.Status.PAGAMENTO_PENDENTE,
+            Pedido.Status.PAGO,
+            Pedido.Status.FALHOU,
         ):
             try:
                 pedido.transicionar(Pedido.Status.CANCELADO, request=request)
@@ -1698,6 +2018,14 @@ def _aplicar_resultado_valido(
                     id_externo=id_externo,
                     request=request,
                 )
+        else:
+            _registrar_resultado_financeiro(
+                pedido,
+                acao="pedido.estorno_com_andamento",
+                status_provedor=status_provedor,
+                id_externo=id_externo,
+                request=request,
+            )
         _registrar_resultado_financeiro(
             pedido,
             acao="pedido.pagamento_estornado",

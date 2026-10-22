@@ -27,6 +27,7 @@ STATUS_AGUARDANDO = (
 STATUS_FINANCEIROS_COM_RECEITA = (
     Pedido.StatusFinanceiro.PAGO,
     Pedido.StatusFinanceiro.ESTORNADO,
+    Pedido.StatusFinanceiro.CANCELADO,
 )
 
 

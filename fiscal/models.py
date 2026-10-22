@@ -1,3 +1,4 @@
+from django.core.exceptions import ValidationError
 from django.db import models
 
 
@@ -8,16 +9,31 @@ class NotaFiscal(models.Model):
         PENDENTE = "pendente", "Pendente de envio"
         AUTORIZADA = "autorizada", "Autorizada"
         ERRO = "erro", "Erro"
+        CANCELADA = "cancelada", "Cancelada"
 
     class Origem(models.TextChoices):
         API = "api", "Integração Bling"
         MANUAL = "manual", "Registro manual"
 
-    pedido = models.OneToOneField(
+    class Tipo(models.TextChoices):
+        SAIDA = "saida", "NF-e de Saída"
+        ENTRADA = "entrada", "NF-e de Entrada/Devolução"
+
+    pedido = models.ForeignKey(
         "sales.Pedido",
         on_delete=models.PROTECT,
-        related_name="nota_fiscal",
+        related_name="notas_fiscais",
         verbose_name="pedido",
+    )
+    tipo = models.CharField(
+        "tipo", max_length=10, choices=Tipo.choices, default=Tipo.SAIDA
+    )
+    cfop = models.CharField("CFOP", max_length=10, blank=True)
+    chave_referenciada = models.CharField(
+        "chave da NF-e referenciada",
+        max_length=44,
+        blank=True,
+        help_text="Para NF-e de devolução: chave da NF-e de saída original.",
     )
     status = models.CharField(
         "status", max_length=12, choices=Status.choices, default=Status.PENDENTE
@@ -38,6 +54,24 @@ class NotaFiscal(models.Model):
     class Meta:
         verbose_name = "nota fiscal"
         verbose_name_plural = "notas fiscais"
+        constraints = [
+            models.UniqueConstraint(
+                fields=("pedido", "tipo"),
+                name="nota_fiscal_unica_por_pedido_tipo",
+            )
+        ]
 
     def __str__(self):
         return f"NF-e {self.numero or '(pendente)'} — {self.pedido.numero}"
+
+    def clean(self):
+        super().clean()
+        if self.tipo == self.Tipo.ENTRADA and not self.chave_referenciada:
+            raise ValidationError(
+                {
+                    "chave_referenciada": (
+                        "NF-e de entrada/devolução exige a chave da NF-e "
+                        "de saída referenciada."
+                    )
+                }
+            )

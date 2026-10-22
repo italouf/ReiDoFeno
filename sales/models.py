@@ -63,6 +63,10 @@ class Pedido(models.Model):
         Status.FALHOU: {Status.CANCELADO},
     }
 
+    class TipoCancelamento(models.TextChoices):
+        PADRAO = "padrao", "Cancelamento Padrão (24h)"
+        DEVOLUCAO = "devolucao", "Devolução (NF-e de entrada)"
+
     class Modalidade(models.TextChoices):
         ENTREGA = "entrega", "Entrega"
         RETIRADA = "retirada", "Retirada na unidade"
@@ -154,6 +158,27 @@ class Pedido(models.Model):
         db_index=True,
         help_text="Condição financeira do pedido; independente do andamento.",
     )
+    tipo_cancelamento = models.CharField(  # noqa: DJ001 - nulo = não cancelado
+        "tipo de cancelamento",
+        max_length=20,
+        choices=TipoCancelamento.choices,
+        null=True,
+        blank=True,
+    )
+    justificativa_cancelamento = models.TextField(
+        "justificativa do cancelamento", blank=True
+    )
+    cancelado_em = models.DateTimeField(
+        "cancelado em", null=True, blank=True
+    )
+    cancelado_por = models.ForeignKey(
+        Usuario,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="pedidos_cancelados",
+        verbose_name="cancelado por",
+    )
     criado_em = models.DateTimeField("criado em", auto_now_add=True)
     atualizado_em = models.DateTimeField("atualizado em", auto_now=True)
 
@@ -234,6 +259,11 @@ class Pedido(models.Model):
             erros["total"] = "Total deve ser igual a subtotal + frete."
         if erros:
             raise ValidationError(erros)
+
+    @property
+    def nota_fiscal(self):
+        """Nota de saída do pedido (compatibilidade com o vínculo antigo)."""
+        return self.notas_fiscais.filter(tipo="saida").order_by("-pk").first()
 
     def tem_prova_financeira(self) -> bool:
         """Prova explícita (provedor validado ou reconciliação autorizada)."""
