@@ -46,7 +46,8 @@
           <th scope="col">Operação</th>
           <th scope="col" class="num">Alíquota</th>
           <th scope="col" class="num">Valor</th>
-          <th scope="col">Aprovado em</th>
+          <th scope="col">Evento</th>
+          <th scope="col"><span class="visually-hidden">Ações</span></th>
         </tr>
       </thead>
       <tbody>
@@ -58,7 +59,8 @@
           <td>{% if linha.interestadual %}<strong>Interestadual</strong>{% else %}Interna{% endif %}</td>
           <td class="num">{{ linha.aliquota_icms|floatformat:4 }}</td>
           <td class="num">R$ {{ linha.valor|floatformat:2 }}</td>
-          <td>{{ linha.aprovado_em|date:"d/m/Y H:i" }}</td>
+          <td>{{ linha.evento }}{% if linha.evento_em %} · {{ linha.evento_em|date:"d/m/Y H:i" }}{% endif %}</td>
+          <td><a class="btn btn--secundario btn--pequeno" href="{% url 'fiscal:nota_manual' linha.pedido_id %}">Nota manual</a></td>
         </tr>
         {% endfor %}
       </tbody>

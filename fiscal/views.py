@@ -32,7 +32,9 @@ class RegistrarNotaManualView(
     grupos_permitidos = GRUPOS_FISCAIS
 
     def dispatch(self, request, *args, **kwargs):
-        if request.user.is_authenticated and not self.tem_acesso(request.user):
+        if not request.user.is_authenticated:
+            return self.handle_no_permission()
+        if not self.tem_acesso(request.user):
             raise PermissionDenied
         self.pedido = get_object_or_404(Pedido, pk=self.kwargs["pedido_pk"])
         return super().dispatch(request, *args, **kwargs)
@@ -43,24 +45,73 @@ class RegistrarNotaManualView(
         return contexto
 
     def form_valid(self, form):
-        with transaction.atomic():
-            nota, _criada = NotaFiscal.objects.get_or_create(
-                pedido=self.pedido, tipo=NotaFiscal.Tipo.SAIDA
+        from .services import pedido_elegivel
+
+        if not pedido_elegivel(self.pedido):
+            form.add_error(
+                None,
+                "O pedido precisa estar pago, conciliado e com documento válido.",
             )
+            return self.form_invalid(form)
+
+        numero = form.cleaned_data["numero"]
+        chave = form.cleaned_data["chave_acesso"]
+        cfop = (
+            form.cleaned_data.get("cfop")
+            or ("6.102" if self.pedido.interestadual else "5.102")
+        )
+        link = form.cleaned_data.get("link_documento", "")
+        with transaction.atomic():
+            nota = (
+                NotaFiscal.objects.select_for_update()
+                .filter(pedido=self.pedido, tipo=NotaFiscal.Tipo.SAIDA)
+                .first()
+            )
+            if (
+                nota is not None
+                and nota.status == NotaFiscal.Status.AUTORIZADA
+                and (
+                    nota.numero != numero
+                    or nota.chave_acesso != chave
+                    or nota.link_documento != link
+                )
+            ):
+                form.add_error(
+                    None,
+                    "NF-e autorizada não pode ser substituída por outro "
+                    "documento. Cancele-a antes de registrar outra.",
+                )
+                return self.form_invalid(form)
+            antes = None
+            if nota is None:
+                nota = NotaFiscal(
+                    pedido=self.pedido, tipo=NotaFiscal.Tipo.SAIDA
+                )
+            else:
+                antes = {
+                    "numero": nota.numero,
+                    "chave": nota.chave_acesso,
+                    "cfop": nota.cfop,
+                    "status": nota.status,
+                }
             nota.status = NotaFiscal.Status.AUTORIZADA
             nota.origem = NotaFiscal.Origem.MANUAL
-            nota.numero = form.cleaned_data["numero"]
-            nota.chave_acesso = form.cleaned_data["chave_acesso"]
-            nota.link_documento = form.cleaned_data.get("link_documento", "")
+            nota.numero = numero
+            nota.chave_acesso = chave
+            nota.cfop = cfop
+            nota.link_documento = link
+            nota.full_clean()
             nota.save()
 
             registrar_auditoria(
                 acao="fiscal.nota_manual_registrada",
                 instancia=nota,
                 request=self.request,
+                antes=antes,
                 depois={
                     "numero": nota.numero,
                     "chave": nota.chave_acesso,
+                    "cfop": nota.cfop,
                     "origem": nota.origem,
                 },
             )
@@ -68,7 +119,7 @@ class RegistrarNotaManualView(
             self.request,
             f"NF-e manual {nota.numero} vinculada ao pedido {self.pedido.numero}.",
         )
-        return redirect(reverse("sales:pedido_interno_detail", args=[self.pedido.pk]))
+        return redirect(reverse("fiscal:relatorio_fiscal"))
 
 
 class RelatorioFiscalView(

@@ -57,3 +57,12 @@ registrava justificativa/ator e não tratava nota fiscal.
   para a nota de saída.
 - A emissão real da NF-e de entrada continua manual/assistida nesta fase;
   o sistema registra e audita o documento e o CFOP.
+- A reversão da migração `NotaFiscal` de `OneToOne` para `ForeignKey` não é
+  possível depois que um pedido tiver saída e entrada; o rollback deve ser
+  tratado como operação de recuperação manual.
+- O prazo de 24h é aplicado ao cancelamento padrão. A devolução é permitida
+  após pagamento; a política temporal posterior (janela de arrependimento,
+  frete de retorno) depende de decisão operacional e não é inventada aqui.
+- Após devolução, o status operacional não é convertido em `cancelado` quando
+  o pedido já estava `concluido`; o fato fica em `tipo_cancelamento` e na
+  NF-e de entrada. Um estado operacional dedicado pode ser avaliado na Fase 3.

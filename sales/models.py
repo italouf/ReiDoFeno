@@ -294,7 +294,12 @@ class Pedido(models.Model):
         """Nota de saída do pedido (compatibilidade com o vínculo antigo)."""
         if self.pk is None:
             return None
-        return self.notas_fiscais.filter(tipo="saida").order_by("-pk").first()
+        for nota in sorted(
+            self.notas_fiscais.all(), key=lambda item: item.pk, reverse=True
+        ):
+            if nota.tipo == "saida":
+                return nota
+        return None
 
     def tem_prova_financeira(self) -> bool:
         """Prova explícita (provedor validado ou reconciliação autorizada)."""

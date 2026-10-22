@@ -1,5 +1,7 @@
 from django import forms
 
+from accounts.models import Usuario
+
 from .models import Despesa
 
 
@@ -14,8 +16,20 @@ class DespesaForm(forms.ModelForm):
             "valor",
             "recorrencia",
             "data",
+            "usuario_responsavel",
             "observacao",
         )
         widgets = {
             "data": forms.DateInput(attrs={"type": "date"}),
         }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["usuario_responsavel"].queryset = (
+            Usuario.objects.filter(
+                is_active=True,
+                groups__name__in=("Administrador", "Gestor", "Vendedor"),
+            )
+            .distinct()
+            .order_by("username")
+        )

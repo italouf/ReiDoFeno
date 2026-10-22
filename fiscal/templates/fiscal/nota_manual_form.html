@@ -9,7 +9,7 @@
     {% include "components/form_campos.html" with form=form %}
     <div class="form-acoes">
       <button type="submit" class="btn">Vincular nota ao pedido</button>
-      <a class="btn btn--secundario" href="{% url 'sales:pedido_interno_detail' pedido.pk %}">Cancelar</a>
+      <a class="btn btn--secundario" href="{% url 'fiscal:relatorio_fiscal' %}">Cancelar</a>
     </div>
   </form>
 </div>

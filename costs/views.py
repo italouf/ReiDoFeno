@@ -31,6 +31,8 @@ class DespesaCreateView(CustosBaseView, AuditoriaFormValidMixin, CreateView):
     success_url = reverse_lazy("costs:despesa_lista")
 
     def form_valid(self, form):
+        if not form.cleaned_data.get("usuario_responsavel"):
+            form.instance.usuario_responsavel = self.request.user
         messages.success(self.request, "Despesa registrada com sucesso.")
         return super().form_valid(form)
 

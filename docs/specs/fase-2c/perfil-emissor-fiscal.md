@@ -26,10 +26,13 @@ sistema.
 
 - `/fiscal/pedidos/<pk>/nota-manual/` — Administrador, Gestor e Emissor
   Fiscal.
-- `/fiscal/relatorios/` — Administrador, Gestor e Emissor Fiscal.
+- `/fiscal/relatorios/` — Administrador, Gestor e Emissor Fiscal, com link
+  para a nota manual de cada pedido.
 - `/gestao/pedidos/<pk>/status/` — apenas grupos internos; Emissor recebe
   403.
 - `/painel/painel/` — apenas Administrador/Gestor.
+- O pós-login redireciona cada papel para uma rota permitida: gestão → painel,
+  Emissor → relatório fiscal, Vendedor → minhas métricas.
 
 ## Data migration
 

@@ -5,7 +5,6 @@ from decimal import Decimal
 from django.db.models import (
     Count,
     DateTimeField,
-    DecimalField,
     Exists,
     F,
     Max,
@@ -13,13 +12,11 @@ from django.db.models import (
     Q,
     Sum,
 )
-from django.db.models.functions import TruncDate
 from django.utils import timezone
 
 from costs.services import despesas_no_periodo
 from sales.models import ItemPedido, Pagamento, Pedido
 
-STATUS_EXCLUIDOS_VENDA = (Pedido.Status.CANCELADO,)
 STATUS_AGUARDANDO = (
     Pedido.Status.AGUARDANDO_PAGAMENTO,
     Pedido.Status.PAGAMENTO_PENDENTE,
@@ -28,6 +25,10 @@ STATUS_FINANCEIROS_COM_RECEITA = (
     Pedido.StatusFinanceiro.PAGO,
     Pedido.StatusFinanceiro.ESTORNADO,
     Pedido.StatusFinanceiro.CANCELADO,
+)
+TIPOS_DEVOLUCAO = (
+    Pedido.TipoCancelamento.PADRAO,
+    Pedido.TipoCancelamento.DEVOLUCAO,
 )
 
 
@@ -38,28 +39,175 @@ def _janela(inicio: date, fim: date):
     return começo, término
 
 
-def receita_do_periodo(inicio: date, fim: date) -> Decimal:
-    """Receita por competência de pagamento aprovado menos estornos.
+def _excluir_aprovacao_pos_cancelamento(query, campo_aprovado):
+    """Ignora aprovação tardia de pedido cancelado antes do pagamento."""
+    return query.exclude(
+        pedido__status=Pedido.Status.CANCELADO,
+        pedido__cancelado_em__isnull=False,
+        **{f"{campo_aprovado}__gt": F("pedido__cancelado_em")},
+    )
 
-    A data da receita é ``Pagamento.aprovado_em``. Um estorno não apaga a
-    receita histórica: ele entra como evento negativo em ``estornado_em``.
-    ``Pedido.status`` não participa do cálculo.
-    """
+
+def pagamentos_aprovados(inicio: date, fim: date, vendedor=None):
+    """Pagamentos aprovados no período, sem aprovação tardia pós-cancelamento."""
     começo, término = _janela(inicio, fim)
+    query = Pagamento.objects.filter(
+        aprovado_em__range=(começo, término),
+        aprovado_em__isnull=False,
+        pedido__status_financeiro__in=STATUS_FINANCEIROS_COM_RECEITA,
+    )
+    query = _excluir_aprovacao_pos_cancelamento(query, "aprovado_em")
+    if vendedor is not None:
+        query = query.filter(pedido__usuario_criador=vendedor)
+    return query.select_related("pedido", "pedido__unidade")
 
-    receitas = (
-        Pagamento.objects.filter(
-            aprovado_em__range=(começo, término),
-            aprovado_em__isnull=False,
+
+def pagamentos_estornados(inicio: date, fim: date, vendedor=None):
+    """Estornos ocorridos no período, como eventos negativos."""
+    começo, término = _janela(inicio, fim)
+    query = Pagamento.objects.filter(
+        estornado_em__range=(começo, término),
+        estornado_em__isnull=False,
+    )
+    if vendedor is not None:
+        query = query.filter(pedido__usuario_criador=vendedor)
+    return query.select_related("pedido", "pedido__unidade")
+
+
+def _itens_vendidos(inicio: date, fim: date, vendedor=None):
+    começo, término = _janela(inicio, fim)
+    query = (
+        ItemPedido.objects.filter(
+            pedido__pagamento__aprovado_em__range=(começo, término),
+            pedido__pagamento__aprovado_em__isnull=False,
             pedido__status_financeiro__in=STATUS_FINANCEIROS_COM_RECEITA,
-        ).aggregate(total=Sum("valor"))["total"]
+        )
+        .exclude(
+            pedido__status=Pedido.Status.CANCELADO,
+            pedido__tipo_cancelamento__isnull=True,
+        )
+    )
+    query = _excluir_aprovacao_pos_cancelamento(
+        query, "pedido__pagamento__aprovado_em"
+    )
+    if vendedor is not None:
+        query = query.filter(pedido__usuario_criador=vendedor)
+    return query.select_related(
+        "pedido__pagamento", "pedido__unidade", "produto"
+    )
+
+
+def _itens_devolvidos(inicio: date, fim: date, vendedor=None):
+    começo, término = _janela(inicio, fim)
+    query = ItemPedido.objects.filter(
+        pedido__cancelado_em__range=(começo, término),
+        pedido__cancelado_em__isnull=False,
+        pedido__tipo_cancelamento__in=TIPOS_DEVOLUCAO,
+    )
+    if vendedor is not None:
+        query = query.filter(pedido__usuario_criador=vendedor)
+    return query.select_related("pedido__unidade", "produto")
+
+
+def _linhas_itens(inicio: date, fim: date, unidade=None, vendedor=None):
+    """Linhas de item com sinal: venda positiva, devolução negativa."""
+    linhas = {}
+
+    vendidos = _itens_vendidos(inicio, fim, vendedor=vendedor)
+    if unidade is not None:
+        vendidos = vendidos.filter(pedido__unidade=unidade)
+    for item in vendidos:
+        dia = timezone.localtime(
+            item.pedido.pagamento.aprovado_em
+        ).date()
+        chave = (
+            item.produto_id,
+            item.produto_nome,
+            item.pedido.unidade_id,
+            item.pedido.unidade.nome,
+            dia,
+        )
+        linha = linhas.setdefault(
+            chave,
+            {
+                "quantidade": Decimal("0.00"),
+                "receita": Decimal("0.00"),
+                "cmv": Decimal("0.00"),
+            },
+        )
+        linha["quantidade"] += item.quantidade
+        linha["receita"] += item.subtotal
+        linha["cmv"] += item.custo_unitario * item.quantidade
+
+    devolvidos = _itens_devolvidos(inicio, fim, vendedor=vendedor)
+    if unidade is not None:
+        devolvidos = devolvidos.filter(pedido__unidade=unidade)
+    for item in devolvidos:
+        dia = timezone.localtime(item.pedido.cancelado_em).date()
+        chave = (
+            item.produto_id,
+            item.produto_nome,
+            item.pedido.unidade_id,
+            item.pedido.unidade.nome,
+            dia,
+        )
+        linha = linhas.setdefault(
+            chave,
+            {
+                "quantidade": Decimal("0.00"),
+                "receita": Decimal("0.00"),
+                "cmv": Decimal("0.00"),
+            },
+        )
+        linha["quantidade"] -= item.quantidade
+        linha["receita"] -= item.subtotal
+        linha["cmv"] -= item.custo_unitario * item.quantidade
+
+    resultado = []
+    for (
+        produto_id,
+        produto,
+        unidade_id,
+        unidade_nome,
+        dia,
+    ), valores in sorted(
+        linhas.items(),
+        key=lambda entrada: (
+            entrada[0][4],
+            entrada[0][1],
+            entrada[0][3],
+        ),
+    ):
+        if not any(valores.values()):
+            continue
+        resultado.append(
+            {
+                "produto_id": produto_id,
+                "produto": produto,
+                "unidade_id": unidade_id,
+                "unidade": unidade_nome,
+                "dia": dia,
+                "quantidade": valores["quantidade"],
+                "receita": valores["receita"],
+                "cmv": valores["cmv"],
+                "lucro_bruto": valores["receita"] - valores["cmv"],
+            }
+        )
+    return resultado
+
+
+def receita_do_periodo(inicio: date, fim: date) -> Decimal:
+    """Receita por competência de pagamento aprovado menos estornos."""
+    receitas = (
+        pagamentos_aprovados(inicio, fim).aggregate(
+            total=Sum("valor")
+        )["total"]
         or Decimal("0.00")
     )
     estornos = (
-        Pagamento.objects.filter(
-            estornado_em__range=(começo, término),
-            estornado_em__isnull=False,
-        ).aggregate(total=Sum("valor"))["total"]
+        pagamentos_estornados(inicio, fim).aggregate(
+            total=Sum("valor")
+        )["total"]
         or Decimal("0.00")
     )
     return receitas - estornos
@@ -68,78 +216,54 @@ def receita_do_periodo(inicio: date, fim: date) -> Decimal:
 def metricas_do_periodo(
     inicio: date, fim: date, vendedor=None
 ) -> dict:
-    """Vendas, top produtos, despesas e lucro do intervalo [inicio, fim].
-
-    A receita é reconhecida por pagamento aprovado (ANA-01), não pelo
-    andamento operacional. Pedidos cancelados antes do pagamento ficam fora.
-    ``vendedor`` aplica o recorte do ADR-010; ``None`` é a visão global.
-    """
-    começo, término = _janela(inicio, fim)
-    pagamentos = Pagamento.objects.filter(
-        aprovado_em__range=(começo, término),
-        aprovado_em__isnull=False,
-        pedido__status_financeiro__in=STATUS_FINANCEIROS_COM_RECEITA,
+    """Vendas, CMV, top produtos, despesas e lucro no intervalo."""
+    aprovados = pagamentos_aprovados(inicio, fim, vendedor=vendedor)
+    estornos = pagamentos_estornados(inicio, fim, vendedor=vendedor)
+    total_vendas = (
+        aprovados.aggregate(total=Sum("valor"))["total"]
+        or Decimal("0.00")
+    ) - (
+        estornos.aggregate(total=Sum("valor"))["total"]
+        or Decimal("0.00")
     )
-    itens = ItemPedido.objects.filter(
-        pedido__pagamento__aprovado_em__range=(começo, término),
-        pedido__pagamento__aprovado_em__isnull=False,
-        pedido__status_financeiro__in=STATUS_FINANCEIROS_COM_RECEITA,
+    pedidos_vendidos = aprovados.values("pedido_id").distinct().count()
+
+    linhas = _linhas_itens(inicio, fim, vendedor=vendedor)
+    receita_produtos = sum(
+        (linha["receita"] for linha in linhas), Decimal("0.00")
+    )
+    cmv_total = sum(
+        (linha["cmv"] for linha in linhas), Decimal("0.00")
+    )
+    lucro_bruto = receita_produtos - cmv_total
+
+    produtos = {}
+    for linha in linhas:
+        dados = produtos.setdefault(
+            linha["produto"],
+            {
+                "produto_nome": linha["produto"],
+                "quantidade_vendida": Decimal("0.00"),
+                "receita": Decimal("0.00"),
+            },
+        )
+        dados["quantidade_vendida"] += linha["quantidade"]
+        dados["receita"] += linha["receita"]
+    top_produtos = sorted(
+        produtos.values(),
+        key=lambda linha: linha["quantidade_vendida"],
+        reverse=True,
+    )[:5]
+
+    despesas_total = despesas_no_periodo(
+        inicio, fim, usuario=vendedor
     )
     aguardando = Pedido.objects.filter(
         status_financeiro=Pedido.StatusFinanceiro.PENDENTE,
         status__in=STATUS_AGUARDANDO,
     )
     if vendedor is not None:
-        pagamentos = pagamentos.filter(pedido__usuario_criador=vendedor)
-        itens = itens.filter(pedido__usuario_criador=vendedor)
         aguardando = aguardando.filter(usuario_criador=vendedor)
-
-    pedidos_vendidos = pagamentos.values("pedido_id").distinct().count()
-    total_vendas = (
-        pagamentos.aggregate(total=Sum("valor"))["total"]
-        or Decimal("0.00")
-    )
-    estornos = Pagamento.objects.filter(
-        estornado_em__range=(começo, término),
-        estornado_em__isnull=False,
-    )
-    if vendedor is not None:
-        estornos = estornos.filter(pedido__usuario_criador=vendedor)
-    total_vendas -= (
-        estornos.aggregate(total=Sum("valor"))["total"]
-        or Decimal("0.00")
-    )
-
-    top_produtos = (
-        itens.exclude(pedido__status__in=STATUS_EXCLUIDOS_VENDA)
-        .values("produto_nome")
-        .annotate(
-            quantidade_vendida=Sum("quantidade"),
-            receita=Sum(
-                F("preco_unitario") * F("quantidade"),
-                output_field=DecimalField(max_digits=14, decimal_places=2),
-            ),
-        )
-        .order_by("-quantidade_vendida")[:5]
-    )
-
-    cmv_total = (
-        itens.filter(
-            pedido__status_financeiro=Pedido.StatusFinanceiro.PAGO
-        )
-        .exclude(pedido__status__in=STATUS_EXCLUIDOS_VENDA)
-        .aggregate(
-            total=Sum(
-                F("custo_unitario") * F("quantidade"),
-                output_field=DecimalField(max_digits=14, decimal_places=2),
-            )
-        )["total"]
-        or Decimal("0.00")
-    )
-    despesas_total = despesas_no_periodo(
-        inicio, fim, usuario=vendedor
-    )
-    lucro_bruto = total_vendas - cmv_total
 
     return {
         "inicio": inicio,
@@ -149,11 +273,14 @@ def metricas_do_periodo(
         "total_vendas": total_vendas,
         "pedidos_vendidos": pedidos_vendidos,
         "top_produtos": top_produtos,
+        "receita_produtos": receita_produtos,
         "cmv_total": cmv_total,
         "lucro_bruto": lucro_bruto,
         "despesas_total": despesas_total,
         "lucro_estimado": lucro_bruto - despesas_total,
-        "aguardando_pagamento": aguardando.select_related("cliente", "unidade"),
+        "aguardando_pagamento": aguardando.select_related(
+            "cliente", "unidade"
+        ),
         "aguardando_total": aguardando.count(),
     }
 
@@ -161,100 +288,50 @@ def metricas_do_periodo(
 def vendas_por_produto(
     inicio: date, fim: date, unidade=None, vendedor=None
 ) -> list[dict]:
-    """Vendas agrupadas por produto, dia de aprovação e unidade.
-
-    A receita é a dos itens (preço × quantidade); frete não é receita de
-    produto. CMV usa o snapshot de custo do item (ADR-008).
-    """
-    começo, término = _janela(inicio, fim)
-    itens = ItemPedido.objects.filter(
-        pedido__pagamento__aprovado_em__range=(começo, término),
-        pedido__pagamento__aprovado_em__isnull=False,
-        pedido__status_financeiro=Pedido.StatusFinanceiro.PAGO,
-    ).exclude(pedido__status__in=STATUS_EXCLUIDOS_VENDA)
-    if unidade is not None:
-        itens = itens.filter(pedido__unidade=unidade)
-    if vendedor is not None:
-        itens = itens.filter(pedido__usuario_criador=vendedor)
-
-    linhas = (
-        itens.annotate(
-            dia=TruncDate("pedido__pagamento__aprovado_em")
-        )
-        .values("produto__nome", "pedido__unidade__nome", "dia")
-        .annotate(
-            quantidade_total=Sum("quantidade"),
-            receita=Sum(
-                F("preco_unitario") * F("quantidade"),
-                output_field=DecimalField(max_digits=14, decimal_places=2),
-            ),
-            cmv=Sum(
-                F("custo_unitario") * F("quantidade"),
-                output_field=DecimalField(max_digits=14, decimal_places=2),
-            ),
-        )
-        .order_by("dia", "produto__nome", "pedido__unidade__nome")
+    """Vendas por produto/dia/unidade, com devoluções como linhas negativas."""
+    return _linhas_itens(
+        inicio, fim, unidade=unidade, vendedor=vendedor
     )
-
-    resultado = []
-    for linha in linhas:
-        receita = linha["receita"] or Decimal("0.00")
-        cmv = linha["cmv"] or Decimal("0.00")
-        resultado.append(
-            {
-                "produto": linha["produto__nome"],
-                "unidade": linha["pedido__unidade__nome"],
-                "dia": linha["dia"],
-                "quantidade": linha["quantidade_total"] or Decimal("0.00"),
-                "receita": receita,
-                "cmv": cmv,
-                "lucro_bruto": receita - cmv,
-            }
-        )
-    return resultado
 
 
 def comparativo_unidades(inicio: date, fim: date) -> list[dict]:
     """Receita, CMV, lucro, pedidos e ticket médio por unidade ativa."""
     from core.models import Unidade
 
-    começo, término = _janela(inicio, fim)
-    pagamentos = (
-        Pagamento.objects.filter(
-            aprovado_em__range=(começo, término),
-            aprovado_em__isnull=False,
-            pedido__status_financeiro=Pedido.StatusFinanceiro.PAGO,
-        )
+    aprovados = (
+        pagamentos_aprovados(inicio, fim)
         .values("pedido__unidade_id")
         .annotate(
             receita=Sum("valor"),
             num_pedidos=Count("pedido_id", distinct=True),
         )
     )
-    cmv = (
-        ItemPedido.objects.filter(
-            pedido__pagamento__aprovado_em__range=(começo, término),
-            pedido__pagamento__aprovado_em__isnull=False,
-            pedido__status_financeiro=Pedido.StatusFinanceiro.PAGO,
-        )
-        .exclude(pedido__status__in=STATUS_EXCLUIDOS_VENDA)
+    estornos = (
+        pagamentos_estornados(inicio, fim)
         .values("pedido__unidade_id")
-        .annotate(
-            total=Sum(
-                F("custo_unitario") * F("quantidade"),
-                output_field=DecimalField(max_digits=14, decimal_places=2),
-            )
-        )
+        .annotate(total=Sum("valor"))
     )
-    receitas = {linha["pedido__unidade_id"]: linha for linha in pagamentos}
-    cmvs = {linha["pedido__unidade_id"]: linha["total"] for linha in cmv}
+    receitas = {linha["pedido__unidade_id"]: linha for linha in aprovados}
+    estornos_por_unidade = {
+        linha["pedido__unidade_id"]: linha["total"] for linha in estornos
+    }
+    cmv_por_unidade = {}
+    for linha in _linhas_itens(inicio, fim):
+        cmv_por_unidade[linha["unidade_id"]] = (
+            cmv_por_unidade.get(linha["unidade_id"], Decimal("0.00"))
+            + linha["cmv"]
+        )
 
     resultado = []
     for unidade in Unidade.objects.filter(ativa=True).order_by("nome"):
         dados = receitas.get(unidade.pk, {})
-        receita = dados.get("receita") or Decimal("0.00")
+        receita = (
+            dados.get("receita") or Decimal("0.00")
+        ) - (
+            estornos_por_unidade.get(unidade.pk) or Decimal("0.00")
+        )
         num_pedidos = dados.get("num_pedidos") or 0
-        custo = cmvs.get(unidade.pk) or Decimal("0.00")
+        custo = cmv_por_unidade.get(unidade.pk) or Decimal("0.00")
         resultado.append(
             {
                 "unidade": unidade.nome,

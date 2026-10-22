@@ -32,8 +32,9 @@ operação BA→MG e destacar essas vendas no relatório fiscal.
 - `aliquota_interestadual` (0.12);
 - `linhas` com pedido, unidade, UF de entrega, indicador e alíquota.
 
-Receita usa pagamentos aprovados no período, alinhada à ANA-01. A tela
-`/fiscal/relatorios/` destaca as vendas interestaduais e exporta CSV.
+Receita usa pagamentos aprovados no período, alinhada à ANA-01, com estornos
+negativos na data do evento. A tela `/fiscal/relatorios/` destaca as vendas
+interestaduais e exporta CSV.
 
 ## Testes
 

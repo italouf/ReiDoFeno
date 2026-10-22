@@ -4,6 +4,7 @@ from django.urls import path, reverse_lazy
 from .views import (
     ConfirmarVinculoClienteView,
     LoginView,
+    PosLoginView,
     VincularClienteView,
 )
 
@@ -11,6 +12,7 @@ app_name = "accounts"
 
 urlpatterns = [
     path("login/", LoginView.as_view(), name="login"),
+    path("pos-login/", PosLoginView.as_view(), name="pos_login"),
     path("logout/", auth_views.LogoutView.as_view(), name="logout"),
     path(
         "vincular-cliente/",

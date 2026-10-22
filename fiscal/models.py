@@ -66,6 +66,13 @@ class NotaFiscal(models.Model):
 
     def clean(self):
         super().clean()
+        if self.chave_acesso and (
+            len(self.chave_acesso) != 44
+            or not self.chave_acesso.isdigit()
+        ):
+            raise ValidationError(
+                {"chave_acesso": "A chave de acesso deve ter 44 dígitos."}
+            )
         if self.tipo == self.Tipo.ENTRADA:
             chave = (self.chave_referenciada or "").strip()
             if not chave:

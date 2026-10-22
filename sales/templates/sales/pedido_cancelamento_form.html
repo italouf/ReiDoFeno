@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Cancelar pedido {{ pedido.numero }} — Rei do Feno{% endblock %}
+{% block content %}
+{% include "components/cabecalho_pagina.html" with titulo="Cancelar pedido" descricao=pedido.numero %}
+<section class="cartao">
+  <p style="margin-top:0; color:var(--tinta-700);">
+    Cliente: <strong>{{ pedido.cliente.nome }}</strong> ·
+    Total: <strong>R$ {{ pedido.total }}</strong> ·
+    Financeiro: <strong>{{ pedido.get_status_financeiro_display }}</strong>
+  </p>
+  <form method="post" data-enviar>
+    {% csrf_token %}
+    {% include "components/form_campos.html" with form=form %}
+    <div class="form-acoes">
+      <button type="submit" class="btn">Registrar cancelamento</button>
+      <a class="btn btn--secundario" href="{% url 'sales:pedido_interno_detail' pedido.pk %}">Voltar</a>
+    </div>
+  </form>
+</section>
+{% endblock %}

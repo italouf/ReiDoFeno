@@ -66,6 +66,12 @@
   {% endif %}
 {% endif %}
 
+{% if pedido.status_financeiro == 'pago' and pedido.status != 'cancelado' %}
+<p style="margin-top:var(--espaco-5);">
+  <a class="btn btn--secundario" href="{% url 'sales:pedido_cancelamento' pedido.pk %}">Cancelar ou devolver</a>
+</p>
+{% endif %}
+
 {% if proximos_status %}
 <section class="cartao" style="margin-top:var(--espaco-5);">
   <h2 style="margin-top:0;">Atualizar status</h2>

@@ -71,6 +71,7 @@ TEMPLATES = [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
+                "core.context_processors.papeis",
                 "sales.context_processors.loja",
             ],
         },
@@ -136,7 +137,7 @@ RATELIMIT_VINCULO_CONSUMO = os.environ.get(
 RATELIMIT_WEBHOOK = os.environ.get("RATELIMIT_WEBHOOK", "60/m")
 
 LOGIN_URL = "/accounts/login/"
-LOGIN_REDIRECT_URL = "/painel/painel/"
+LOGIN_REDIRECT_URL = "/accounts/pos-login/"
 LOGOUT_REDIRECT_URL = "/accounts/login/"
 
 PASSWORD_HASHERS = [

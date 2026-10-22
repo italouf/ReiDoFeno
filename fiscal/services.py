@@ -1,6 +1,6 @@
 """Serviço fiscal: elegibilidade, envio ao ERP e reprocessamento."""
 import logging
-from datetime import date, datetime, time
+from datetime import date
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError
@@ -88,18 +88,19 @@ def cancelar_nota_fiscal(nota, *, motivo: str, usuario=None, request=None):
 
 
 def relatorio_fiscal(inicio: date, fim: date) -> dict:
-    """Receita fiscal do período, separando operações internas e externas."""
-    from sales.models import Pagamento, Pedido
+    """Receita fiscal do período, separando internas e interestaduais.
 
-    tz = timezone.get_current_timezone()
-    começo = datetime.combine(inicio, time.min, tzinfo=tz)
-    término = datetime.combine(fim, time.max, tzinfo=tz)
-    pagamentos = Pagamento.objects.filter(
-        aprovado_em__range=(começo, término),
-        aprovado_em__isnull=False,
-        pedido__status_financeiro=Pedido.StatusFinanceiro.PAGO,
-    ).select_related("pedido", "pedido__unidade")
-    totais = pagamentos.aggregate(
+    Aprovações entram positivas na data do pagamento; estornos entram
+    negativos na data do evento, alinhados à ANA-01.
+    """
+    from analytics.services import (
+        pagamentos_aprovados,
+        pagamentos_estornados,
+    )
+
+    aprovados = pagamentos_aprovados(inicio, fim)
+    estornos = pagamentos_estornados(inicio, fim)
+    totais_aprovados = aprovados.aggregate(
         intrastadual=Sum(
             "valor", filter=Q(pedido__interestadual=False)
         ),
@@ -107,29 +108,63 @@ def relatorio_fiscal(inicio: date, fim: date) -> dict:
             "valor", filter=Q(pedido__interestadual=True)
         ),
     )
-    linhas = [
-        {
-            "pedido": pagamento.pedido.numero,
-            "unidade": pagamento.pedido.unidade.nome,
-            "uf_entrega": (
-                pagamento.pedido.uf_entrega or pagamento.pedido.uf
-            ),
-            "interestadual": pagamento.pedido.interestadual,
-            "aliquota_icms": pagamento.pedido.aliquota_icms,
-            "valor": pagamento.valor,
-            "aprovado_em": pagamento.aprovado_em,
-        }
-        for pagamento in pagamentos.order_by("pedido__numero")
-    ]
+    totais_estornos = estornos.aggregate(
+        intrastadual=Sum(
+            "valor", filter=Q(pedido__interestadual=False)
+        ),
+        interestadual=Sum(
+            "valor", filter=Q(pedido__interestadual=True)
+        ),
+    )
+    linhas = []
+    for pagamento in aprovados.order_by("pedido__numero"):
+        linhas.append(
+            {
+                "pedido": pagamento.pedido.numero,
+                "pedido_id": pagamento.pedido_id,
+                "unidade": pagamento.pedido.unidade.nome,
+                "uf_entrega": (
+                    pagamento.pedido.uf_entrega or pagamento.pedido.uf
+                ),
+                "interestadual": pagamento.pedido.interestadual,
+                "aliquota_icms": pagamento.pedido.aliquota_icms,
+                "valor": pagamento.valor,
+                "evento": "aprovacao",
+                "evento_em": pagamento.aprovado_em,
+                "estorno": False,
+            }
+        )
+    for pagamento in estornos.order_by("pedido__numero"):
+        linhas.append(
+            {
+                "pedido": pagamento.pedido.numero,
+                "pedido_id": pagamento.pedido_id,
+                "unidade": pagamento.pedido.unidade.nome,
+                "uf_entrega": (
+                    pagamento.pedido.uf_entrega or pagamento.pedido.uf
+                ),
+                "interestadual": pagamento.pedido.interestadual,
+                "aliquota_icms": pagamento.pedido.aliquota_icms,
+                "valor": -pagamento.valor,
+                "evento": "estorno",
+                "evento_em": pagamento.estornado_em,
+                "estorno": True,
+            }
+        )
+    linhas.sort(
+        key=lambda linha: (linha["evento_em"], linha["pedido"])
+    )
+    intrastadual = (
+        totais_aprovados["intrastadual"] or Decimal("0.00")
+    ) - (totais_estornos["intrastadual"] or Decimal("0.00"))
+    interestadual = (
+        totais_aprovados["interestadual"] or Decimal("0.00")
+    ) - (totais_estornos["interestadual"] or Decimal("0.00"))
     return {
         "inicio": inicio,
         "fim": fim,
-        "vendas_intrastaduais": (
-            totais["intrastadual"] or Decimal("0.00")
-        ),
-        "vendas_interestaduais": (
-            totais["interestadual"] or Decimal("0.00")
-        ),
+        "vendas_intrastaduais": intrastadual,
+        "vendas_interestaduais": interestadual,
         "aliquota_interestadual": Decimal("0.1200"),
         "linhas": linhas,
     }
@@ -183,6 +218,8 @@ def enviar_para_emissao(pedido, client=None) -> NotaFiscal | None:
     if nota.status == NotaFiscal.Status.AUTORIZADA and not criada:
         return nota  # já emitida: nunca duplica
 
+    if not nota.cfop:
+        nota.cfop = "6.102" if pedido.interestadual else "5.102"
     client = client or obter_client()
     nota.tentativas += 1
     try:
@@ -234,17 +271,21 @@ def enviar_para_emissao(pedido, client=None) -> NotaFiscal | None:
 
 def processar_fila_fiscal() -> int:
     """Varre pedidos pagos sem NF-e autorizada e tenta emitir (idempotente)."""
+    from django.db.models import Exists, OuterRef
+
     from sales.models import Pedido
 
+    autorizada = NotaFiscal.objects.filter(
+        pedido=OuterRef("pk"),
+        tipo=NotaFiscal.Tipo.SAIDA,
+        status=NotaFiscal.Status.AUTORIZADA,
+    )
     pedidos = (
         Pedido.objects.filter(
             status_financeiro="pago", financeiro_conciliado=True
         )
         .exclude(status="cancelado")
-        .exclude(
-            notas_fiscais__tipo=NotaFiscal.Tipo.SAIDA,
-            notas_fiscais__status=NotaFiscal.Status.AUTORIZADA,
-        )
+        .exclude(Exists(autorizada))
         .select_related("cliente")
     )
     enviados = 0
@@ -260,15 +301,23 @@ def avisar_pagos_sem_nfe(horas_limite: int = 24) -> int:
     from datetime import timedelta
 
     limite = timezone.now() - timedelta(hours=horas_limite)
+    from django.db.models import Exists, OuterRef
+
     from sales.models import Pedido
 
-    pendentes = Pedido.objects.filter(
-        status_financeiro="pago",
-        financeiro_conciliado=True,
-        atualizado_em__lt=limite,
-    ).exclude(status="cancelado").exclude(
-        notas_fiscais__tipo=NotaFiscal.Tipo.SAIDA,
-        notas_fiscais__status=NotaFiscal.Status.AUTORIZADA,
+    autorizada = NotaFiscal.objects.filter(
+        pedido=OuterRef("pk"),
+        tipo=NotaFiscal.Tipo.SAIDA,
+        status=NotaFiscal.Status.AUTORIZADA,
+    )
+    pendentes = (
+        Pedido.objects.filter(
+            status_financeiro="pago",
+            financeiro_conciliado=True,
+            atualizado_em__lt=limite,
+        )
+        .exclude(status="cancelado")
+        .exclude(Exists(autorizada))
     )
     total = 0
     for pedido in pendentes.select_related("cliente"):

@@ -114,6 +114,41 @@ class RelatorioVendasProdutoTests(TestCase):
         self.assertEqual(linha["cmv"], Decimal("60.00"))
         self.assertEqual(linha["lucro_bruto"], Decimal("40.00"))
 
+    def test_produtos_homonimos_nao_sao_mesclados(self):
+        unidade = UnidadeFactory()
+        produto_a = ProdutoFactory(nome="Feno Homonimo")
+        produto_b = ProdutoFactory(nome="Feno Homonimo")
+        _pedido_pago(
+            produto=produto_a, unidade=unidade, quantidade=1,
+            preco=Decimal("10.00"),
+        )
+        _pedido_pago(
+            produto=produto_b, unidade=unidade, quantidade=2,
+            preco=Decimal("10.00"),
+        )
+
+        relatorio = vendas_por_produto(DIA, DIA, unidade=unidade)
+
+        self.assertEqual(len(relatorio), 2)
+        self.assertEqual(
+            {linha["produto_id"] for linha in relatorio},
+            {produto_a.pk, produto_b.pk},
+        )
+
+    def test_renomeacao_preserva_snapshot_do_item(self):
+        produto = ProdutoFactory(nome="Nome no Checkout")
+        unidade = UnidadeFactory()
+        _pedido_pago(
+            produto=produto, unidade=unidade, quantidade=1,
+            preco=Decimal("10.00"),
+        )
+        produto.nome = "Nome Novo no Catalogo"
+        produto.save(update_fields=["nome"])
+
+        relatorio = vendas_por_produto(DIA, DIA, unidade=unidade)
+
+        self.assertEqual(relatorio[0]["produto"], "Nome no Checkout")
+
     def test_periodo_fora_nao_aparece(self):
         produto = ProdutoFactory()
         unidade = UnidadeFactory()

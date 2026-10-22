@@ -40,3 +40,16 @@ class CheckoutForm(forms.Form):
                 if not limpo.get(campo):
                     self.add_error(campo, "Informe o endereço completo para entrega.")
         return limpo
+
+
+class CancelamentoForm(forms.Form):
+    tipo = forms.ChoiceField(
+        label="Caminho",
+        choices=Pedido.TipoCancelamento.choices,
+        widget=forms.RadioSelect,
+    )
+    justificativa = forms.CharField(
+        label="Justificativa",
+        min_length=5,
+        widget=forms.Textarea(attrs={"rows": 4}),
+    )

@@ -20,6 +20,8 @@ estorno e compensação de estoque.
 - `registrar_devolucao(pedido, justificativa, usuario)`.
 - `estornar_pagamento(pagamento, usuario, motivo)`.
 - `fiscal.services.cancelar_nota_fiscal(nota, motivo, usuario)`.
+- Rota de gestão: `/gestao/pedidos/<pk>/cancelar/` com escolha do caminho e
+  justificativa. O endpoint genérico de status recusa cancelar pedido pago.
 
 ## Regras de estoque
 

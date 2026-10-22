@@ -610,6 +610,11 @@ def alterar_status_operacional(
         pedidos_visiveis_para(usuario).select_for_update(), pk=pedido_id
     )
     if novo_status == Pedido.Status.CANCELADO:
+        if pedido.status_financeiro == Pedido.StatusFinanceiro.PAGO:
+            raise ValidationError(
+                "Pedido pago deve ser cancelado pelo fluxo de cancelamento "
+                "padrão ou devolução."
+            )
         return cancelar_pedido(pedido, request=request, usuario=usuario)
     pedido.transicionar(novo_status, request=request, usuario=usuario)
     return pedido
@@ -1423,8 +1428,9 @@ def estornar_pagamento(
     request=None,
 ) -> Pedido:
     """Estorna o pagamento e registra a data do evento financeiro."""
-    pagamento = Pagamento.objects.select_for_update().get(pk=pagamento.pk)
+    # Ordem global: pedido -> pagamento (evita deadlock com cancelamentos).
     pedido = Pedido.objects.select_for_update().get(pk=pagamento.pedido_id)
+    pagamento = Pagamento.objects.select_for_update().get(pk=pagamento.pk)
     if pagamento.status not in (
         Pagamento.Status.APROVADO,
         Pagamento.Status.CANCELADO,
@@ -1604,21 +1610,35 @@ def registrar_devolucao(
         return existente
     if pedido.status_financeiro != Pedido.StatusFinanceiro.PAGO:
         raise ValidationError("Só pedidos pagos podem ser devolvidos.")
-    nota_saida = pedido.nota_fiscal
-    if nota_saida is None or not nota_saida.chave_acesso:
+    pagamento = getattr(pedido, "pagamento", None)
+    if (
+        pagamento is None
+        or pagamento.status != Pagamento.Status.APROVADO
+        or pagamento.aprovado_em is None
+    ):
         raise ValidationError(
-            "NF-e de saída com chave é obrigatória para registrar devolução."
+            "Devolução exige pagamento aprovado e conciliado."
+        )
+    nota_saida = pedido.nota_fiscal
+    if nota_saida is None or nota_saida.status != "autorizada":
+        raise ValidationError(
+            "NF-e de saída autorizada é obrigatória para registrar devolução."
+        )
+    chave_saida = (nota_saida.chave_acesso or "").strip()
+    if len(chave_saida) != 44 or not chave_saida.isdigit():
+        raise ValidationError(
+            "A NF-e de saída deve ter chave de acesso de 44 dígitos."
         )
     cfop_inverso = calcular_cfop_inverso(nota_saida.cfop)
-    nota_entrada, _criada = NotaFiscal.objects.get_or_create(
+    nota_entrada = NotaFiscal(
         pedido=pedido,
         tipo=NotaFiscal.Tipo.ENTRADA,
-        defaults={
-            "cfop": cfop_inverso,
-            "chave_referenciada": nota_saida.chave_acesso,
-            "status": NotaFiscal.Status.PENDENTE,
-        },
+        cfop=cfop_inverso,
+        chave_referenciada=chave_saida,
+        status=NotaFiscal.Status.PENDENTE,
     )
+    nota_entrada.full_clean()
+    nota_entrada.save()
 
     _devolver_estoque_do_pedido(
         pedido,
@@ -1774,6 +1794,10 @@ def cancelar_pedido(
             motivo="cancelamento antes do pagamento",
         )
         _cancelar_obrigacoes_estoque(pedido)
+
+    if pedido.cancelado_em is None:
+        pedido.cancelado_em = timezone.now()
+        pedido.save(update_fields=["cancelado_em", "atualizado_em"])
 
     from .emails import email_pedido_cancelado
 

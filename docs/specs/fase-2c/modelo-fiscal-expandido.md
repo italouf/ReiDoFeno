@@ -25,6 +25,11 @@ NF-e de entrada referenciada, com CFOP inverso e trilha de auditoria.
 - tabela explícita para 5.101–5.110, 6.101–6.103 e 7.101–7.102;
 - regra geral: 5→1, 6→2, 7→3;
 - CFOP fora dessas operações de saída é rejeitado.
+- A saída emitida pelo sistema recebe CFOP 5.102 (interna) ou 6.102
+  (interestadual) quando ainda estiver vazio; o formulário manual permite
+  informar e usa o mesmo default.
+- A NF-e de entrada/devolução só é criada a partir de saída autorizada, com
+  chave de 44 dígitos, e passa por `full_clean()` antes de persistir.
 
 ## Testes
 

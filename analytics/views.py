@@ -61,8 +61,8 @@ class RelatorioVendasProdutoView(
         fim = parse_date(self.request.GET.get("fim") or "") or hoje
         unidade_id = self.request.GET.get("unidade") or ""
         unidade = None
-        if unidade_id:
-            unidade = Unidade.objects.filter(pk=unidade_id).first()
+        if unidade_id.isdigit():
+            unidade = Unidade.objects.filter(pk=int(unidade_id)).first()
         return inicio, fim, unidade
 
     def get_context_data(self, **kwargs):

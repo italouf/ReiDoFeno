@@ -24,13 +24,15 @@ from customers.models import Cliente
 
 from .cart import Carrinho
 from .emails import email_pedido_criado
-from .forms import CheckoutForm
+from .forms import CancelamentoForm, CheckoutForm
 from .models import Pagamento, Pedido
 from .services import (
     ResultadoPagamentoInvalido,
     alterar_status_operacional,
+    cancelar_pedido_padrao,
     criar_pedido_do_carrinho,
     pedidos_visiveis_para,
+    registrar_devolucao,
 )
 
 logger = logging.getLogger(__name__)
@@ -623,8 +625,10 @@ class PedidoInternoDetailView(LoginRequiredMixin, GrupoRequiredMixin, DetailView
     grupos_permitidos = GRUPOS_INTERNOS
 
     def get_queryset(self):
-        return pedidos_visiveis_para(self.request.user).select_related(
-            "cliente", "unidade"
+        return (
+            pedidos_visiveis_para(self.request.user)
+            .select_related("cliente", "unidade")
+            .prefetch_related("itens", "notas_fiscais")
         )
 
     def get_context_data(self, **kwargs):
@@ -640,6 +644,56 @@ class PedidoInternoDetailView(LoginRequiredMixin, GrupoRequiredMixin, DetailView
             for valor in sorted(permitidos)
         ]
         return contexto
+
+
+class PedidoCancelamentoView(
+    LoginRequiredMixin, GrupoRequiredMixin, FormView
+):
+    """Workflow de cancelamento padrão e devolução fiscal."""
+
+    template_name = "sales/pedido_cancelamento_form.html"
+    form_class = CancelamentoForm
+    grupos_permitidos = GRUPOS_INTERNOS
+
+    def dispatch(self, request, *args, **kwargs):
+        if not request.user.is_authenticated:
+            return self.handle_no_permission()
+        self.pedido = get_object_or_404(
+            pedidos_visiveis_para(request.user), pk=self.kwargs["pk"]
+        )
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_context_data(self, **kwargs):
+        contexto = super().get_context_data(**kwargs)
+        contexto["pedido"] = self.pedido
+        return contexto
+
+    def form_valid(self, form):
+        try:
+            if form.cleaned_data["tipo"] == Pedido.TipoCancelamento.PADRAO:
+                cancelar_pedido_padrao(
+                    pedido=self.pedido,
+                    justificativa=form.cleaned_data["justificativa"],
+                    usuario=self.request.user,
+                    request=self.request,
+                )
+            else:
+                registrar_devolucao(
+                    pedido=self.pedido,
+                    justificativa=form.cleaned_data["justificativa"],
+                    usuario=self.request.user,
+                    request=self.request,
+                )
+        except ValidationError as erro:
+            form.add_error(None, erro.message)
+            return self.form_invalid(form)
+        messages.success(
+            self.request,
+            f"Cancelamento registrado para o pedido {self.pedido.numero}.",
+        )
+        return redirect(
+            "sales:pedido_interno_detail", pk=self.pedido.pk
+        )
 
 
 class PedidoAtualizarStatusView(LoginRequiredMixin, GrupoRequiredMixin, View):

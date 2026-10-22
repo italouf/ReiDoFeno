@@ -10,8 +10,24 @@
       <dd>{{ pedidos_hoje }}</dd>
     </div>
     <div class="numero-bloco">
-      <dt>Vendas totais</dt>
+      <dt>Receita do mês</dt>
       <dd>R$ {{ vendas_total|floatformat:2 }}</dd>
+    </div>
+    <div class="numero-bloco">
+      <dt>Pedidos pagos</dt>
+      <dd>{{ num_pedidos }}</dd>
+    </div>
+    <div class="numero-bloco">
+      <dt>CMV do mês</dt>
+      <dd>R$ {{ cmv_total|floatformat:2 }}</dd>
+    </div>
+    <div class="numero-bloco">
+      <dt>Lucro bruto</dt>
+      <dd>R$ {{ lucro_bruto|floatformat:2 }}</dd>
+    </div>
+    <div class="numero-bloco">
+      <dt>Despesas atribuídas</dt>
+      <dd>R$ {{ despesas_total|floatformat:2 }}</dd>
     </div>
     <div class="numero-bloco">
       <dt>Clientes atendidos</dt>

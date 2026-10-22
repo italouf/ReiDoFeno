@@ -20,10 +20,12 @@ Base: `a314a74` (merge da Fase 2B)
 
 ## Validação
 
-- Suíte local completa (SQLite): **575 passed, 15 skipped, 240 subtests**.
+- Suíte local completa (SQLite): **598 passed, 16 skipped, 240 subtests**.
 - Cobertura:
-  - `analytics/services.py`: **97,87%**;
-  - `sales/services.py`: **85,02%**.
+  - `analytics/services.py`: **98,70%**;
+  - `sales/services.py`: **85,22%**.
+- Gate histórico `0001 → HEAD` validado em SQLite descartável com
+  `validar_migracao_legado --criar/--verificar`.
 - `ruff check .`: limpo.
 - `python manage.py check`: sem issues.
 - `python manage.py makemigrations --check --dry-run`: sem mudanças.
@@ -32,6 +34,28 @@ Base: `a314a74` (merge da Fase 2B)
 - **Pendente de CI:** a suíte PostgreSQL 15 + Redis não foi executada neste
   ambiente local. Os testes marcados `postgres` permanecem pulados no SQLite,
   como nas fases anteriores; o workflow de CI já contém o serviço PostgreSQL.
+  Foi adicionado um teste PostgreSQL de concorrência entre cancelamento
+  padrão e estorno direto para validar a ordem de locks pedido→pagamento.
+
+## Correções da revisão final
+
+- Gate histórico de migração corrigido: fixture da `sales/0001` não envia
+  campo que só existe em `0014`; `--criar/--verificar` passou em banco
+  descartável.
+- Receita, CMV, top produtos, relatório por produto, comparativo e relatório
+  fiscal passaram a compartilhar a mesma semântica de eventos: aprovação
+  positiva e estorno/devolução negativa na data do evento.
+- Cancelamento pago foi removido do endpoint genérico; nova rota
+  `/gestao/pedidos/<pk>/cancelar/` expõe os dois caminhos.
+- Saída fiscal recebe CFOP 5.102/6.102 quando emitida pelo sistema ou manual;
+  devolução exige saída autorizada, chave de 44 dígitos e nota de entrada
+  validada por `full_clean()`.
+- Emissor é redirecionado para o relatório fiscal após registrar nota, e o
+  pós-login/navegação aponta cada papel para uma rota permitida.
+- Pedidos legados recebem backfill de `uf_entrega`/`interestadual`; despesas
+  podem ser atribuídas a um responsável no formulário.
+- Ordem de locks padronizada em pedido→pagamento, com teste PostgreSQL de
+  concorrência entre cancelamento padrão e estorno.
 
 ## Decisões e limites registrados
 

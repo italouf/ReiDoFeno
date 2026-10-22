@@ -32,6 +32,11 @@ Foi adicionado `Pagamento.estornado_em`. A transição para `CANCELADO` a partir
 de `APROVADO` grava esse campo, seja por chargeback/refund do provedor, seja
 por estorno operacional.
 
+O CMV segue a mesma competência de evento: entra positivo na aprovação e é
+revertido negativamente em `Pedido.cancelado_em` quando há cancelamento
+padrão ou devolução. Assim, uma venda de janeiro devolvida em fevereiro mantém
+receita e CMV em janeiro e registra os dois negativos em fevereiro.
+
 ## Alternativas consideradas
 
 1. **Manter receita por `Pedido.status`.** Rejeitada: não distingue pagamento

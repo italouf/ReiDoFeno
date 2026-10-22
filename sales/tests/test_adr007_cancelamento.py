@@ -8,6 +8,7 @@ from django.contrib.auth.models import Group
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.test import TestCase
+from django.urls import reverse
 from django.utils import timezone
 
 from accounts.models import Usuario
@@ -17,9 +18,14 @@ from core.models import LogAuditoria
 from fiscal.models import NotaFiscal
 from sales.factories import ItemPedidoFactory, PagamentoFactory, PedidoFactory
 from sales.models import Pagamento, Pedido
-from sales.services import cancelar_pedido_padrao, registrar_devolucao
+from sales.services import (
+    cancelar_pedido_padrao,
+    marcar_pagamento_aprovado,
+    registrar_devolucao,
+)
+from sales.tests.helpers import fluxo_checkout
 from stock.factories import EstoqueFactory
-from stock.models import MovimentoEstoque
+from stock.models import Estoque, MovimentoEstoque
 
 
 class BaseCancelamentoTests(TestCase):
@@ -180,6 +186,27 @@ class CancelamentoPadraoTests(BaseCancelamentoTests):
                 usuario=self.admin,
             )
 
+    def test_cancelamento_padrao_apos_baixa_real_restaura_saldo(self):
+        pedido = fluxo_checkout(self.client, quantidade=2)
+        PagamentoFactory(pedido=pedido, valor=pedido.total)
+        marcar_pagamento_aprovado(pedido)
+        item = pedido.itens.get()
+        estoque = Estoque.objects.get(
+            produto=item.produto, unidade=pedido.unidade
+        )
+        self.assertEqual(
+            estoque.quantidade, Decimal("98.00")
+        )
+
+        cancelar_pedido_padrao(
+            pedido=pedido,
+            justificativa="Mercadoria não saiu da loja",
+            usuario=self.admin,
+        )
+
+        estoque.refresh_from_db()
+        self.assertEqual(estoque.quantidade, Decimal("100.00"))
+
     def test_cancelamento_padrao_devolve_estoque_baixado(self):
         produto = ProdutoFactory(custo=Decimal("10.00"))
         unidade = UnidadeFactory()
@@ -208,6 +235,62 @@ class CancelamentoPadraoTests(BaseCancelamentoTests):
                 unidade=unidade,
                 tipo=MovimentoEstoque.Tipo.ENTRADA_DEVOLUCAO,
                 delta=Decimal("5.00"),
+            ).exists()
+        )
+
+
+class CancelamentoViewTests(BaseCancelamentoTests):
+    def test_view_cancelamento_padrao(self):
+        pedido = self.criar_pedido_pago(
+            aprovado_em=timezone.now() - timedelta(hours=2)
+        )
+        self.client.force_login(self.admin)
+
+        resposta = self.client.post(
+            reverse("sales:pedido_cancelamento", args=[pedido.pk]),
+            {
+                "tipo": Pedido.TipoCancelamento.PADRAO,
+                "justificativa": "Cliente desistiu antes da saída",
+            },
+        )
+
+        self.assertRedirects(
+            resposta,
+            reverse("sales:pedido_interno_detail", args=[pedido.pk]),
+            fetch_redirect_response=False,
+        )
+        pedido.refresh_from_db()
+        self.assertEqual(pedido.tipo_cancelamento, "padrao")
+
+    def test_view_devolucao_cria_nota_entrada(self):
+        pedido = self.criar_pedido_pago(
+            aprovado_em=timezone.now() - timedelta(days=3)
+        )
+        NotaFiscal.objects.create(
+            pedido=pedido,
+            tipo=NotaFiscal.Tipo.SAIDA,
+            status=NotaFiscal.Status.AUTORIZADA,
+            cfop="5.102",
+            chave_acesso="29260812345678901234567890123456789012345678",
+        )
+        self.client.force_login(self.admin)
+
+        resposta = self.client.post(
+            reverse("sales:pedido_cancelamento", args=[pedido.pk]),
+            {
+                "tipo": Pedido.TipoCancelamento.DEVOLUCAO,
+                "justificativa": "Produto devolvido pelo cliente",
+            },
+        )
+
+        self.assertRedirects(
+            resposta,
+            reverse("sales:pedido_interno_detail", args=[pedido.pk]),
+            fetch_redirect_response=False,
+        )
+        self.assertTrue(
+            NotaFiscal.objects.filter(
+                pedido=pedido, tipo=NotaFiscal.Tipo.ENTRADA
             ).exists()
         )
 
@@ -269,6 +352,66 @@ class DevolucaoTests(BaseCancelamentoTests):
 
         estoque.refresh_from_db()
         self.assertEqual(estoque.quantidade, Decimal("15.00"))
+
+    def test_devolucao_rejeita_nfe_pendente(self):
+        pedido = self.criar_pedido_pago(
+            aprovado_em=timezone.now() - timedelta(days=2)
+        )
+        NotaFiscal.objects.create(
+            pedido=pedido,
+            tipo=NotaFiscal.Tipo.SAIDA,
+            status=NotaFiscal.Status.PENDENTE,
+            cfop="5.102",
+            chave_acesso="29260812345678901234567890123456789012345678",
+        )
+
+        with pytest.raises(ValidationError, match="autorizada"):
+            registrar_devolucao(
+                pedido=pedido,
+                justificativa="Devolução",
+                usuario=self.admin,
+            )
+
+    def test_devolucao_rejeita_chave_curta_da_saida(self):
+        pedido = self.criar_pedido_pago(
+            aprovado_em=timezone.now() - timedelta(days=2)
+        )
+        NotaFiscal.objects.create(
+            pedido=pedido,
+            tipo=NotaFiscal.Tipo.SAIDA,
+            status=NotaFiscal.Status.AUTORIZADA,
+            cfop="5.102",
+            chave_acesso="123",
+        )
+
+        with pytest.raises(ValidationError, match="44"):
+            registrar_devolucao(
+                pedido=pedido,
+                justificativa="Devolução",
+                usuario=self.admin,
+            )
+
+    def test_devolucao_exige_pagamento_aprovado(self):
+        pedido = self.criar_pedido_pago(
+            aprovado_em=timezone.now() - timedelta(days=2)
+        )
+        Pagamento.objects.filter(pedido=pedido).update(
+            status=Pagamento.Status.PENDENTE
+        )
+        NotaFiscal.objects.create(
+            pedido=pedido,
+            tipo=NotaFiscal.Tipo.SAIDA,
+            status=NotaFiscal.Status.AUTORIZADA,
+            cfop="5.102",
+            chave_acesso="29260812345678901234567890123456789012345678",
+        )
+
+        with pytest.raises(ValidationError, match="pagamento aprovado"):
+            registrar_devolucao(
+                pedido=pedido,
+                justificativa="Devolução",
+                usuario=self.admin,
+            )
 
     def test_devolucao_exige_nfe_saida(self):
         pedido = self.criar_pedido_pago(

@@ -38,9 +38,10 @@ class PerfilEmissorFiscalTests(TestCase):
                 "numero": "9001",
                 "chave_acesso": "29260812345678901234567890123456789012345678",
             },
+            follow=True,
         )
 
-        self.assertEqual(resposta.status_code, 302)
+        self.assertEqual(resposta.status_code, 200)
         self.assertTrue(
             NotaFiscal.objects.filter(
                 pedido=self.pedido, tipo=NotaFiscal.Tipo.SAIDA

@@ -29,3 +29,12 @@ por venda.
   atual.
 - Itens criados fora do checkout (importações, comandos) devem informar o
   snapshot explicitamente.
+- Cancelamento padrão e devolução geram um evento negativo de CMV na data
+  `Pedido.cancelado_em`, mantendo a coerência com a receita por evento
+  (ADR-016). A reversão usa as quantidades dos itens; se a baixa foi parcial,
+  o valor permanece como melhor evidência disponível até conciliação.
+- A proteção de imutabilidade cobre `save`, `QuerySet.update` e `bulk_update`
+  da aplicação. SQL bruto, `_base_manager` e leitura concorrente seguida de
+  escrita ainda podem contornar a checagem; um trigger PostgreSQL dedicado
+  fica como endurecimento da Fase 3, pois o dado é tratado como confiável
+  dentro do processo Django.

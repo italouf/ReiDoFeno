@@ -1,10 +1,14 @@
 from datetime import date
 from decimal import Decimal
 
+from django.contrib.auth.models import Group
 from django.core.exceptions import ValidationError
+from django.core.management import call_command
 from django.test import TestCase
 
+from accounts.models import Usuario
 from costs.factories import DespesaFactory
+from costs.forms import DespesaForm
 from costs.models import Despesa
 from costs.services import despesas_no_periodo
 
@@ -19,6 +23,32 @@ class DespesaModelTests(TestCase):
         despesa = DespesaFactory.build(valor=Decimal("-1"))
         with self.assertRaises(ValidationError):
             despesa.full_clean()
+
+
+class DespesaFormTests(TestCase):
+    def test_permite_atribuir_responsavel(self):
+        call_command("seed_groups", verbosity=0)
+        vendedor = Usuario.objects.create_user(
+            username="vendedor_despesa", password="senha-forte-123"
+        )
+        vendedor.groups.add(Group.objects.get(name="Vendedor"))
+        form = DespesaForm(
+            data={
+                "categoria": Despesa.Categoria.OPERACIONAL,
+                "tipo": "Frete",
+                "fornecedor": "Transportadora",
+                "fornecedor_cnpj": "",
+                "valor": "100.00",
+                "recorrencia": Despesa.Recorrencia.UNICA,
+                "data": "2026-10-01",
+                "usuario_responsavel": vendedor.pk,
+                "observacao": "",
+            }
+        )
+
+        self.assertTrue(form.is_valid(), form.errors)
+        despesa = form.save()
+        self.assertEqual(despesa.usuario_responsavel, vendedor)
 
 
 class DespesasNoPeriodoTests(TestCase):

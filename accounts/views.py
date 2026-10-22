@@ -31,6 +31,21 @@ class LoginView(auth_views.LoginView):
     redirect_authenticated_user = True
 
 
+class PosLoginView(LoginRequiredMixin, View):
+    """Landing por papel, evitando mandar perfis para uma rota 403."""
+
+    def get(self, request):
+        usuario = request.user
+        grupos = set(usuario.groups.values_list("name", flat=True))
+        if usuario.is_superuser or grupos & {"Administrador", "Gestor"}:
+            return redirect("core:painel")
+        if "Emissor Fiscal" in grupos:
+            return redirect("fiscal:relatorio_fiscal")
+        if "Vendedor" in grupos:
+            return redirect("sales:minhas_metricas")
+        return redirect("/")
+
+
 @method_decorator(
     limitar_com_429(
         key="user",
