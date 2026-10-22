@@ -2,6 +2,7 @@ import csv
 
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.core.exceptions import PermissionDenied
 from django.db import transaction
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect
@@ -18,7 +19,7 @@ from .forms import NotaManualForm
 from .models import NotaFiscal
 from .services import relatorio_fiscal
 
-GRUPOS_FISCAIS = ("Administrador", "Gestor")
+GRUPOS_FISCAIS = ("Administrador", "Gestor", "Emissor Fiscal")
 
 
 class RegistrarNotaManualView(
@@ -31,6 +32,8 @@ class RegistrarNotaManualView(
     grupos_permitidos = GRUPOS_FISCAIS
 
     def dispatch(self, request, *args, **kwargs):
+        if request.user.is_authenticated and not self.tem_acesso(request.user):
+            raise PermissionDenied
         self.pedido = get_object_or_404(Pedido, pk=self.kwargs["pedido_pk"])
         return super().dispatch(request, *args, **kwargs)
 
