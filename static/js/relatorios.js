@@ -16,7 +16,12 @@
     var dpr = window.devicePixelRatio || 1;
     var rect = canvas.parentElement.getBoundingClientRect();
     var width = Math.max(320, rect.width || 640);
-    var height = Number(canvas.getAttribute("height")) || 220;
+    var height = Number(
+      canvas.dataset.logicalHeight ||
+        canvas.getAttribute("height") ||
+        220
+    );
+    canvas.dataset.logicalHeight = String(height);
     canvas.style.width = width + "px";
     canvas.style.height = height + "px";
     canvas.width = Math.round(width * dpr);

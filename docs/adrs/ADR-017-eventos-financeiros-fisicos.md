@@ -37,6 +37,21 @@ Cada fato tem uma competência e um efeito próprios:
 - Estoque só é compensado com `ObrigacaoEstoquePedido.quantidade_baixada`
   comprovada e não compensada; sem evidência, cria-se pendência/`Aviso`.
 
+## Fechamento da reauditoria (R01–R05)
+
+- Primeiro registro fiscal e cancelamento serializam pelo lock do Pedido,
+  na ordem `Pedido → NotaFiscal`; a ausência inicial de nota não é protegida
+  por lock de linha inexistente.
+- Chave de acesso não vazia é globalmente única por constraint condicional;
+  legado duplicado aborta a migração para conciliação, sem escolher vencedor.
+- Retorno legado só é associado por FK explícita ou formato canônico
+  inequívoco; motivo com mais de um pedido permanece em conciliação.
+- Receita financeira, receita de produtos e frete usam a mesma população
+  elegível. Pagamento cancelado sem data de estorno fica em
+  `receita_em_conciliacao`, fora da identidade e sem frete negativo.
+- A altura lógica do canvas é independente do backing store; DPR 2 não
+  acumula escala em resizes.
+
 ## Consequências
 
 - Mesmo período e mesmo escopo reconciliam painel, vendedor, produto,

@@ -5,8 +5,10 @@ Branch: `fase-2c-analytics-fiscal`
 Base: `a314a74` (merge da Fase 2B)
 
 > **Atualização pós-auditoria:** os achados A01–A09 foram corrigidos e
-> validados localmente. Ver `docs/audit/fase-2c-correcao-rastreabilidade.md`
-> e `docs/audit/fase-2c-correcao-validacao.md`. O Gate C (CI remoto
+> validados localmente. A reauditoria R01–R05 também foi tratada; ver
+> `docs/audit/fase-2c-reauditoria-r01-r05.md`,
+> `docs/audit/fase-2c-correcao-rastreabilidade.md` e
+> `docs/audit/fase-2c-correcao-validacao.md`. O Gate C (CI remoto
 > PostgreSQL 15/Redis) e o Gate H (aceite humano) permanecem pendentes.
 
 ## Entregas
@@ -25,11 +27,11 @@ Base: `a314a74` (merge da Fase 2B)
 
 ## Validação
 
-- Suíte local completa (SQLite): **628 passed, 16 skipped, 240 subtests**.
+- Suíte local completa (SQLite): **632 passed, 18 skipped, 240 subtests**.
 - Cobertura:
-  - `analytics/services.py`: **94,79%**;
-  - `sales/services.py`: **84,82%**;
-  - `fiscal/services.py`: **90,20%**.
+  - `analytics/services.py`: **94,95%**;
+  - `sales/services.py`: **84,91%**;
+  - `fiscal/services.py`: **88,20%**.
 - Gate histórico `0001 → HEAD` validado em SQLite descartável com
   `validar_migracao_legado --criar/--verificar`.
 - `ruff check .`: limpo.

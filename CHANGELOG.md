@@ -1,5 +1,27 @@
 # Changelog
 
+## [Fase 2C — reauditoria R01–R05] — 2026-10-22
+
+- **R01:** registro manual de saída relê e trava o Pedido antes da primeira
+  nota, na ordem `Pedido → NotaFiscal`; cancelamento e primeiro registro
+  deixam de intercalar com estado obsoleto.
+- **R02:** chave de acesso não vazia ganha constraint condicional global;
+  migração faz preflight de duplicidades legadas e escritores tratam
+  `IntegrityError` como conflito de formulário.
+- **R03:** associação de retorno legado aceita somente FK explícita ou
+  formatos canônicos com exatamente um `PF...`; texto ambíguo não reverte
+  CMV nem autoriza crédito.
+- **R04:** receita financeira, produtos e frete passam a usar a mesma
+  população elegível; pagamento cancelado sem `estornado_em` fica em
+  `receita_em_conciliacao`, sem frete negativo inventado.
+- **R05:** canvas usa `data-logical-height` estável; DPR 2 não acumula altura
+  em resizes sucessivos.
+- **Validação local:** SQLite 632 passed/18 skipped/240 subtests; cobertura
+  `analytics/services.py` 94,95%, `sales/services.py` 84,91%,
+  `fiscal/services.py` 88,20%; Node test R05 2/2; gate histórico
+  0001→HEAD aprovado. PostgreSQL 15/Redis e R01/R02 concorrentes ficam
+  pendentes de CI no novo SHA; aceite humano pendente.
+
 ## [Fase 2C — correção da auditoria A01–A09] — 2026-10-22
 
 - **A01/A02:** eventos de receita de produtos, estorno financeiro e retorno
@@ -17,10 +39,11 @@
 - **A08:** gráficos deixam CDN/script inline e usam `static/js/relatorios.js`;
   validados em navegador sob CSP padrão.
 - **A09:** workflow de push inclui `fase-2c-analytics-fiscal`.
-- **Validação local:** SQLite 628 passed/16 skipped/240 subtests; cobertura
-  `analytics/services.py` 94,79%, `sales/services.py` 84,82%,
-  `fiscal/services.py` 90,20%; gate histórico 0001→HEAD aprovado; Ruff,
-  check, check --deploy, Bandit 0 medium/high e pip-audit 0.
+- **Validação local daquela correção:** SQLite 628 passed/16 skipped/240
+  subtests; cobertura `analytics/services.py` 94,79%,
+  `sales/services.py` 84,82%, `fiscal/services.py` 90,20%; gate histórico
+  0001→HEAD aprovado; Ruff, check, check --deploy, Bandit 0 medium/high e
+  pip-audit 0.
   PostgreSQL 15 + Redis e CI remoto permanecem pendentes de execução
   autorizada; aceite do cliente também pendente.
 

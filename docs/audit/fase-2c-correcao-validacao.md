@@ -9,11 +9,11 @@ PostgreSQL 15/Redis: **não disponíveis neste ambiente**; CI remoto pendente.
 
 | Verificação | Resultado |
 |---|---|
-| Suíte SQLite | **628 passed, 16 skipped, 240 subtests** |
-| Cobertura total dos módulos medidos | **86,65%** |
-| `analytics/services.py` | **94,79%** |
-| `sales/services.py` | **84,82%** |
-| `fiscal/services.py` | **90,20%** |
+| Suíte SQLite | **632 passed, 18 skipped, 240 subtests** |
+| Cobertura total dos módulos medidos | **86,57%** |
+| `analytics/services.py` | **94,95%** |
+| `sales/services.py` | **84,91%** |
+| `fiscal/services.py` | **88,20%** |
 | `ruff check .` | limpo |
 | `manage.py check` | sem issues |
 | `manage.py makemigrations --check --dry-run` | no changes |
@@ -24,6 +24,18 @@ PostgreSQL 15/Redis: **não disponíveis neste ambiente**; CI remoto pendente.
 
 Os 16 skips são os testes marcados `postgres`/Redis já conhecidos e os testes
 que exigem backend real. Não foram apresentados como aprovados.
+
+## Reauditoria R01–R05
+
+- R01: lock `Pedido → NotaFiscal`, releitura e revalidação; teste PG
+  concorrente marcado, teste sequencial SQLite.
+- R02: constraint condicional de chave, preflight de legado e tratamento de
+  `IntegrityError`; teste PG concorrente marcado.
+- R03: formatos canônicos ancorados; motivo ambíguo não atribui pedido.
+- R04: exclusão compartilhada de pagamento cancelado sem estorno;
+  `receita_em_conciliacao` separada.
+- R05: Node test `static/js/relatorios.test.mjs` 2/2 e browser emulado DPR 2
+  com quatro resizes, CSS 240 px/backing 480 px estáveis.
 
 ## Cenários adicionais A01–A07
 
@@ -69,9 +81,9 @@ desenvolvimento:
   (1008 px em viewport de 1024 px), scripts apenas
   `static/js/relatorios.js` e `static/js/app.js`; zero erros de console/CSP.
   Screenshot: `docs/audit/fase-2c-comparativo-csp.png`.
-- DPI: a correção define largura/altura CSS e backing store com
-  `devicePixelRatio`; a evidência visual foi DPR 1. DPR 2 permanece uma
-  verificação de dispositivo.
+- DPI: browser emulado com `devicePixelRatio=2` e quatro resizes manteve
+  CSS 240 px, backing 480 px e `data-logical-height=240`; o teste Node repete
+  a estabilidade sem acumular escala. Não houve dispositivo físico.
 - Login como Emissor Fiscal: `/fiscal/notas-entrada/` listou a pendência;
   o formulário registrou número 77001/chave/ link, e a lista passou a
   “Autorizada”; nenhuma ação de estoque/pagamento foi repetida.

@@ -14,3 +14,4 @@ class WorkflowCIBranchTests(SimpleTestCase):
         self.assertIn("postgres:15", texto)
         self.assertIn("redis", texto.lower())
         self.assertIn("workflow_dispatch", texto)
+        self.assertIn("node --test static/js/relatorios.test.mjs", texto)
