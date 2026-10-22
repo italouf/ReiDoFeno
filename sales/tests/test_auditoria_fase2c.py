@@ -389,6 +389,35 @@ class A02LegadoTests(BaseAuditoriaTests):
         )
         self.assertEqual(obrigacao.quantidade_baixada, Decimal("2.00"))
 
+    def test_frete_e_receita_de_produtos_ficam_separados(self):
+        pedido = PedidoFactory(
+            status=Pedido.Status.PAGO,
+            subtotal=Decimal("100.00"),
+            frete=Decimal("20.00"),
+            total=Decimal("120.00"),
+        )
+        ItemPedidoFactory(
+            pedido=pedido,
+            quantidade=2,
+            preco_unitario=Decimal("50.00"),
+            custo_unitario=Decimal("30.00"),
+        )
+        PagamentoFactory(
+            pedido=pedido,
+            valor=Decimal("120.00"),
+            status=Pagamento.Status.APROVADO,
+            aprovado_em=timezone.now(),
+        )
+        hoje = timezone.localdate()
+
+        metricas = metricas_do_periodo(hoje, hoje)
+
+        self.assertEqual(metricas["receita"], Decimal("120.00"))
+        self.assertEqual(metricas["receita_produtos"], Decimal("100.00"))
+        self.assertEqual(metricas["receita_frete"], Decimal("20.00"))
+        self.assertEqual(metricas["cmv_total"], Decimal("60.00"))
+        self.assertEqual(metricas["lucro_bruto"], Decimal("40.00"))
+
     def test_estorno_de_aprovacao_tardia_nao_gera_negativo(self):
         pedido = PedidoFactory(
             status=Pedido.Status.CANCELADO,

@@ -9,7 +9,7 @@ PostgreSQL 15/Redis: **não disponíveis neste ambiente**; CI remoto pendente.
 
 | Verificação | Resultado |
 |---|---|
-| Suíte SQLite | **627 passed, 16 skipped, 240 subtests** |
+| Suíte SQLite | **628 passed, 16 skipped, 240 subtests** |
 | Cobertura total dos módulos medidos | **86,65%** |
 | `analytics/services.py` | **94,79%** |
 | `sales/services.py` | **84,82%** |
