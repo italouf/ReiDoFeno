@@ -25,10 +25,11 @@ Base: `a314a74` (merge da Fase 2B)
 
 ## Validação
 
-- Suíte local completa (SQLite): **598 passed, 16 skipped, 240 subtests**.
+- Suíte local completa (SQLite): **628 passed, 16 skipped, 240 subtests**.
 - Cobertura:
-  - `analytics/services.py`: **98,70%**;
-  - `sales/services.py`: **85,22%**.
+  - `analytics/services.py`: **94,79%**;
+  - `sales/services.py`: **84,82%**;
+  - `fiscal/services.py`: **90,20%**.
 - Gate histórico `0001 → HEAD` validado em SQLite descartável com
   `validar_migracao_legado --criar/--verificar`.
 - `ruff check .`: limpo.
