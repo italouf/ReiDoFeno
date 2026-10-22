@@ -71,6 +71,10 @@ class ModeloFiscalTests(TestCase):
         with pytest.raises(ValidationError):
             calcular_cfop_inverso("1.202")
 
+    def test_calcular_cfop_inverso_rejeita_saida_sem_mapeamento(self):
+        with pytest.raises(ValidationError, match="mapeamento"):
+            calcular_cfop_inverso("5.199")
+
     def test_pedido_admite_saida_e_entrada(self):
         pedido = self._pedido()
         saida = self._nota(pedido)

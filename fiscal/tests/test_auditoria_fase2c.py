@@ -1,0 +1,251 @@
+"""Reprodução dos achados A05-A07 da auditoria da Fase 2C."""
+
+from datetime import date, datetime, time
+from decimal import Decimal
+
+from django.contrib.auth.models import Group
+from django.core.management import call_command
+from django.test import TestCase
+from django.urls import reverse
+from django.utils import timezone
+
+from accounts.models import Usuario
+from fiscal.models import NotaFiscal
+from sales.factories import (
+    ItemPedidoFactory,
+    PagamentoFactory,
+    PedidoFactory,
+)
+from sales.models import Pagamento, Pedido
+
+CHAVE_SAIDA = "29260812345678901234567890123456789012345678"
+CHAVE_ENTRADA = "31261098765432109876543210987654321098765432"
+
+
+def _em(dia: date, hora=12):
+    return timezone.make_aware(datetime.combine(dia, time(hora)))
+
+
+class BaseFiscalAuditoriaTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        call_command("seed_groups", verbosity=0)
+        cls.emissor = Usuario.objects.create_user(
+            username="emissor_auditoria", password="senha-forte-123"
+        )
+        cls.emissor.groups.add(Group.objects.get(name="Emissor Fiscal"))
+        cls.gestor = Usuario.objects.create_user(
+            username="gestor_auditoria", password="senha-forte-123"
+        )
+        cls.gestor.groups.add(Group.objects.get(name="Gestor"))
+
+    def _pedido(self, status=Pedido.Status.CONCLUIDO, financeiro=None):
+        pedido = PedidoFactory(
+            status=status,
+            status_financeiro=financeiro or Pedido.StatusFinanceiro.PAGO,
+            financeiro_conciliado=True,
+            subtotal=Decimal("100.00"),
+            total=Decimal("100.00"),
+        )
+        ItemPedidoFactory(
+            pedido=pedido,
+            quantidade=1,
+            preco_unitario=Decimal("100.00"),
+            custo_unitario=Decimal("60.00"),
+        )
+        PagamentoFactory(
+            pedido=pedido,
+            valor=Decimal("100.00"),
+            status=Pagamento.Status.APROVADO,
+            aprovado_em=timezone.now(),
+        )
+        return pedido
+
+
+class A05RegistroEntradaTests(BaseFiscalAuditoriaTests):
+    def _entrada_pendente(self):
+        pedido = self._pedido(
+            financeiro=Pedido.StatusFinanceiro.ESTORNADO
+        )
+        Pagamento.objects.filter(pedido=pedido).update(
+            status=Pagamento.Status.CANCELADO,
+            estornado_em=timezone.now(),
+        )
+        saida = NotaFiscal.objects.create(
+            pedido=pedido,
+            tipo=NotaFiscal.Tipo.SAIDA,
+            status=NotaFiscal.Status.AUTORIZADA,
+            cfop="5.102",
+            chave_acesso=CHAVE_SAIDA,
+        )
+        entrada = NotaFiscal.objects.create(
+            pedido=pedido,
+            tipo=NotaFiscal.Tipo.ENTRADA,
+            status=NotaFiscal.Status.PENDENTE,
+            cfop="1.202",
+            chave_referenciada=saida.chave_acesso,
+        )
+        return pedido, entrada
+
+    def test_emissor_deve_conseguir_registrar_documento_de_entrada(self):
+        pedido, entrada = self._entrada_pendente()
+        self.client.force_login(self.emissor)
+
+        lista = self.client.get(reverse("fiscal:nota_entrada_lista"))
+        self.assertEqual(lista.status_code, 200)
+        self.assertContains(lista, pedido.numero)
+
+        formulario = self.client.get(
+            reverse("fiscal:nota_entrada_registrar", args=[entrada.pk])
+        )
+        self.assertEqual(formulario.status_code, 200)
+
+        resposta = self.client.post(
+            reverse("fiscal:nota_entrada_registrar", args=[entrada.pk]),
+            {
+                "numero": "77001",
+                "chave_acesso": CHAVE_ENTRADA,
+                "link_documento": "https://exemplo.com/entrada.pdf",
+            },
+        )
+        self.assertEqual(resposta.status_code, 302)
+
+        entrada.refresh_from_db()
+        self.assertEqual(entrada.status, NotaFiscal.Status.AUTORIZADA)
+        self.assertEqual(entrada.origem, NotaFiscal.Origem.MANUAL)
+        self.assertEqual(entrada.numero, "77001")
+        self.assertEqual(entrada.chave_acesso, CHAVE_ENTRADA)
+        self.assertEqual(entrada.chave_referenciada, CHAVE_SAIDA)
+
+    def test_entrada_com_referencia_incompativel_e_rejeitada(self):
+        pedido, entrada = self._entrada_pendente()
+        entrada.chave_referenciada = "99999999999999999999999999999999999999999999"
+        entrada.save(update_fields=["chave_referenciada"])
+        self.client.force_login(self.emissor)
+
+        resposta = self.client.post(
+            reverse("fiscal:nota_entrada_registrar", args=[entrada.pk]),
+            {
+                "numero": "77003",
+                "chave_acesso": CHAVE_ENTRADA,
+            },
+        )
+
+        self.assertEqual(resposta.status_code, 200)
+        entrada.refresh_from_db()
+        self.assertEqual(entrada.status, NotaFiscal.Status.PENDENTE)
+
+    def test_registro_de_entrada_nao_repete_estoque_nem_estorno(self):
+        pedido, entrada = self._entrada_pendente()
+        self.client.force_login(self.emissor)
+        self.client.post(
+            reverse("fiscal:nota_entrada_registrar", args=[entrada.pk]),
+            {
+                "numero": "77002",
+                "chave_acesso": CHAVE_ENTRADA,
+            },
+        )
+
+        self.assertEqual(
+            Pagamento.objects.filter(
+                pedido=pedido, estornado_em__isnull=False
+            ).count(),
+            1,
+        )
+        self.assertEqual(NotaFiscal.objects.filter(pedido=pedido).count(), 2)
+
+
+class A06CsvFiscalTests(BaseFiscalAuditoriaTests):
+    def test_csv_fiscal_com_dados_deve_funcionar(self):
+        self._pedido()
+        self.client.force_login(self.emissor)
+
+        resposta = self.client.get(
+            reverse("fiscal:relatorio_fiscal"),
+            {
+                "formato": "csv",
+                "inicio": date.today().isoformat(),
+                "fim": date.today().isoformat(),
+            },
+        )
+
+        self.assertEqual(resposta.status_code, 200)
+        conteudo = resposta.content.decode("utf-8")
+        self.assertIn("aprovacao", conteudo)
+        self.assertIn("100.00", conteudo)
+
+
+class A07CfopTests(BaseFiscalAuditoriaTests):
+    def _nota_autorizada(self, cfop="5.102"):
+        pedido = self._pedido()
+        return NotaFiscal.objects.create(
+            pedido=pedido,
+            tipo=NotaFiscal.Tipo.SAIDA,
+            status=NotaFiscal.Status.AUTORIZADA,
+            origem=NotaFiscal.Origem.MANUAL,
+            cfop=cfop,
+            numero="123",
+            chave_acesso=CHAVE_SAIDA,
+        )
+
+    def test_cfop_de_nota_autorizada_nao_deve_ser_reescrito_silenciosamente(self):
+        nota = self._nota_autorizada()
+        self.client.force_login(self.gestor)
+
+        resposta = self.client.post(
+            reverse("fiscal:nota_manual", args=[nota.pedido_id]),
+            {
+                "numero": nota.numero,
+                "chave_acesso": nota.chave_acesso,
+                "cfop": "5.101",
+            },
+        )
+
+        self.assertEqual(resposta.status_code, 200)
+        nota.refresh_from_db()
+        self.assertEqual(nota.cfop, "5.102")
+
+    def test_saneamento_de_legado_apos_estorno_e_permitido(self):
+        nota = self._nota_autorizada(cfop="")
+        pedido = nota.pedido
+        pedido.status_financeiro = Pedido.StatusFinanceiro.ESTORNADO
+        pedido.save(update_fields=["status_financeiro"])
+        Pagamento.objects.filter(pedido=pedido).update(
+            status=Pagamento.Status.CANCELADO,
+            estornado_em=timezone.now(),
+        )
+        self.client.force_login(self.gestor)
+
+        resposta = self.client.post(
+            reverse("fiscal:nota_manual", args=[pedido.pk]),
+            {
+                "numero": nota.numero,
+                "chave_acesso": nota.chave_acesso,
+                "cfop": "5.102",
+                "motivo_retificacao": "Saneamento após estorno",
+                "evidencia_retificacao": "https://exemplo.com/evidencia",
+            },
+        )
+
+        self.assertEqual(resposta.status_code, 302)
+        nota.refresh_from_db()
+        self.assertEqual(nota.cfop, "5.102")
+
+    def test_saneamento_autorizado_de_cfop_legado_e_auditado(self):
+        nota = self._nota_autorizada(cfop="")
+        self.client.force_login(self.gestor)
+
+        resposta = self.client.post(
+            reverse("fiscal:nota_manual", args=[nota.pedido_id]),
+            {
+                "numero": nota.numero,
+                "chave_acesso": nota.chave_acesso,
+                "cfop": "5.102",
+                "motivo_retificacao": "Saneamento de metadado legado",
+                "evidencia_retificacao": "https://exemplo.com/evidencia",
+            },
+        )
+
+        self.assertEqual(resposta.status_code, 302)
+        nota.refresh_from_db()
+        self.assertEqual(nota.cfop, "5.102")

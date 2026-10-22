@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Notas de entrada — Rei do Feno{% endblock %}
+{% block content %}
+{% include "components/cabecalho_pagina.html" with titulo="Notas de entrada/devolução" descricao="Documentos fiscais de devolução pendentes ou registrados." %}
+
+<p><a class="btn btn--secundario" href="{% url 'fiscal:relatorio_fiscal' %}">Voltar ao relatório fiscal</a></p>
+
+{% if notas %}
+<div class="tabela-envolve">
+  <table class="tabela">
+    <thead>
+      <tr>
+        <th scope="col">Pedido</th>
+        <th scope="col">Cliente</th>
+        <th scope="col">CFOP</th>
+        <th scope="col">Chave referenciada</th>
+        <th scope="col">Status</th>
+        <th scope="col">Número</th>
+        <th scope="col"><span class="visually-hidden">Ações</span></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for nota in notas %}
+      <tr>
+        <td>{{ nota.pedido.numero }}</td>
+        <td>{{ nota.pedido.cliente.nome }}</td>
+        <td>{{ nota.cfop|default:"—" }}</td>
+        <td>{{ nota.chave_referenciada|default:"—" }}</td>
+        <td>{{ nota.get_status_display }}</td>
+        <td>{{ nota.numero|default:"—" }}</td>
+        <td><a class="btn btn--secundario btn--pequeno" href="{% url 'fiscal:nota_entrada_registrar' nota.pk %}">Registrar documento</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+{% include "components/estado_vazio.html" with icone="i-documento" titulo="Nenhuma nota de entrada registrada." descricao="Devoluções registradas no pedido aparecem aqui." %}
+{% endif %}
+{% endblock %}

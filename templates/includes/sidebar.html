@@ -25,6 +25,9 @@ Itens visíveis por papel; a autorização continua no servidor.
       <a class="menu-item" href="{% url 'fiscal:relatorio_fiscal' %}" {% if request.resolver_match.view_name == 'fiscal:relatorio_fiscal' %}aria-current="page"{% endif %}>
         <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-documento"/></svg>Relatório fiscal
       </a>
+      <a class="menu-item" href="{% url 'fiscal:nota_entrada_lista' %}" {% if request.resolver_match.view_name in 'fiscal:nota_entrada_lista fiscal:nota_entrada_registrar' %}aria-current="page"{% endif %}>
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-documento"/></svg>Notas de entrada
+      </a>
       {% endif %}
       {% if pode_painel_global %}
       <a class="menu-item" href="{% url 'analytics:aviso_lista' %}" {% if request.resolver_match.view_name == 'analytics:aviso_lista' %}aria-current="page"{% endif %}>

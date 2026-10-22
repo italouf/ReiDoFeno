@@ -49,8 +49,10 @@ def calcular_cfop_inverso(cfop: str) -> str:
     com_ponto = f"{normalizado[0]}.{normalizado[1:]}"
     if com_ponto in CFOP_INVERSO:
         return CFOP_INVERSO[com_ponto]
-    prefixo = {"5": "1", "6": "2", "7": "3"}[normalizado[0]]
-    return f"{prefixo}.{normalizado[1:]}"
+    raise ValidationError(
+        "CFOP de saída sem mapeamento de devolução validado pelo responsável "
+        "fiscal."
+    )
 
 
 # Compatibilidade com o nome interno previsto na especificação da Fase 2C.

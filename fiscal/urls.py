@@ -11,6 +11,16 @@ urlpatterns = [
         name="nota_manual",
     ),
     path(
+        "notas-entrada/",
+        views.NotaEntradaListView.as_view(),
+        name="nota_entrada_lista",
+    ),
+    path(
+        "notas-entrada/<int:pk>/registrar/",
+        views.RegistrarNotaEntradaView.as_view(),
+        name="nota_entrada_registrar",
+    ),
+    path(
         "relatorios/",
         views.RelatorioFiscalView.as_view(),
         name="relatorio_fiscal",
