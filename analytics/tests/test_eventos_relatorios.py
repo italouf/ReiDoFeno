@@ -2,6 +2,7 @@
 
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
+from unittest import mock
 
 from django.test import TestCase
 from django.utils import timezone
@@ -16,7 +17,8 @@ from catalog.factories import ProdutoFactory
 from core.factories import UnidadeFactory
 from fiscal.services import relatorio_fiscal
 from sales.factories import ItemPedidoFactory, PagamentoFactory, PedidoFactory
-from sales.models import Pagamento, Pedido
+from sales.models import ObrigacaoEstoquePedido, Pagamento, Pedido
+from stock.models import MovimentoEstoque
 
 
 def _em(dia: date):
@@ -62,6 +64,25 @@ class EventosReceitaCmvTests(TestCase):
                 "cancelado_em",
             ]
         )
+        obrigacao = ObrigacaoEstoquePedido.objects.create(
+            pedido=self.pedido,
+            produto=self.produto,
+            unidade=self.unidade,
+            quantidade_devida=Decimal("2.00"),
+            quantidade_baixada=Decimal("2.00"),
+            status=ObrigacaoEstoquePedido.Status.RESOLVIDA,
+        )
+        with mock.patch(
+            "django.utils.timezone.now",
+            return_value=_em(date(2026, 2, 5)),
+        ):
+            MovimentoEstoque.objects.create(
+                produto=self.produto,
+                unidade=self.unidade,
+                tipo=MovimentoEstoque.Tipo.ENTRADA_DEVOLUCAO,
+                delta=Decimal("2.00"),
+                obrigacao=obrigacao,
+            )
 
     def test_cmv_e_lucro_permanecem_na_competencia_original(self):
         self._devolver_em_fevereiro()

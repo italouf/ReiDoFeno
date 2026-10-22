@@ -16,6 +16,7 @@ from django.utils import timezone
 
 from costs.services import despesas_no_periodo
 from sales.models import ItemPedido, Pagamento, Pedido
+from stock.models import MovimentoEstoque
 
 STATUS_AGUARDANDO = (
     Pedido.Status.AGUARDANDO_PAGAMENTO,
@@ -26,12 +27,6 @@ STATUS_FINANCEIROS_COM_RECEITA = (
     Pedido.StatusFinanceiro.ESTORNADO,
     Pedido.StatusFinanceiro.CANCELADO,
 )
-TIPOS_DEVOLUCAO = (
-    Pedido.TipoCancelamento.PADRAO,
-    Pedido.TipoCancelamento.DEVOLUCAO,
-)
-
-
 def _janela(inicio: date, fim: date):
     tz = timezone.get_current_timezone()
     começo = datetime.combine(inicio, time.min, tzinfo=tz)
@@ -76,16 +71,10 @@ def pagamentos_estornados(inicio: date, fim: date, vendedor=None):
 
 def _itens_vendidos(inicio: date, fim: date, vendedor=None):
     começo, término = _janela(inicio, fim)
-    query = (
-        ItemPedido.objects.filter(
-            pedido__pagamento__aprovado_em__range=(começo, término),
-            pedido__pagamento__aprovado_em__isnull=False,
-            pedido__status_financeiro__in=STATUS_FINANCEIROS_COM_RECEITA,
-        )
-        .exclude(
-            pedido__status=Pedido.Status.CANCELADO,
-            pedido__tipo_cancelamento__isnull=True,
-        )
+    query = ItemPedido.objects.filter(
+        pedido__pagamento__aprovado_em__range=(começo, término),
+        pedido__pagamento__aprovado_em__isnull=False,
+        pedido__status_financeiro__in=STATUS_FINANCEIROS_COM_RECEITA,
     )
     query = _excluir_aprovacao_pos_cancelamento(
         query, "pedido__pagamento__aprovado_em"
@@ -97,20 +86,62 @@ def _itens_vendidos(inicio: date, fim: date, vendedor=None):
     )
 
 
-def _itens_devolvidos(inicio: date, fim: date, vendedor=None):
+def _movimentos_devolucao(inicio: date, fim: date, vendedor=None):
+    """Retornos físicos comprovados por movimentos de devolução."""
     começo, término = _janela(inicio, fim)
-    query = ItemPedido.objects.filter(
-        pedido__cancelado_em__range=(começo, término),
-        pedido__cancelado_em__isnull=False,
-        pedido__tipo_cancelamento__in=TIPOS_DEVOLUCAO,
+    query = MovimentoEstoque.objects.filter(
+        tipo=MovimentoEstoque.Tipo.ENTRADA_DEVOLUCAO,
+        delta__gt=Decimal("0.00"),
+        criado_em__range=(começo, término),
+        obrigacao__isnull=False,
     )
     if vendedor is not None:
-        query = query.filter(pedido__usuario_criador=vendedor)
-    return query.select_related("pedido__unidade", "produto")
+        query = query.filter(
+            obrigacao__pedido__usuario_criador=vendedor
+        )
+    return query.select_related(
+        "produto", "unidade", "obrigacao__pedido"
+    )
+
+
+def _custo_medio_item(pedido, produto) -> Decimal:
+    """Custo unitário médio dos itens do pedido para um produto."""
+    itens = ItemPedido.objects.filter(pedido=pedido, produto=produto)
+    quantidade = sum(
+        (item.quantidade for item in itens), Decimal("0.00")
+    )
+    if quantidade <= 0:
+        return Decimal("0.00")
+    custo = sum(
+        (
+            item.custo_unitario * item.quantidade
+            for item in itens
+        ),
+        Decimal("0.00"),
+    )
+    return custo / quantidade
+
+
+def _linha(linhas, *, produto_id, produto, unidade_id, unidade, dia):
+    chave = (produto_id, produto, unidade_id, unidade, dia)
+    return linhas.setdefault(
+        chave,
+        {
+            "quantidade": Decimal("0.00"),
+            "quantidade_devolvida": Decimal("0.00"),
+            "receita": Decimal("0.00"),
+            "cmv": Decimal("0.00"),
+        },
+    )
 
 
 def _linhas_itens(inicio: date, fim: date, unidade=None, vendedor=None):
-    """Linhas de item com sinal: venda positiva, devolução negativa."""
+    """Eventos de item: venda, estorno financeiro e retorno físico.
+
+    A venda reconhece receita, quantidade financeira e CMV. O estorno
+    financeiro reduz receita/quantidade, mas não o CMV. O retorno físico
+    reduz apenas o CMV e alimenta a quantidade devolvida.
+    """
     linhas = {}
 
     vendidos = _itens_vendidos(inicio, fim, vendedor=vendedor)
@@ -120,48 +151,55 @@ def _linhas_itens(inicio: date, fim: date, unidade=None, vendedor=None):
         dia = timezone.localtime(
             item.pedido.pagamento.aprovado_em
         ).date()
-        chave = (
-            item.produto_id,
-            item.produto_nome,
-            item.pedido.unidade_id,
-            item.pedido.unidade.nome,
-            dia,
-        )
-        linha = linhas.setdefault(
-            chave,
-            {
-                "quantidade": Decimal("0.00"),
-                "receita": Decimal("0.00"),
-                "cmv": Decimal("0.00"),
-            },
+        linha = _linha(
+            linhas,
+            produto_id=item.produto_id,
+            produto=item.produto_nome,
+            unidade_id=item.pedido.unidade_id,
+            unidade=item.pedido.unidade.nome,
+            dia=dia,
         )
         linha["quantidade"] += item.quantidade
         linha["receita"] += item.subtotal
         linha["cmv"] += item.custo_unitario * item.quantidade
 
-    devolvidos = _itens_devolvidos(inicio, fim, vendedor=vendedor)
+    estornos = pagamentos_estornados(inicio, fim, vendedor=vendedor)
+    for pagamento in estornos:
+        itens = ItemPedido.objects.filter(pedido=pagamento.pedido)
+        if unidade is not None:
+            itens = itens.filter(pedido__unidade=unidade)
+        dia = timezone.localtime(pagamento.estornado_em).date()
+        for item in itens:
+            linha = _linha(
+                linhas,
+                produto_id=item.produto_id,
+                produto=item.produto_nome,
+                unidade_id=pagamento.pedido.unidade_id,
+                unidade=pagamento.pedido.unidade.nome,
+                dia=dia,
+            )
+            linha["quantidade"] -= item.quantidade
+            linha["receita"] -= item.subtotal
+
+    devolvidos = _movimentos_devolucao(
+        inicio, fim, vendedor=vendedor
+    )
     if unidade is not None:
-        devolvidos = devolvidos.filter(pedido__unidade=unidade)
-    for item in devolvidos:
-        dia = timezone.localtime(item.pedido.cancelado_em).date()
-        chave = (
-            item.produto_id,
-            item.produto_nome,
-            item.pedido.unidade_id,
-            item.pedido.unidade.nome,
-            dia,
+        devolvidos = devolvidos.filter(unidade=unidade)
+    for movimento in devolvidos:
+        pedido = movimento.obrigacao.pedido
+        custo_unitario = _custo_medio_item(pedido, movimento.produto)
+        dia = timezone.localtime(movimento.criado_em).date()
+        linha = _linha(
+            linhas,
+            produto_id=movimento.produto_id,
+            produto=movimento.produto.nome,
+            unidade_id=movimento.unidade_id,
+            unidade=movimento.unidade.nome,
+            dia=dia,
         )
-        linha = linhas.setdefault(
-            chave,
-            {
-                "quantidade": Decimal("0.00"),
-                "receita": Decimal("0.00"),
-                "cmv": Decimal("0.00"),
-            },
-        )
-        linha["quantidade"] -= item.quantidade
-        linha["receita"] -= item.subtotal
-        linha["cmv"] -= item.custo_unitario * item.quantidade
+        linha["quantidade_devolvida"] += movimento.delta
+        linha["cmv"] -= custo_unitario * movimento.delta
 
     resultado = []
     for (
@@ -188,6 +226,7 @@ def _linhas_itens(inicio: date, fim: date, unidade=None, vendedor=None):
                 "unidade": unidade_nome,
                 "dia": dia,
                 "quantidade": valores["quantidade"],
+                "quantidade_devolvida": valores["quantidade_devolvida"],
                 "receita": valores["receita"],
                 "cmv": valores["cmv"],
                 "lucro_bruto": valores["receita"] - valores["cmv"],
@@ -235,6 +274,7 @@ def metricas_do_periodo(
     cmv_total = sum(
         (linha["cmv"] for linha in linhas), Decimal("0.00")
     )
+    receita_frete = total_vendas - receita_produtos
     lucro_bruto = receita_produtos - cmv_total
 
     produtos = {}
@@ -274,10 +314,11 @@ def metricas_do_periodo(
         "pedidos_vendidos": pedidos_vendidos,
         "top_produtos": top_produtos,
         "receita_produtos": receita_produtos,
+        "receita_frete": receita_frete,
         "cmv_total": cmv_total,
         "lucro_bruto": lucro_bruto,
         "despesas_total": despesas_total,
-        "lucro_estimado": lucro_bruto - despesas_total,
+        "lucro_estimado": total_vendas - cmv_total - despesas_total,
         "aguardando_pagamento": aguardando.select_related(
             "cliente", "unidade"
         ),
@@ -316,10 +357,18 @@ def comparativo_unidades(inicio: date, fim: date) -> list[dict]:
         linha["pedido__unidade_id"]: linha["total"] for linha in estornos
     }
     cmv_por_unidade = {}
+    receita_produtos_por_unidade = {}
     for linha in _linhas_itens(inicio, fim):
-        cmv_por_unidade[linha["unidade_id"]] = (
-            cmv_por_unidade.get(linha["unidade_id"], Decimal("0.00"))
+        unidade_id = linha["unidade_id"]
+        cmv_por_unidade[unidade_id] = (
+            cmv_por_unidade.get(unidade_id, Decimal("0.00"))
             + linha["cmv"]
+        )
+        receita_produtos_por_unidade[unidade_id] = (
+            receita_produtos_por_unidade.get(
+                unidade_id, Decimal("0.00")
+            )
+            + linha["receita"]
         )
 
     resultado = []
@@ -332,12 +381,17 @@ def comparativo_unidades(inicio: date, fim: date) -> list[dict]:
         )
         num_pedidos = dados.get("num_pedidos") or 0
         custo = cmv_por_unidade.get(unidade.pk) or Decimal("0.00")
+        receita_produtos = (
+            receita_produtos_por_unidade.get(unidade.pk)
+            or Decimal("0.00")
+        )
         resultado.append(
             {
                 "unidade": unidade.nome,
                 "receita": receita,
+                "receita_produtos": receita_produtos,
                 "cmv": custo,
-                "lucro_bruto": receita - custo,
+                "lucro_bruto": receita_produtos - custo,
                 "num_pedidos": num_pedidos,
                 "ticket_medio": (
                     receita / num_pedidos
