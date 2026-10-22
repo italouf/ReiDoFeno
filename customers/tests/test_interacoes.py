@@ -4,12 +4,17 @@ from django.contrib.auth.models import Group
 from django.core.management import call_command
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from accounts.models import Usuario
 from customers.factories import ClienteFactory
 from customers.models import InteracaoVendedor
-from sales.factories import ItemPedidoFactory, PedidoFactory
-from sales.models import Pedido
+from sales.factories import (
+    ItemPedidoFactory,
+    PagamentoFactory,
+    PedidoFactory,
+)
+from sales.models import Pagamento, Pedido
 
 
 class InteracaoVendedorTests(TestCase):
@@ -62,6 +67,12 @@ class MetricasVendedorTests(TestCase):
         ItemPedidoFactory(pedido=pedido, preco_unitario=Decimal(total),
                           quantidade=Decimal("1"))
         pedido.recalcular_totais()
+        PagamentoFactory(
+            pedido=pedido,
+            valor=Decimal(total),
+            status=Pagamento.Status.APROVADO,
+            aprovado_em=timezone.now(),
+        )
         return pedido
 
     def test_metricas_isoladas_por_vendedor(self):
@@ -78,6 +89,12 @@ class MetricasVendedorTests(TestCase):
     def test_cancelados_fora_das_vendas_totais(self):
         cancelado = self._criar_pedido(self.vendedores["vend_a"],
                                        status=Pedido.Status.PAGO)
+        pagamento = cancelado.pagamento
+        pagamento.status = Pagamento.Status.CANCELADO
+        pagamento.estornado_em = timezone.now()
+        pagamento.save(update_fields=["status", "estornado_em"])
+        cancelado.status_financeiro = Pedido.StatusFinanceiro.ESTORNADO
+        cancelado.save(update_fields=["status_financeiro"])
         cancelado.transicionar(Pedido.Status.CANCELADO)
         self._criar_pedido(self.vendedores["vend_a"], total="50.00")
 

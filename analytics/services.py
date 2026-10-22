@@ -53,11 +53,14 @@ def receita_do_periodo(inicio: date, fim: date) -> Decimal:
     return receitas - estornos
 
 
-def metricas_do_periodo(inicio: date, fim: date) -> dict:
+def metricas_do_periodo(
+    inicio: date, fim: date, vendedor=None
+) -> dict:
     """Vendas, top produtos, despesas e lucro do intervalo [inicio, fim].
 
     A receita é reconhecida por pagamento aprovado (ANA-01), não pelo
     andamento operacional. Pedidos cancelados antes do pagamento ficam fora.
+    ``vendedor`` aplica o recorte do ADR-010; ``None`` é a visão global.
     """
     começo, término = _janela(inicio, fim)
     pagamentos = Pagamento.objects.filter(
@@ -65,16 +68,38 @@ def metricas_do_periodo(inicio: date, fim: date) -> dict:
         aprovado_em__isnull=False,
         pedido__status_financeiro__in=STATUS_FINANCEIROS_COM_RECEITA,
     )
+    itens = ItemPedido.objects.filter(
+        pedido__pagamento__aprovado_em__range=(começo, término),
+        pedido__pagamento__aprovado_em__isnull=False,
+        pedido__status_financeiro__in=STATUS_FINANCEIROS_COM_RECEITA,
+    )
+    aguardando = Pedido.objects.filter(
+        status_financeiro=Pedido.StatusFinanceiro.PENDENTE,
+        status__in=STATUS_AGUARDANDO,
+    )
+    if vendedor is not None:
+        pagamentos = pagamentos.filter(pedido__usuario_criador=vendedor)
+        itens = itens.filter(pedido__usuario_criador=vendedor)
+        aguardando = aguardando.filter(usuario_criador=vendedor)
+
     pedidos_vendidos = pagamentos.values("pedido_id").distinct().count()
-    total_vendas = receita_do_periodo(inicio, fim)
+    total_vendas = (
+        pagamentos.aggregate(total=Sum("valor"))["total"]
+        or Decimal("0.00")
+    )
+    estornos = Pagamento.objects.filter(
+        estornado_em__range=(começo, término),
+        estornado_em__isnull=False,
+    )
+    if vendedor is not None:
+        estornos = estornos.filter(pedido__usuario_criador=vendedor)
+    total_vendas -= (
+        estornos.aggregate(total=Sum("valor"))["total"]
+        or Decimal("0.00")
+    )
 
     top_produtos = (
-        ItemPedido.objects.filter(
-            pedido__pagamento__aprovado_em__range=(começo, término),
-            pedido__pagamento__aprovado_em__isnull=False,
-            pedido__status_financeiro__in=STATUS_FINANCEIROS_COM_RECEITA,
-        )
-        .exclude(pedido__status__in=STATUS_EXCLUIDOS_VENDA)
+        itens.exclude(pedido__status__in=STATUS_EXCLUIDOS_VENDA)
         .values("produto_nome")
         .annotate(
             quantidade_vendida=Sum("quantidade"),
@@ -87,10 +112,8 @@ def metricas_do_periodo(inicio: date, fim: date) -> dict:
     )
 
     cmv_total = (
-        ItemPedido.objects.filter(
-            pedido__pagamento__aprovado_em__range=(começo, término),
-            pedido__pagamento__aprovado_em__isnull=False,
-            pedido__status_financeiro=Pedido.StatusFinanceiro.PAGO,
+        itens.filter(
+            pedido__status_financeiro=Pedido.StatusFinanceiro.PAGO
         )
         .exclude(pedido__status__in=STATUS_EXCLUIDOS_VENDA)
         .aggregate(
@@ -101,13 +124,10 @@ def metricas_do_periodo(inicio: date, fim: date) -> dict:
         )["total"]
         or Decimal("0.00")
     )
-    despesas_total = despesas_no_periodo(inicio, fim)
-    lucro_bruto = total_vendas - cmv_total
-
-    aguardando = Pedido.objects.filter(
-        status_financeiro=Pedido.StatusFinanceiro.PENDENTE,
-        status__in=STATUS_AGUARDANDO,
+    despesas_total = despesas_no_periodo(
+        inicio, fim, usuario=vendedor
     )
+    lucro_bruto = total_vendas - cmv_total
 
     return {
         "inicio": inicio,
@@ -126,30 +146,38 @@ def metricas_do_periodo(inicio: date, fim: date) -> dict:
     }
 
 
-def clientes_para_recompra(dias: int):
-    """Clientes com compra paga/concluída há mais de `dias` dias."""
+def clientes_para_recompra(dias: int, vendedor=None):
+    """Clientes com compra paga há mais de `dias` dias.
+
+    Com ``vendedor``, tanto a existência da compra antiga quanto a data da
+    última compra consideram apenas pedidos criados por ele (ADR-010).
+    """
     from datetime import timedelta
 
     from customers.models import Cliente
 
     limite = timezone.now() - timedelta(days=dias)
-    compras_antigas = (
-        Pedido.objects.filter(
-            cliente=OuterRef("pk"),
-            status_financeiro=Pedido.StatusFinanceiro.PAGO,
-            criado_em__lt=limite,
-        )
-        .exclude(status=Pedido.Status.CANCELADO)
+    filtro_antigo = Q(
+        cliente=OuterRef("pk"),
+        status_financeiro=Pedido.StatusFinanceiro.PAGO,
+        criado_em__lt=limite,
+    )
+    filtro_ultima = Q(
+        pedidos__status_financeiro=Pedido.StatusFinanceiro.PAGO
+    ) & ~Q(pedidos__status=Pedido.Status.CANCELADO)
+    if vendedor is not None:
+        filtro_antigo &= Q(usuario_criador=vendedor)
+        filtro_ultima &= Q(pedidos__usuario_criador=vendedor)
+
+    compras_antigas = Pedido.objects.filter(filtro_antigo).exclude(
+        status=Pedido.Status.CANCELADO
     )
     return (
         Cliente.objects.filter(Exists(compras_antigas))
         .annotate(
             ultima_compra=Max(
                 "pedidos__criado_em",
-                filter=Q(
-                    pedidos__status_financeiro=Pedido.StatusFinanceiro.PAGO
-                )
-                & ~Q(pedidos__status=Pedido.Status.CANCELADO),
+                filter=filtro_ultima,
                 output_field=DateTimeField(),
             )
         )

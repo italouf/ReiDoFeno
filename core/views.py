@@ -13,7 +13,7 @@ from django.views.generic import (
 
 from analytics.models import Aviso
 from catalog.models import Produto
-from core.mixins import GRUPOS_INTERNOS, GrupoRequiredMixin
+from core.mixins import GrupoRequiredMixin
 from costs.models import Despesa
 from stock.models import Estoque, MovimentoEstoque
 
@@ -31,7 +31,7 @@ def healthz(request):
 
 class PainelView(GrupoRequiredMixin, TemplateView):
     template_name = "core/painel.html"
-    grupos_permitidos = GRUPOS_INTERNOS
+    grupos_permitidos = ("Administrador", "Gestor")
 
     def get_context_data(self, **kwargs):
 
@@ -43,7 +43,10 @@ class PainelView(GrupoRequiredMixin, TemplateView):
         hoje = timezone.localdate()
         inicio = _parse_data(self.request.GET.get("inicio")) or hoje.replace(day=1)
         fim = _parse_data(self.request.GET.get("fim")) or hoje
-        contexto["metricas"] = metricas_do_periodo(inicio, fim)
+        metricas = metricas_do_periodo(inicio, fim)
+        contexto["metricas"] = metricas
+        contexto["receita"] = metricas["receita"]
+        contexto["num_pedidos"] = metricas["num_pedidos"]
         contexto["filtro_inicio"] = inicio.isoformat()
         contexto["filtro_fim"] = fim.isoformat()
 

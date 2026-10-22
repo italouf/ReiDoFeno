@@ -558,24 +558,39 @@ class MinhasMetricasView(LoginRequiredMixin, GrupoRequiredMixin, TemplateView):
     grupos_permitidos = GRUPOS_INTERNOS
 
     def get_context_data(self, **kwargs):
-        from datetime import date
-
-        from django.db.models import Sum
         from django.utils import timezone
+
+        from analytics.services import metricas_do_periodo
 
         contexto = super().get_context_data(**kwargs)
         meus = Pedido.objects.filter(usuario_criador=self.request.user)
         hoje = timezone.localdate()
-
-        contexto["pedidos_hoje"] = meus.filter(criado_em__date=hoje).count()
-        vendas = meus.filter(
-            status_financeiro=Pedido.StatusFinanceiro.PAGO
-        ).exclude(status=Pedido.Status.CANCELADO)
-        contexto["vendas_total"] = (
-            vendas.aggregate(soma=Sum("total"))["soma"] or 0
+        metricas = metricas_do_periodo(
+            hoje.replace(day=1),
+            hoje,
+            vendedor=self.request.user,
         )
+
+        contexto["metricas"] = metricas
+        contexto["receita"] = metricas["receita"]
+        contexto["num_pedidos"] = metricas["num_pedidos"]
+        contexto["cmv_total"] = metricas["cmv_total"]
+        contexto["lucro_bruto"] = metricas["lucro_bruto"]
+        contexto["despesas_total"] = metricas["despesas_total"]
+        contexto["pedidos_hoje"] = meus.filter(criado_em__date=hoje).count()
+        contexto["vendas_total"] = metricas["receita"]
         contexto["clientes_atendidos"] = (
-            vendas.values("cliente").distinct().count()
+            Pagamento.objects.filter(
+                aprovado_em__isnull=False,
+                pedido__usuario_criador=self.request.user,
+                pedido__status_financeiro__in=(
+                    Pedido.StatusFinanceiro.PAGO,
+                    Pedido.StatusFinanceiro.ESTORNADO,
+                ),
+            )
+            .values("pedido__cliente_id")
+            .distinct()
+            .count()
         )
         contexto["pendentes"] = meus.filter(
             status_financeiro=Pedido.StatusFinanceiro.PENDENTE,
@@ -585,7 +600,7 @@ class MinhasMetricasView(LoginRequiredMixin, GrupoRequiredMixin, TemplateView):
             ),
         ).count()
         contexto["interacoes_hoje"] = self.request.user.interacoes.filter(
-            criado_em__date=date.today()
+            criado_em__date=hoje
         ).count()
         return contexto
 
