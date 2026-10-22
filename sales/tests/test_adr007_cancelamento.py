@@ -17,7 +17,7 @@ from core.factories import UnidadeFactory
 from core.models import LogAuditoria
 from fiscal.models import NotaFiscal
 from sales.factories import ItemPedidoFactory, PagamentoFactory, PedidoFactory
-from sales.models import Pagamento, Pedido
+from sales.models import ObrigacaoEstoquePedido, Pagamento, Pedido
 from sales.services import (
     cancelar_pedido_padrao,
     marcar_pagamento_aprovado,
@@ -220,6 +220,14 @@ class CancelamentoPadraoTests(BaseCancelamentoTests):
             pedido=pedido, produto=produto, quantidade=5,
             preco_unitario=Decimal("20.00"),
         )
+        ObrigacaoEstoquePedido.objects.create(
+            pedido=pedido,
+            produto=produto,
+            unidade=unidade,
+            quantidade_devida=Decimal("5.00"),
+            quantidade_baixada=Decimal("5.00"),
+            status=ObrigacaoEstoquePedido.Status.RESOLVIDA,
+        )
 
         cancelar_pedido_padrao(
             pedido=pedido,
@@ -343,6 +351,14 @@ class DevolucaoTests(BaseCancelamentoTests):
             pedido=pedido, produto=produto, quantidade=5,
             preco_unitario=Decimal("20.00"),
         )
+        ObrigacaoEstoquePedido.objects.create(
+            pedido=pedido,
+            produto=produto,
+            unidade=unidade,
+            quantidade_devida=Decimal("5.00"),
+            quantidade_baixada=Decimal("5.00"),
+            status=ObrigacaoEstoquePedido.Status.RESOLVIDA,
+        )
 
         registrar_devolucao(
             pedido=pedido,
@@ -437,6 +453,14 @@ class DevolucaoTests(BaseCancelamentoTests):
         ItemPedidoFactory(
             pedido=pedido, produto=produto, quantidade=5,
             preco_unitario=Decimal("20.00"),
+        )
+        ObrigacaoEstoquePedido.objects.create(
+            pedido=pedido,
+            produto=produto,
+            unidade=unidade,
+            quantidade_devida=Decimal("5.00"),
+            quantidade_baixada=Decimal("5.00"),
+            status=ObrigacaoEstoquePedido.Status.RESOLVIDA,
         )
 
         primeira = registrar_devolucao(

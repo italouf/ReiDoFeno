@@ -57,6 +57,12 @@ registrava justificativa/ator e não tratava nota fiscal.
   para a nota de saída.
 - A emissão real da NF-e de entrada continua manual/assistida nesta fase;
   o sistema registra e audita o documento e o CFOP.
+- A devolução após chargeback é permitida quando há prova de aprovação
+  anterior e estorno confirmado; ela não executa um segundo estorno. É o
+  caminho para receber fisicamente mercadoria já estornada.
+- A NF-e de entrada pendente é concluída por uma fila/rota do Emissor Fiscal,
+  que registra número/chave/link sem repetir estoque ou estorno e sem exigir
+  financeiro atualmente pago.
 - A reversão da migração `NotaFiscal` de `OneToOne` para `ForeignKey` não é
   possível depois que um pedido tiver saída e entrada; o rollback deve ser
   tratado como operação de recuperação manual.

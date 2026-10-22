@@ -1398,12 +1398,38 @@ def _devolver_estoque_do_pedido(
             produto_id=produto_id,
             unidade_id=pedido.unidade_id,
         ).first()
-        quantidade = (
-            obrigacao.quantidade_baixada
-            if obrigacao is not None
-            else dados["quantidade"]
+        if obrigacao is None:
+            _registrar_pendencia_estoque(
+                pedido,
+                produto=dados["produto"],
+                quantidade=dados["quantidade"],
+                motivo=(
+                    "devolução sem obrigação/evidência de baixa; "
+                    "estoque mantido para conciliação"
+                ),
+                request=request,
+            )
+            continue
+        compensado = (
+            MovimentoEstoque.objects.filter(
+                obrigacao=obrigacao,
+                tipo=MovimentoEstoque.Tipo.ENTRADA_DEVOLUCAO,
+            ).aggregate(total=Sum("delta"))["total"]
+            or Decimal("0.00")
         )
+        quantidade = obrigacao.quantidade_baixada - compensado
         if quantidade <= 0:
+            if obrigacao.quantidade_baixada <= 0:
+                _registrar_pendencia_estoque(
+                    pedido,
+                    produto=dados["produto"],
+                    quantidade=dados["quantidade"],
+                    motivo=(
+                        "devolução sem baixa comprovada; "
+                        "estoque mantido para conciliação"
+                    ),
+                    request=request,
+                )
             continue
         registrar_movimento(
             produto=dados["produto"],
@@ -1413,6 +1439,7 @@ def _devolver_estoque_do_pedido(
             motivo=motivo,
             usuario=usuario,
             request=request,
+            obrigacao=obrigacao,
         )
         devolvidos += 1
     return devolvidos
@@ -1608,16 +1635,30 @@ def registrar_devolucao(
     ).first()
     if pedido.tipo_cancelamento == Pedido.TipoCancelamento.DEVOLUCAO:
         return existente
-    if pedido.status_financeiro != Pedido.StatusFinanceiro.PAGO:
-        raise ValidationError("Só pedidos pagos podem ser devolvidos.")
     pagamento = getattr(pedido, "pagamento", None)
-    if (
-        pagamento is None
-        or pagamento.status != Pagamento.Status.APROVADO
-        or pagamento.aprovado_em is None
-    ):
+    if pagamento is None or pagamento.aprovado_em is None:
         raise ValidationError(
-            "Devolução exige pagamento aprovado e conciliado."
+            "Devolução exige histórico de pagamento aprovado."
+        )
+    if pedido.status_financeiro == Pedido.StatusFinanceiro.PAGO:
+        if pagamento.status != Pagamento.Status.APROVADO:
+            raise ValidationError(
+                "Devolução exige pagamento aprovado e conciliado."
+            )
+    elif pedido.status_financeiro in (
+        Pedido.StatusFinanceiro.ESTORNADO,
+        Pedido.StatusFinanceiro.CANCELADO,
+    ):
+        if (
+            pagamento.status != Pagamento.Status.CANCELADO
+            or pagamento.estornado_em is None
+        ):
+            raise ValidationError(
+                "Devolução após estorno exige estorno confirmado."
+            )
+    else:
+        raise ValidationError(
+            "Devolução exige pagamento aprovado ou estorno confirmado."
         )
     nota_saida = pedido.nota_fiscal
     if nota_saida is None or nota_saida.status != "autorizada":
@@ -1630,15 +1671,17 @@ def registrar_devolucao(
             "A NF-e de saída deve ter chave de acesso de 44 dígitos."
         )
     cfop_inverso = calcular_cfop_inverso(nota_saida.cfop)
-    nota_entrada = NotaFiscal(
-        pedido=pedido,
-        tipo=NotaFiscal.Tipo.ENTRADA,
-        cfop=cfop_inverso,
-        chave_referenciada=chave_saida,
-        status=NotaFiscal.Status.PENDENTE,
-    )
-    nota_entrada.full_clean()
-    nota_entrada.save()
+    nota_entrada = existente
+    if nota_entrada is None:
+        nota_entrada = NotaFiscal(
+            pedido=pedido,
+            tipo=NotaFiscal.Tipo.ENTRADA,
+            cfop=cfop_inverso,
+            chave_referenciada=chave_saida,
+            status=NotaFiscal.Status.PENDENTE,
+        )
+        nota_entrada.full_clean()
+        nota_entrada.save()
 
     _devolver_estoque_do_pedido(
         pedido,
@@ -1654,8 +1697,10 @@ def registrar_devolucao(
         motivo="devolução",
     )
     _cancelar_obrigacoes_estoque(pedido)
-    pagamento = getattr(pedido, "pagamento", None)
-    if pagamento is not None:
+    if (
+        pedido.status_financeiro == Pedido.StatusFinanceiro.PAGO
+        and pagamento.status == Pagamento.Status.APROVADO
+    ):
         estornar_pagamento(
             pagamento,
             status_pedido=Pedido.StatusFinanceiro.ESTORNADO,
