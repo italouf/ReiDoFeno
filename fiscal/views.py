@@ -4,6 +4,7 @@ from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
+from django.db.models import Case, IntegerField, Value, When
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
@@ -25,7 +26,7 @@ GRUPOS_FISCAIS = ("Administrador", "Gestor", "Emissor Fiscal")
 def _csv_seguro(valor) -> str:
     """Evita que texto vindo do banco seja interpretado como fórmula."""
     texto = str(valor or "")
-    if texto.startswith(("=", "+", "-", "@")):
+    if texto.lstrip().startswith(("=", "+", "-", "@")):
         return "'" + texto
     return texto
 
@@ -79,6 +80,16 @@ class RegistrarNotaManualView(
                 .filter(pedido=self.pedido, tipo=NotaFiscal.Tipo.SAIDA)
                 .first()
             )
+            if (
+                nota is not None
+                and nota.status == NotaFiscal.Status.CANCELADA
+            ):
+                form.add_error(
+                    None,
+                    "NF-e cancelada não pode ser reautorizada por esta rota. "
+                    "Emita um novo documento fora do sistema e registre-o.",
+                )
+                return self.form_invalid(form)
             if (
                 nota is not None
                 and nota.status == NotaFiscal.Status.AUTORIZADA
@@ -176,7 +187,17 @@ class NotaEntradaListView(
         return (
             NotaFiscal.objects.filter(tipo=NotaFiscal.Tipo.ENTRADA)
             .select_related("pedido", "pedido__cliente")
-            .order_by("status", "-criado_em")
+            .annotate(
+                fila=Case(
+                    When(
+                        status=NotaFiscal.Status.PENDENTE,
+                        then=Value(0),
+                    ),
+                    default=Value(1),
+                    output_field=IntegerField(),
+                )
+            )
+            .order_by("fila", "-criado_em")
         )
 
 
@@ -219,8 +240,15 @@ class RegistrarNotaEntradaView(
             nota = NotaFiscal.objects.select_for_update().get(
                 pk=self.nota.pk, tipo=NotaFiscal.Tipo.ENTRADA
             )
+            if nota.status == NotaFiscal.Status.CANCELADA:
+                form.add_error(
+                    None,
+                    "Documento de entrada cancelado não pode ser reautorizado.",
+                )
+                return self.form_invalid(form)
             saida = (
-                NotaFiscal.objects.filter(
+                NotaFiscal.objects.select_for_update()
+                .filter(
                     pedido_id=nota.pedido_id,
                     tipo=NotaFiscal.Tipo.SAIDA,
                     status=NotaFiscal.Status.AUTORIZADA,
@@ -242,6 +270,23 @@ class RegistrarNotaEntradaView(
             numero = form.cleaned_data["numero"]
             chave = form.cleaned_data["chave_acesso"]
             link = form.cleaned_data.get("link_documento", "")
+            if chave == nota.chave_referenciada:
+                form.add_error(
+                    "chave_acesso",
+                    "A chave da entrada não pode ser igual à chave "
+                    "referenciada da saída.",
+                )
+                return self.form_invalid(form)
+            if (
+                NotaFiscal.objects.filter(chave_acesso=chave)
+                .exclude(pk=nota.pk)
+                .exists()
+            ):
+                form.add_error(
+                    "chave_acesso",
+                    "Já existe uma nota registrada com esta chave.",
+                )
+                return self.form_invalid(form)
             if (
                 nota.status == NotaFiscal.Status.AUTORIZADA
                 and (

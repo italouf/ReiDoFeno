@@ -219,6 +219,7 @@ class RelatorioVendasProdutoTests(TestCase):
         for resposta in (vendas, comparativo):
             texto = resposta.content.decode()
             self.assertNotIn("cdn.jsdelivr.net", texto)
+            self.assertNotIn("<script>", texto)
             self.assertIn("js/relatorios.js", texto)
             self.assertIn(
                 "default-src 'self'",

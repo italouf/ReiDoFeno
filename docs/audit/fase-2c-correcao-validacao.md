@@ -9,10 +9,10 @@ PostgreSQL 15/Redis: **não disponíveis neste ambiente**; CI remoto pendente.
 
 | Verificação | Resultado |
 |---|---|
-| Suíte SQLite | **616 passed, 16 skipped, 240 subtests** |
-| Cobertura total dos módulos medidos | **87,26%** |
-| `analytics/services.py` | **97,85%** |
-| `sales/services.py` | **85,09%** |
+| Suíte SQLite | **627 passed, 16 skipped, 240 subtests** |
+| Cobertura total dos módulos medidos | **86,65%** |
+| `analytics/services.py` | **94,79%** |
+| `sales/services.py` | **84,82%** |
 | `fiscal/services.py` | **90,20%** |
 | `ruff check .` | limpo |
 | `manage.py check` | sem issues |
@@ -43,6 +43,18 @@ Executados em `sales/tests/test_auditoria_fase2c.py` e
 - `test_csv_fiscal_com_dados_deve_funcionar` — HTTP 200 com linha real.
 - `test_cfop_de_nota_autorizada_nao_deve_ser_reescrito_silenciosamente`.
 - `test_saneamento_autorizado_de_cfop_legado_e_auditado`.
+- `test_movimento_legado_sem_obrigacao_e_reconhecido` — movimento antigo
+  sem FK é mapeado pelo número do pedido; não duplica crédito.
+- `test_evidencia_zero_nao_credita` e
+  `test_devolucao_reconcilia_evidencia_parcial_em_segunda_chamada`.
+- `test_oracle_janeiro_fevereiro_marco_por_fluxos_publicos` — 100/60/40,
+  -100/0/-100, 0/-60/60.
+- `test_entrada_nao_pode_reutilizar_chave_da_saida`,
+  `test_entrada_nao_pode_duplicar_chave_de_outra_nota`,
+  `test_entrada_cancelada_nao_e_reautorizada`,
+  `test_saida_cancelada_nao_e_reautorizada`,
+  `test_cfop_sem_mapeamento_e_rejeitado`.
+- `test_csv_fiscal_sanitiza_formula_e_exporta_estorno`.
 - `test_graficos_nao_dependem_de_cdn_nem_script_inline`.
 - `test_push_da_fase_2c_dispara_ci`.
 
@@ -52,9 +64,14 @@ Playwright, servidor local com CSP padrão e `DEBUG=True` do settings de
 desenvolvimento:
 
 - `/gestao/relatorios/comparativo-unidades/`: canvas pintado, tabela
-  FS `100/60/40` e Iaçu `100/40/60`; scripts apenas
+  FS `100/60/40` e Iaçu `100/40/60`; colunas separadas de receita financeira,
+  receita de produtos e frete; `canvas.style.width` acompanha o container
+  (1008 px em viewport de 1024 px), scripts apenas
   `static/js/relatorios.js` e `static/js/app.js`; zero erros de console/CSP.
   Screenshot: `docs/audit/fase-2c-comparativo-csp.png`.
+- DPI: a correção define largura/altura CSS e backing store com
+  `devicePixelRatio`; a evidência visual foi DPR 1. DPR 2 permanece uma
+  verificação de dispositivo.
 - Login como Emissor Fiscal: `/fiscal/notas-entrada/` listou a pendência;
   o formulário registrou número 77001/chave/ link, e a lista passou a
   “Autorizada”; nenhuma ação de estoque/pagamento foi repetida.
@@ -74,3 +91,8 @@ O único erro de console no login foi `favicon.ico` 404, sem relação com CSP.
 - `NotaFiscal` de entrada é registro manual; não é autorização externa
   inventada pelo sistema.
 - A validação visual usou dados sintéticos, não base real.
+- Movimentos legados de devolução sem número de pedido no motivo não são
+  inventados: ficam para conciliação e bloqueiam novo crédito até atribuição.
+- A proteção de chave única de NF-e é de aplicação/validação, não uma
+  constraint SQL adicional sobre dados históricos; uma constraint exigiria
+  saneamento prévio de duplicidades legadas.

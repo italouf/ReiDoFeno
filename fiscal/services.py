@@ -38,8 +38,8 @@ CFOP_INVERSO = {
 def calcular_cfop_inverso(cfop: str) -> str:
     """CFOP de devolução para uma operação de saída.
 
-    Usa a tabela explícita para as operações conhecidas e a regra geral
-    (5→1, 6→2, 7→3) para as demais saídas.
+    Somente operações presentes na tabela explícita são aceitas. A regra
+    genérica de prefixo não é prova de enquadramento fiscal.
     """
     normalizado = (cfop or "").strip().replace(".", "")
     if len(normalizado) != 4 or not normalizado.isdigit():

@@ -50,6 +50,9 @@ def pagamentos_aprovados(inicio: date, fim: date, vendedor=None):
         aprovado_em__range=(começo, término),
         aprovado_em__isnull=False,
         pedido__status_financeiro__in=STATUS_FINANCEIROS_COM_RECEITA,
+    ).exclude(
+        status=Pagamento.Status.CANCELADO,
+        estornado_em__isnull=True,
     )
     query = _excluir_aprovacao_pos_cancelamento(query, "aprovado_em")
     if vendedor is not None:
@@ -63,7 +66,9 @@ def pagamentos_estornados(inicio: date, fim: date, vendedor=None):
     query = Pagamento.objects.filter(
         estornado_em__range=(começo, término),
         estornado_em__isnull=False,
+        aprovado_em__isnull=False,
     )
+    query = _excluir_aprovacao_pos_cancelamento(query, "aprovado_em")
     if vendedor is not None:
         query = query.filter(pedido__usuario_criador=vendedor)
     return query.select_related("pedido", "pedido__unidade")
@@ -87,21 +92,13 @@ def _itens_vendidos(inicio: date, fim: date, vendedor=None):
 
 
 def _movimentos_devolucao(inicio: date, fim: date, vendedor=None):
-    """Retornos físicos comprovados por movimentos de devolução."""
+    """Retornos físicos comprovados, inclusive movimentos legados."""
     começo, término = _janela(inicio, fim)
-    query = MovimentoEstoque.objects.filter(
+    return MovimentoEstoque.objects.filter(
         tipo=MovimentoEstoque.Tipo.ENTRADA_DEVOLUCAO,
         delta__gt=Decimal("0.00"),
         criado_em__range=(começo, término),
-        obrigacao__isnull=False,
-    )
-    if vendedor is not None:
-        query = query.filter(
-            obrigacao__pedido__usuario_criador=vendedor
-        )
-    return query.select_related(
-        "produto", "unidade", "obrigacao__pedido"
-    )
+    ).select_related("produto", "unidade", "obrigacao__pedido")
 
 
 def _custo_medio_item(pedido, produto) -> Decimal:
@@ -140,7 +137,8 @@ def _linhas_itens(inicio: date, fim: date, unidade=None, vendedor=None):
 
     A venda reconhece receita, quantidade financeira e CMV. O estorno
     financeiro reduz receita/quantidade, mas não o CMV. O retorno físico
-    reduz apenas o CMV e alimenta a quantidade devolvida.
+    reduz apenas o CMV e alimenta a quantidade devolvida, sem criar uma
+    segunda linha de receita.
     """
     linhas = {}
 
@@ -181,13 +179,20 @@ def _linhas_itens(inicio: date, fim: date, unidade=None, vendedor=None):
             linha["quantidade"] -= item.quantidade
             linha["receita"] -= item.subtotal
 
-    devolvidos = _movimentos_devolucao(
-        inicio, fim, vendedor=vendedor
-    )
-    if unidade is not None:
-        devolvidos = devolvidos.filter(unidade=unidade)
+    devolvidos = _movimentos_devolucao(inicio, fim)
+    from sales.services import _obrigacao_por_movimento
+
     for movimento in devolvidos:
-        pedido = movimento.obrigacao.pedido
+        obrigacao = movimento.obrigacao or _obrigacao_por_movimento(
+            movimento
+        )
+        if obrigacao is None:
+            continue
+        pedido = obrigacao.pedido
+        if vendedor is not None and pedido.usuario_criador_id != vendedor.pk:
+            continue
+        if unidade is not None and movimento.unidade_id != unidade.pk:
+            continue
         custo_unitario = _custo_medio_item(pedido, movimento.produto)
         dia = timezone.localtime(movimento.criado_em).date()
         linha = _linha(
@@ -390,6 +395,7 @@ def comparativo_unidades(inicio: date, fim: date) -> list[dict]:
                 "unidade": unidade.nome,
                 "receita": receita,
                 "receita_produtos": receita_produtos,
+                "receita_frete": receita - receita_produtos,
                 "cmv": custo,
                 "lucro_bruto": receita_produtos - custo,
                 "num_pedidos": num_pedidos,

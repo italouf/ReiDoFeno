@@ -28,6 +28,20 @@ class NotaManualForm(forms.Form):
         label="Link do XML/DANFE", required=False
     )
 
+    def clean_cfop(self):
+        from .services import calcular_cfop_inverso
+
+        cfop = (self.cleaned_data.get("cfop") or "").strip()
+        if not cfop:
+            return cfop
+        try:
+            calcular_cfop_inverso(cfop)
+        except Exception as erro:
+            raise forms.ValidationError(
+                "CFOP de saída sem mapeamento de devolução validado."
+            ) from erro
+        return cfop
+
 
 class NotaEntradaManualForm(forms.Form):
     numero = forms.CharField(label="Número da NF-e de entrada", max_length=20)

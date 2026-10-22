@@ -17,6 +17,7 @@ from sales.factories import (
     PedidoFactory,
 )
 from sales.models import Pagamento, Pedido
+from stock.models import MovimentoEstoque
 
 CHAVE_SAIDA = "29260812345678901234567890123456789012345678"
 CHAVE_ENTRADA = "31261098765432109876543210987654321098765432"
@@ -135,8 +136,58 @@ class A05RegistroEntradaTests(BaseFiscalAuditoriaTests):
         entrada.refresh_from_db()
         self.assertEqual(entrada.status, NotaFiscal.Status.PENDENTE)
 
+    def test_entrada_nao_pode_reutilizar_chave_da_saida(self):
+        _, entrada = self._entrada_pendente()
+        self.client.force_login(self.emissor)
+
+        resposta = self.client.post(
+            reverse("fiscal:nota_entrada_registrar", args=[entrada.pk]),
+            {"numero": "77004", "chave_acesso": CHAVE_SAIDA},
+        )
+
+        self.assertEqual(resposta.status_code, 200)
+        entrada.refresh_from_db()
+        self.assertEqual(entrada.status, NotaFiscal.Status.PENDENTE)
+
+    def test_entrada_nao_pode_duplicar_chave_de_outra_nota(self):
+        _, entrada = self._entrada_pendente()
+        outro_pedido = self._pedido()
+        NotaFiscal.objects.create(
+            pedido=outro_pedido,
+            tipo=NotaFiscal.Tipo.SAIDA,
+            status=NotaFiscal.Status.AUTORIZADA,
+            cfop="5.102",
+            chave_acesso=CHAVE_ENTRADA,
+        )
+        self.client.force_login(self.emissor)
+
+        resposta = self.client.post(
+            reverse("fiscal:nota_entrada_registrar", args=[entrada.pk]),
+            {"numero": "77006", "chave_acesso": CHAVE_ENTRADA},
+        )
+
+        self.assertEqual(resposta.status_code, 200)
+        entrada.refresh_from_db()
+        self.assertEqual(entrada.status, NotaFiscal.Status.PENDENTE)
+
+    def test_entrada_cancelada_nao_e_reautorizada(self):
+        _, entrada = self._entrada_pendente()
+        entrada.status = NotaFiscal.Status.CANCELADA
+        entrada.save(update_fields=["status"])
+        self.client.force_login(self.emissor)
+
+        resposta = self.client.post(
+            reverse("fiscal:nota_entrada_registrar", args=[entrada.pk]),
+            {"numero": "77005", "chave_acesso": CHAVE_ENTRADA},
+        )
+
+        self.assertEqual(resposta.status_code, 200)
+        entrada.refresh_from_db()
+        self.assertEqual(entrada.status, NotaFiscal.Status.CANCELADA)
+
     def test_registro_de_entrada_nao_repete_estoque_nem_estorno(self):
         pedido, entrada = self._entrada_pendente()
+        movimentos_antes = MovimentoEstoque.objects.count()
         self.client.force_login(self.emissor)
         self.client.post(
             reverse("fiscal:nota_entrada_registrar", args=[entrada.pk]),
@@ -153,6 +204,7 @@ class A05RegistroEntradaTests(BaseFiscalAuditoriaTests):
             1,
         )
         self.assertEqual(NotaFiscal.objects.filter(pedido=pedido).count(), 2)
+        self.assertEqual(MovimentoEstoque.objects.count(), movimentos_antes)
 
 
 class A06CsvFiscalTests(BaseFiscalAuditoriaTests):
@@ -164,8 +216,8 @@ class A06CsvFiscalTests(BaseFiscalAuditoriaTests):
             reverse("fiscal:relatorio_fiscal"),
             {
                 "formato": "csv",
-                "inicio": date.today().isoformat(),
-                "fim": date.today().isoformat(),
+                "inicio": timezone.localdate().isoformat(),
+                "fim": timezone.localdate().isoformat(),
             },
         )
 
@@ -173,6 +225,32 @@ class A06CsvFiscalTests(BaseFiscalAuditoriaTests):
         conteudo = resposta.content.decode("utf-8")
         self.assertIn("aprovacao", conteudo)
         self.assertIn("100.00", conteudo)
+
+    def test_csv_fiscal_sanitiza_formula_e_exporta_estorno(self):
+        pedido = self._pedido()
+        unidade = pedido.unidade
+        unidade.nome = "=Planilha Perigosa"
+        unidade.save(update_fields=["nome"])
+        Pagamento.objects.filter(pedido=pedido).update(
+            status=Pagamento.Status.CANCELADO,
+            estornado_em=timezone.now(),
+        )
+        self.client.force_login(self.emissor)
+
+        resposta = self.client.get(
+            reverse("fiscal:relatorio_fiscal"),
+            {
+                "formato": "csv",
+                "inicio": timezone.localdate().isoformat(),
+                "fim": timezone.localdate().isoformat(),
+            },
+        )
+
+        self.assertEqual(resposta.status_code, 200)
+        conteudo = resposta.content.decode("utf-8")
+        self.assertIn("'=Planilha Perigosa", conteudo)
+        self.assertIn("estorno", conteudo)
+        self.assertIn("-100.00", conteudo)
 
 
 class A07CfopTests(BaseFiscalAuditoriaTests):
@@ -205,6 +283,44 @@ class A07CfopTests(BaseFiscalAuditoriaTests):
         nota.refresh_from_db()
         self.assertEqual(nota.cfop, "5.102")
 
+    def test_saida_cancelada_nao_e_reautorizada(self):
+        nota = self._nota_autorizada()
+        nota.status = NotaFiscal.Status.CANCELADA
+        nota.save(update_fields=["status"])
+        self.client.force_login(self.gestor)
+
+        resposta = self.client.post(
+            reverse("fiscal:nota_manual", args=[nota.pedido_id]),
+            {
+                "numero": nota.numero,
+                "chave_acesso": nota.chave_acesso,
+            },
+        )
+
+        self.assertEqual(resposta.status_code, 200)
+        nota.refresh_from_db()
+        self.assertEqual(nota.status, NotaFiscal.Status.CANCELADA)
+
+    def test_cfop_sem_mapeamento_e_rejeitado(self):
+        pedido = self._pedido()
+        self.client.force_login(self.gestor)
+
+        resposta = self.client.post(
+            reverse("fiscal:nota_manual", args=[pedido.pk]),
+            {
+                "numero": "555",
+                "chave_acesso": CHAVE_SAIDA,
+                "cfop": "5.405",
+            },
+        )
+
+        self.assertEqual(resposta.status_code, 200)
+        self.assertFalse(
+            NotaFiscal.objects.filter(
+                pedido=pedido, tipo=NotaFiscal.Tipo.SAIDA
+            ).exists()
+        )
+
     def test_saneamento_de_legado_apos_estorno_e_permitido(self):
         nota = self._nota_autorizada(cfop="")
         pedido = nota.pedido
@@ -230,6 +346,14 @@ class A07CfopTests(BaseFiscalAuditoriaTests):
         self.assertEqual(resposta.status_code, 302)
         nota.refresh_from_db()
         self.assertEqual(nota.cfop, "5.102")
+        from core.models import LogAuditoria
+
+        self.assertTrue(
+            LogAuditoria.objects.filter(
+                acao="fiscal.nota_cfop_retificado",
+                objeto_id=str(nota.pk),
+            ).exists()
+        )
 
     def test_saneamento_autorizado_de_cfop_legado_e_auditado(self):
         nota = self._nota_autorizada(cfop="")
@@ -249,3 +373,11 @@ class A07CfopTests(BaseFiscalAuditoriaTests):
         self.assertEqual(resposta.status_code, 302)
         nota.refresh_from_db()
         self.assertEqual(nota.cfop, "5.102")
+        from core.models import LogAuditoria
+
+        self.assertTrue(
+            LogAuditoria.objects.filter(
+                acao="fiscal.nota_cfop_retificado",
+                objeto_id=str(nota.pk),
+            ).exists()
+        )

@@ -20,7 +20,7 @@ GRUPOS_GESTAO = ("Administrador", "Gestor")
 
 def _csv_seguro(valor) -> str:
     texto = str(valor or "")
-    if texto.startswith(("=", "+", "-", "@")):
+    if texto.lstrip().startswith(("=", "+", "-", "@")):
         return "'" + texto
     return texto
 
@@ -169,10 +169,11 @@ class ComparativoUnidadesView(
                 "grafico_series": json.dumps(
                     [
                         {
-                            "label": "Receita",
+                            "label": "Receita produtos",
                             "color": "#2f6b4f",
                             "values": [
-                                float(linha["receita"]) for linha in linhas
+                                float(linha["receita_produtos"])
+                                for linha in linhas
                             ],
                         },
                         {

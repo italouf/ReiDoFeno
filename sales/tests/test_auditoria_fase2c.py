@@ -1,12 +1,14 @@
 """Reprodução dos achados A01-A04 da auditoria da Fase 2C."""
 
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
+from unittest import mock
 
 import pytest
 from django.contrib.auth.models import Group
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
+from django.db.models import Sum
 from django.test import TestCase
 from django.utils import timezone
 
@@ -36,6 +38,10 @@ from stock.factories import EstoqueFactory
 from stock.models import Estoque, MovimentoEstoque
 
 CHAVE = "29260812345678901234567890123456789012345678"
+
+
+def _em(dia: date, hora=12):
+    return timezone.make_aware(datetime.combine(dia, time(hora)))
 
 
 def _em(dia: date, hora=12):
@@ -144,6 +150,65 @@ class A01A02ChargebackTests(BaseAuditoriaTests):
         self.assertEqual(janeiro_depois["lucro_bruto"], Decimal("40.00"))
 
 
+class A01A02FluxoPublicoTresPeriodosTests(BaseAuditoriaTests):
+    def test_oracle_janeiro_fevereiro_marco_por_fluxos_publicos(self):
+        pedido = self._pedido(aprovado_em=_em(date(2026, 1, 10)))
+        item = pedido.itens.get()
+        NotaFiscal.objects.create(
+            pedido=pedido,
+            tipo=NotaFiscal.Tipo.SAIDA,
+            status=NotaFiscal.Status.AUTORIZADA,
+            cfop="5.102",
+            chave_acesso=CHAVE,
+        )
+        ObrigacaoEstoquePedido.objects.create(
+            pedido=pedido,
+            produto=item.produto,
+            unidade=pedido.unidade,
+            quantidade_devida=Decimal("2.00"),
+            quantidade_baixada=Decimal("2.00"),
+            evidencia_baixada=Decimal("2.00"),
+            status=ObrigacaoEstoquePedido.Status.RESOLVIDA,
+        )
+
+        janeiro = metricas_do_periodo(
+            date(2026, 1, 1), date(2026, 1, 31)
+        )
+        self.assertEqual(janeiro["receita"], Decimal("100.00"))
+        self.assertEqual(janeiro["cmv_total"], Decimal("60.00"))
+        self.assertEqual(janeiro["lucro_bruto"], Decimal("40.00"))
+
+        with mock.patch(
+            "django.utils.timezone.now",
+            return_value=_em(date(2026, 2, 10)),
+        ):
+            _aplicar_chargeback(pedido)
+
+        fevereiro = metricas_do_periodo(
+            date(2026, 2, 1), date(2026, 2, 28)
+        )
+        self.assertEqual(fevereiro["receita"], Decimal("-100.00"))
+        self.assertEqual(fevereiro["cmv_total"], Decimal("0.00"))
+        self.assertEqual(fevereiro["lucro_bruto"], Decimal("-100.00"))
+
+        with mock.patch(
+            "django.utils.timezone.now",
+            return_value=_em(date(2026, 3, 10)),
+        ):
+            registrar_devolucao(
+                pedido=pedido,
+                justificativa="Retorno físico em março",
+                usuario=self.admin,
+            )
+
+        marco = metricas_do_periodo(
+            date(2026, 3, 1), date(2026, 3, 31)
+        )
+        self.assertEqual(marco["receita"], Decimal("0.00"))
+        self.assertEqual(marco["cmv_total"], Decimal("-60.00"))
+        self.assertEqual(marco["lucro_bruto"], Decimal("60.00"))
+
+
 class A03DevolucaoPosChargebackTests(BaseAuditoriaTests):
     def test_devolucao_manual_apos_chargeback_deve_ser_possivel(self):
         pedido = self._pedido()
@@ -160,6 +225,7 @@ class A03DevolucaoPosChargebackTests(BaseAuditoriaTests):
             unidade=pedido.unidade,
             quantidade_devida=Decimal("2.00"),
             quantidade_baixada=Decimal("2.00"),
+            evidencia_baixada=Decimal("2.00"),
             status=ObrigacaoEstoquePedido.Status.RESOLVIDA,
         )
         _aplicar_chargeback(pedido)
@@ -219,6 +285,53 @@ class A03ComplementoTests(BaseAuditoriaTests):
             1,
         )
 
+    def test_devolucao_reconcilia_evidencia_parcial_em_segunda_chamada(self):
+        pedido = self._pedido()
+        item = pedido.itens.get()
+        NotaFiscal.objects.create(
+            pedido=pedido,
+            tipo=NotaFiscal.Tipo.SAIDA,
+            status=NotaFiscal.Status.AUTORIZADA,
+            cfop="5.102",
+            chave_acesso=CHAVE,
+        )
+        obrigacao = ObrigacaoEstoquePedido.objects.create(
+            pedido=pedido,
+            produto=item.produto,
+            unidade=pedido.unidade,
+            quantidade_devida=Decimal("2.00"),
+            quantidade_baixada=Decimal("2.00"),
+            evidencia_baixada=Decimal("1.00"),
+            status=ObrigacaoEstoquePedido.Status.PENDENTE,
+        )
+
+        registrar_devolucao(
+            pedido=pedido,
+            justificativa="Retorno parcial",
+            usuario=self.admin,
+        )
+        self.assertEqual(
+            MovimentoEstoque.objects.filter(
+                tipo=MovimentoEstoque.Tipo.ENTRADA_DEVOLUCAO
+            ).aggregate(total=Sum("delta"))["total"],
+            Decimal("1.00"),
+        )
+
+        obrigacao.evidencia_baixada = Decimal("2.00")
+        obrigacao.save(update_fields=["evidencia_baixada"])
+        registrar_devolucao(
+            pedido=pedido,
+            justificativa="Conciliação do restante",
+            usuario=self.admin,
+        )
+
+        self.assertEqual(
+            MovimentoEstoque.objects.filter(
+                tipo=MovimentoEstoque.Tipo.ENTRADA_DEVOLUCAO
+            ).aggregate(total=Sum("delta"))["total"],
+            Decimal("2.00"),
+        )
+
     def test_estorno_rejeita_pagamento_recusado(self):
         pedido = self._pedido()
         pagamento = pedido.pagamento
@@ -227,6 +340,79 @@ class A03ComplementoTests(BaseAuditoriaTests):
 
         with pytest.raises(ValidationError):
             estornar_pagamento(pagamento, motivo="inválido")
+
+
+class A02LegadoTests(BaseAuditoriaTests):
+    def test_movimento_legado_sem_obrigacao_e_reconhecido(self):
+        pedido = self._pedido()
+        item = pedido.itens.get()
+        obrigacao = ObrigacaoEstoquePedido.objects.create(
+            pedido=pedido,
+            produto=item.produto,
+            unidade=pedido.unidade,
+            quantidade_devida=Decimal("2.00"),
+            quantidade_baixada=Decimal("2.00"),
+            evidencia_baixada=Decimal("2.00"),
+            status=ObrigacaoEstoquePedido.Status.RESOLVIDA,
+        )
+        MovimentoEstoque.objects.create(
+            produto=item.produto,
+            unidade=pedido.unidade,
+            tipo=MovimentoEstoque.Tipo.ENTRADA_DEVOLUCAO,
+            delta=Decimal("2.00"),
+            motivo=f"Devolução do pedido {pedido.numero}: legado",
+        )
+        hoje = timezone.localdate()
+
+        metricas = metricas_do_periodo(hoje, hoje)
+
+        self.assertEqual(metricas["cmv_total"], Decimal("0.00"))
+        self.assertEqual(metricas["lucro_bruto"], Decimal("100.00"))
+
+        NotaFiscal.objects.create(
+            pedido=pedido,
+            tipo=NotaFiscal.Tipo.SAIDA,
+            status=NotaFiscal.Status.AUTORIZADA,
+            cfop="5.102",
+            chave_acesso=CHAVE,
+        )
+        registrar_devolucao(
+            pedido=pedido,
+            justificativa="Legado já compensado",
+            usuario=self.admin,
+        )
+        self.assertEqual(
+            MovimentoEstoque.objects.filter(
+                tipo=MovimentoEstoque.Tipo.ENTRADA_DEVOLUCAO
+            ).count(),
+            1,
+        )
+        self.assertEqual(obrigacao.quantidade_baixada, Decimal("2.00"))
+
+    def test_estorno_de_aprovacao_tardia_nao_gera_negativo(self):
+        pedido = PedidoFactory(
+            status=Pedido.Status.CANCELADO,
+            status_financeiro=Pedido.StatusFinanceiro.CANCELADO,
+            subtotal=Decimal("100.00"),
+            total=Decimal("100.00"),
+        )
+        Pedido.objects.filter(pk=pedido.pk).update(
+            cancelado_em=timezone.now() - timedelta(hours=1)
+        )
+        pagamento = PagamentoFactory(
+            pedido=pedido,
+            valor=Decimal("100.00"),
+            status=Pagamento.Status.APROVADO,
+            aprovado_em=timezone.now(),
+        )
+        pagamento.status = Pagamento.Status.CANCELADO
+        pagamento.estornado_em = timezone.now() + timedelta(minutes=1)
+        pagamento.save(update_fields=["status", "estornado_em"])
+        hoje = timezone.localdate()
+
+        self.assertEqual(
+            metricas_do_periodo(hoje, hoje)["receita"], Decimal("0.00")
+        )
 
 
 class A04EvidenciaEstoqueTests(BaseAuditoriaTests):
@@ -259,6 +445,40 @@ class A04EvidenciaEstoqueTests(BaseAuditoriaTests):
             ).exists()
         )
 
+    def test_evidencia_zero_nao_credita(self):
+        pedido = self._pedido(
+            status=Pedido.Status.PAGO,
+            com_estoque=True,
+        )
+        item = pedido.itens.get()
+        ObrigacaoEstoquePedido.objects.create(
+            pedido=pedido,
+            produto=item.produto,
+            unidade=pedido.unidade,
+            quantidade_devida=Decimal("2.00"),
+            quantidade_baixada=Decimal("2.00"),
+            evidencia_baixada=Decimal("0.00"),
+            status=ObrigacaoEstoquePedido.Status.PENDENTE,
+        )
+        estoque = Estoque.objects.get(
+            produto=item.produto, unidade=pedido.unidade
+        )
+
+        cancelar_pedido_padrao(
+            pedido=pedido,
+            justificativa="Sem evidência",
+            usuario=self.admin,
+        )
+
+        estoque.refresh_from_db()
+        self.assertEqual(estoque.quantidade, Decimal("10.00"))
+        self.assertTrue(
+            Aviso.objects.filter(
+                tipo=Aviso.Tipo.ESTOQUE_PENDENTE,
+                objeto_id=str(pedido.pk),
+            ).exists()
+        )
+
     def test_evidencia_parcial_devolve_somente_quantidade_comprovada(self):
         pedido = self._pedido(
             status=Pedido.Status.PAGO,
@@ -271,6 +491,7 @@ class A04EvidenciaEstoqueTests(BaseAuditoriaTests):
             unidade=pedido.unidade,
             quantidade_devida=Decimal("2.00"),
             quantidade_baixada=Decimal("1.00"),
+            evidencia_baixada=Decimal("1.00"),
             status=ObrigacaoEstoquePedido.Status.PENDENTE,
         )
         estoque = Estoque.objects.get(

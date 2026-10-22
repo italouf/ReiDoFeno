@@ -73,6 +73,12 @@ class NotaFiscal(models.Model):
             raise ValidationError(
                 {"chave_acesso": "A chave de acesso deve ter 44 dígitos."}
             )
+        if self.chave_acesso and type(self).objects.filter(
+            chave_acesso=self.chave_acesso
+        ).exclude(pk=self.pk).exists():
+            raise ValidationError(
+                {"chave_acesso": "Já existe uma nota com esta chave de acesso."}
+            )
         if self.tipo == self.Tipo.ENTRADA:
             chave = (self.chave_referenciada or "").strip()
             if not chave:

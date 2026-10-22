@@ -14,8 +14,11 @@
 
   function setup(canvas) {
     var dpr = window.devicePixelRatio || 1;
-    var width = canvas.clientWidth || canvas.parentElement.clientWidth || 640;
+    var rect = canvas.parentElement.getBoundingClientRect();
+    var width = Math.max(320, rect.width || 640);
     var height = Number(canvas.getAttribute("height")) || 220;
+    canvas.style.width = width + "px";
+    canvas.style.height = height + "px";
     canvas.width = Math.round(width * dpr);
     canvas.height = Math.round(height * dpr);
     var ctx = canvas.getContext("2d");
@@ -119,6 +122,12 @@
       }
     });
   }
+
+  var resizeTimer = null;
+  window.addEventListener("resize", function () {
+    window.clearTimeout(resizeTimer);
+    resizeTimer = window.setTimeout(init, 120);
+  });
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", init);

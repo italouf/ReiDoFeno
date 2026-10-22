@@ -70,6 +70,7 @@ class EventosReceitaCmvTests(TestCase):
             unidade=self.unidade,
             quantidade_devida=Decimal("2.00"),
             quantidade_baixada=Decimal("2.00"),
+            evidencia_baixada=Decimal("2.00"),
             status=ObrigacaoEstoquePedido.Status.RESOLVIDA,
         )
         with mock.patch(

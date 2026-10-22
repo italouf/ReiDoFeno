@@ -576,6 +576,8 @@ class MinhasMetricasView(LoginRequiredMixin, GrupoRequiredMixin, TemplateView):
         contexto["metricas"] = metricas
         contexto["receita"] = metricas["receita"]
         contexto["num_pedidos"] = metricas["num_pedidos"]
+        contexto["receita_produtos"] = metricas["receita_produtos"]
+        contexto["receita_frete"] = metricas["receita_frete"]
         contexto["cmv_total"] = metricas["cmv_total"]
         contexto["lucro_bruto"] = metricas["lucro_bruto"]
         contexto["despesas_total"] = metricas["despesas_total"]

@@ -12,4 +12,5 @@ class WorkflowCIBranchTests(SimpleTestCase):
         texto = WORKFLOW.read_text(encoding="utf-8")
         self.assertIn("fase-2c-analytics-fiscal", texto)
         self.assertIn("postgres:15", texto)
+        self.assertIn("redis", texto.lower())
         self.assertIn("workflow_dispatch", texto)

@@ -226,6 +226,7 @@ class CancelamentoPadraoTests(BaseCancelamentoTests):
             unidade=unidade,
             quantidade_devida=Decimal("5.00"),
             quantidade_baixada=Decimal("5.00"),
+            evidencia_baixada=Decimal("5.00"),
             status=ObrigacaoEstoquePedido.Status.RESOLVIDA,
         )
 
@@ -357,6 +358,7 @@ class DevolucaoTests(BaseCancelamentoTests):
             unidade=unidade,
             quantidade_devida=Decimal("5.00"),
             quantidade_baixada=Decimal("5.00"),
+            evidencia_baixada=Decimal("5.00"),
             status=ObrigacaoEstoquePedido.Status.RESOLVIDA,
         )
 
@@ -460,6 +462,7 @@ class DevolucaoTests(BaseCancelamentoTests):
             unidade=unidade,
             quantidade_devida=Decimal("5.00"),
             quantidade_baixada=Decimal("5.00"),
+            evidencia_baixada=Decimal("5.00"),
             status=ObrigacaoEstoquePedido.Status.RESOLVIDA,
         )
 

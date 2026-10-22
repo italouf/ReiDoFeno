@@ -27,7 +27,9 @@
       <thead>
         <tr>
           <th scope="col">Unidade</th>
-          <th scope="col" class="num">Receita</th>
+          <th scope="col" class="num">Receita financeira</th>
+          <th scope="col" class="num">Receita produtos</th>
+          <th scope="col" class="num">Frete</th>
           <th scope="col" class="num">CMV</th>
           <th scope="col" class="num">Lucro bruto</th>
           <th scope="col" class="num">Pedidos</th>
@@ -39,6 +41,8 @@
         <tr>
           <td>{{ linha.unidade }}</td>
           <td class="num">R$ {{ linha.receita|floatformat:2 }}</td>
+          <td class="num">R$ {{ linha.receita_produtos|floatformat:2 }}</td>
+          <td class="num">R$ {{ linha.receita_frete|floatformat:2 }}</td>
           <td class="num">R$ {{ linha.cmv|floatformat:2 }}</td>
           <td class="num">R$ {{ linha.lucro_bruto|floatformat:2 }}</td>
           <td class="num">{{ linha.num_pedidos }}</td>
