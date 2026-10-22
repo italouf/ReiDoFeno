@@ -1,5 +1,40 @@
 # Changelog
 
+## [Fase 2C — Analytics Core + Fiscal Manual] — 2026-10-22
+
+- **ANA-01/ADR-016:** receita reconhecida por `Pagamento.aprovado_em`, não por
+  `Pedido.status`; `Pagamento.estornado_em` registra o evento negativo. Pedido
+  pago em separação conta; concluído sem pagamento não conta; estorno abate na
+  data do evento.
+- **ADR-008:** `ItemPedido.custo_unitario` é snapshot imutável do custo no
+  checkout; `Pedido.cmv`, `Pedido.lucro_bruto` e `ItemPedido.lucro_bruto`
+  passam a refletir custo histórico. Migração preenche legados com o custo
+  corrente e registra a limitação.
+- **ADR-010:** métricas de `/gestao/minhas-metricas/` recortadas por
+  `usuario_criador`; painel global restrito a Administrador/Gestor; despesas
+  ganham `usuario_responsavel`; recompra filtra clientes do vendedor.
+- **Painéis:** relatório de vendas por produto/dia/unidade com CMV, lucro e
+  CSV; comparativo FS/Iaçu com receita, CMV, lucro, pedidos e ticket médio.
+- **ADR-007:** cancelamento padrão em até 24h e devolução após entrega, com
+  justificativa, ator, auditoria, estorno e compensação de estoque por
+  `MovimentoEstoque` do tipo `entrada_devolucao`.
+- **Fiscal:** NF-e de entrada/devolução com CFOP inverso e chave referenciada
+  de 44 dígitos; `NotaFiscal.pedido` passa a `ForeignKey` para permitir saída +
+  entrada; cancelamento de NF-e autorizada auditado.
+- **Interestadual:** `Unidade.uf`; `Pedido.uf_entrega`, `interestadual` e
+  `aliquota_icms` calculados no save; BA→MG a 12%; relatório fiscal destaca
+  operações interestaduais e exporta CSV.
+- **Emissor Fiscal:** grupo com permissões de NF-e e leitura de pedido, sem
+  edição de pedido/cliente/produto/estoque; data migration atribui ao usuário
+  `Caio`, se existente.
+- **Validação local:** SQLite 575 passed/15 skipped/240 subtests; cobertura
+  `analytics/services.py` 97,87% e `sales/services.py` 85,02%; Ruff, check,
+  `makemigrations --check`, Bandit (0 medium/high) e pip-audit (0) limpos.
+  A suíte PostgreSQL/Redis de CI não foi executada neste ambiente local; os
+  testes marcados como PostgreSQL continuam pulados fora da CI.
+- **Documentação:** specs em `docs/specs/fase-2c/`; ADRs 007, 008, 010 e 016;
+  relatório em `docs/audit/fase-2c-conclusao.md`.
+
 ## [Fase 2B — remediação da auditoria independente] — 2026-10-20, encerrada em 2026-10-22
 
 - **B01:** removido o fallback que reduzia `quantidade_bloqueada` sem identidade;

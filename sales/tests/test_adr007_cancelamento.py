@@ -13,6 +13,7 @@ from django.utils import timezone
 from accounts.models import Usuario
 from catalog.factories import ProdutoFactory
 from core.factories import UnidadeFactory
+from core.models import LogAuditoria
 from fiscal.models import NotaFiscal
 from sales.factories import ItemPedidoFactory, PagamentoFactory, PedidoFactory
 from sales.models import Pagamento, Pedido
@@ -105,6 +106,77 @@ class CancelamentoPadraoTests(BaseCancelamentoTests):
             cancelar_pedido_padrao(
                 pedido=pedido,
                 justificativa="   ",
+                usuario=self.admin,
+            )
+
+    def test_cancelamento_padrao_em_separacao(self):
+        pedido = self.criar_pedido_pago(
+            status=Pedido.Status.EM_SEPARACAO,
+            aprovado_em=timezone.now() - timedelta(hours=1),
+        )
+
+        cancelar_pedido_padrao(
+            pedido=pedido,
+            justificativa="Mercadoria ainda na loja",
+            usuario=self.admin,
+        )
+
+        pedido.refresh_from_db()
+        self.assertEqual(pedido.status, Pedido.Status.CANCELADO)
+
+    def test_cancelamento_padrao_e_idempotente(self):
+        pedido = self.criar_pedido_pago()
+
+        cancelar_pedido_padrao(
+            pedido=pedido, justificativa="Erro", usuario=self.admin
+        )
+        cancelar_pedido_padrao(
+            pedido=pedido, justificativa="Erro", usuario=self.admin
+        )
+
+        self.assertEqual(
+            LogAuditoria.objects.filter(
+                acao="pedido.cancelado_padrao",
+                objeto_id=str(pedido.pk),
+            ).count(),
+            1,
+        )
+
+    def test_cancelamento_padrao_cancela_nfe_saida(self):
+        pedido = self.criar_pedido_pago()
+        nota = NotaFiscal.objects.create(
+            pedido=pedido,
+            tipo=NotaFiscal.Tipo.SAIDA,
+            status=NotaFiscal.Status.AUTORIZADA,
+            cfop="5.102",
+            chave_acesso="29260812345678901234567890123456789012345678",
+        )
+
+        cancelar_pedido_padrao(
+            pedido=pedido,
+            justificativa="Erro de emissão",
+            usuario=self.admin,
+        )
+
+        nota.refresh_from_db()
+        self.assertEqual(nota.status, NotaFiscal.Status.CANCELADA)
+
+    def test_cancelamento_padrao_exige_pagamento_aprovado(self):
+        pedido = PedidoFactory(
+            status=Pedido.Status.PAGO,
+            subtotal=Decimal("100.00"),
+            total=Decimal("100.00"),
+        )
+        PagamentoFactory(
+            pedido=pedido,
+            valor=Decimal("100.00"),
+            status=Pagamento.Status.PENDENTE,
+        )
+
+        with pytest.raises(ValidationError, match="pagamento aprovado"):
+            cancelar_pedido_padrao(
+                pedido=pedido,
+                justificativa="Erro",
                 usuario=self.admin,
             )
 
@@ -209,6 +281,37 @@ class DevolucaoTests(BaseCancelamentoTests):
                 justificativa="Devolução",
                 usuario=self.admin,
             )
+
+    def test_devolucao_e_idempotente_para_estoque_e_nota(self):
+        produto = ProdutoFactory(custo=Decimal("10.00"))
+        unidade = UnidadeFactory()
+        estoque = EstoqueFactory(
+            produto=produto, unidade=unidade, quantidade=Decimal("10.00")
+        )
+        pedido = self._pedido_com_nfe()
+        pedido.unidade = unidade
+        pedido.save(update_fields=["unidade"])
+        ItemPedidoFactory(
+            pedido=pedido, produto=produto, quantidade=5,
+            preco_unitario=Decimal("20.00"),
+        )
+
+        primeira = registrar_devolucao(
+            pedido=pedido, justificativa="Defeito", usuario=self.admin
+        )
+        segunda = registrar_devolucao(
+            pedido=pedido, justificativa="Defeito", usuario=self.admin
+        )
+
+        self.assertEqual(primeira.pk, segunda.pk)
+        self.assertEqual(
+            NotaFiscal.objects.filter(
+                pedido=pedido, tipo=NotaFiscal.Tipo.ENTRADA
+            ).count(),
+            1,
+        )
+        estoque.refresh_from_db()
+        self.assertEqual(estoque.quantidade, Decimal("15.00"))
 
     def test_devolucao_estorna_pagamento(self):
         pedido = self._pedido_com_nfe()
