@@ -66,12 +66,22 @@ class NotaFiscal(models.Model):
 
     def clean(self):
         super().clean()
-        if self.tipo == self.Tipo.ENTRADA and not self.chave_referenciada:
-            raise ValidationError(
-                {
-                    "chave_referenciada": (
-                        "NF-e de entrada/devolução exige a chave da NF-e "
-                        "de saída referenciada."
-                    )
-                }
-            )
+        if self.tipo == self.Tipo.ENTRADA:
+            chave = (self.chave_referenciada or "").strip()
+            if not chave:
+                raise ValidationError(
+                    {
+                        "chave_referenciada": (
+                            "NF-e de entrada/devolução exige a chave da NF-e "
+                            "de saída referenciada."
+                        )
+                    }
+                )
+            if len(chave) != 44 or not chave.isdigit():
+                raise ValidationError(
+                    {
+                        "chave_referenciada": (
+                            "A chave referenciada deve ter 44 dígitos."
+                        )
+                    }
+                )
