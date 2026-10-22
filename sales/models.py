@@ -449,6 +449,12 @@ class Pagamento(models.Model):
     )
     valor = models.DecimalField("valor", max_digits=12, decimal_places=2)
     aprovado_em = models.DateTimeField("aprovado em", null=True, blank=True)
+    estornado_em = models.DateTimeField(
+        "estornado em",
+        null=True,
+        blank=True,
+        help_text="Data do estorno/chargeback; base negativa da receita.",
+    )
 
     class Meta:
         verbose_name = "pagamento"
