@@ -1,5 +1,29 @@
 # Changelog
 
+## [Fase 2C — correção da auditoria A01–A09] — 2026-10-22
+
+- **A01/A02:** eventos de receita de produtos, estorno financeiro e retorno
+  físico separados; lucro de produto reconcilia painel/comparativo e CMV
+  histórico não é apagado por chargeback.
+- **A03/A04:** devolução após chargeback aceita aprovação histórica + estorno
+  confirmado sem segundo estorno; estoque só compensa obrigação com baixa
+  comprovada e não compensada; ausência de prova gera aviso.
+- **A05/A07:** fila e formulário de NF-e de entrada para Emissor Fiscal;
+  referência à saída autorizada validada; CFOP confirmado não é reescrito por
+  edição comum, saneamento exige motivo/evidência; mapeamento inverso
+  restrito à tabela fiscal validada.
+- **A06:** CSV fiscal exporta evento/data corretos e sanitiza fórmulas em
+  campos textuais; CSV de produto também sanitizado.
+- **A08:** gráficos deixam CDN/script inline e usam `static/js/relatorios.js`;
+  validados em navegador sob CSP padrão.
+- **A09:** workflow de push inclui `fase-2c-analytics-fiscal`.
+- **Validação local:** SQLite 616 passed/16 skipped/240 subtests; cobertura
+  `analytics/services.py` 97,85%, `sales/services.py` 85,09%,
+  `fiscal/services.py` 90,20%; gate histórico 0001→HEAD aprovado; Ruff,
+  check, check --deploy, Bandit 0 medium/high e pip-audit 0.
+  PostgreSQL 15 + Redis e CI remoto permanecem pendentes de execução
+  autorizada; aceite do cliente também pendente.
+
 ## [Fase 2C — Analytics Core + Fiscal Manual] — 2026-10-22
 
 - **ANA-01/ADR-016:** receita reconhecida por `Pagamento.aprovado_em`, não por

@@ -1,0 +1,76 @@
+# Validação da correção da auditoria — Fase 2C
+
+Data: 2026-10-22
+Branch: `fase-2c-analytics-fiscal`
+Ambiente local: Windows, Python 3.14.3, Django 5.2.17, SQLite.
+PostgreSQL 15/Redis: **não disponíveis neste ambiente**; CI remoto pendente.
+
+## Suíte e cobertura
+
+| Verificação | Resultado |
+|---|---|
+| Suíte SQLite | **616 passed, 16 skipped, 240 subtests** |
+| Cobertura total dos módulos medidos | **87,26%** |
+| `analytics/services.py` | **97,85%** |
+| `sales/services.py` | **85,09%** |
+| `fiscal/services.py` | **90,20%** |
+| `ruff check .` | limpo |
+| `manage.py check` | sem issues |
+| `manage.py makemigrations --check --dry-run` | no changes |
+| `manage.py check --deploy` com segredos sintéticos | sem issues |
+| Bandit `-ll` | 0 medium/high |
+| `pip-audit -r requirements.txt` | 0 vulnerabilidades conhecidas |
+| Gate histórico `0001 → HEAD` | aprovado em SQLite descartável |
+
+Os 16 skips são os testes marcados `postgres`/Redis já conhecidos e os testes
+que exigem backend real. Não foram apresentados como aprovados.
+
+## Cenários adicionais A01–A07
+
+Executados em `sales/tests/test_auditoria_fase2c.py` e
+`fiscal/tests/test_auditoria_fase2c.py`:
+
+- `test_chargeback_deve_manter_lucro_coerente_entre_paineis` — 0/60/-60 nos
+  dois painéis.
+- `test_chargeback_nao_deve_apagar_cmv_de_janeiro` — janeiro mantém 100/60/40.
+- `test_devolucao_manual_apos_chargeback_deve_ser_possivel` — uma entrada,
+  um movimento e um estorno.
+- `test_cancelamento_legado_sem_evidencia_nao_deve_inflar_estoque` — saldo
+  10→10 e aviso.
+- `test_evidencia_parcial_devolve_somente_quantidade_comprovada` — 10→11.
+- `test_emissor_deve_conseguir_registrar_documento_de_entrada` — entrada
+  autorizada sem novo efeito.
+- `test_csv_fiscal_com_dados_deve_funcionar` — HTTP 200 com linha real.
+- `test_cfop_de_nota_autorizada_nao_deve_ser_reescrito_silenciosamente`.
+- `test_saneamento_autorizado_de_cfop_legado_e_auditado`.
+- `test_graficos_nao_dependem_de_cdn_nem_script_inline`.
+- `test_push_da_fase_2c_dispara_ci`.
+
+## Evidência de navegador
+
+Playwright, servidor local com CSP padrão e `DEBUG=True` do settings de
+desenvolvimento:
+
+- `/gestao/relatorios/comparativo-unidades/`: canvas pintado, tabela
+  FS `100/60/40` e Iaçu `100/40/60`; scripts apenas
+  `static/js/relatorios.js` e `static/js/app.js`; zero erros de console/CSP.
+  Screenshot: `docs/audit/fase-2c-comparativo-csp.png`.
+- Login como Emissor Fiscal: `/fiscal/notas-entrada/` listou a pendência;
+  o formulário registrou número 77001/chave/ link, e a lista passou a
+  “Autorizada”; nenhuma ação de estoque/pagamento foi repetida.
+  Screenshot: `docs/audit/fase-2c-nota-entrada.png`.
+
+O único erro de console no login foi `favicon.ico` 404, sem relação com CSP.
+
+## Pendências e limites
+
+- CI remoto (PostgreSQL 15 + Redis) não executado: o prompt não autoriza push
+  e não há PostgreSQL/Redis locais. `workflow_dispatch`/PR devem ser usados
+  após autorização.
+- Aceite do cliente não realizado; roteiro em
+  `docs/operacao/fase-2c-aceite.md`.
+- Emissão/cancelamento fiscal real, reembolso real e SEFAZ não executados.
+- Custo legado continua aproximado pelo custo corrente.
+- `NotaFiscal` de entrada é registro manual; não é autorização externa
+  inventada pelo sistema.
+- A validação visual usou dados sintéticos, não base real.

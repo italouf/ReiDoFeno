@@ -4,6 +4,11 @@ Data: 2026-10-22
 Branch: `fase-2c-analytics-fiscal`
 Base: `a314a74` (merge da Fase 2B)
 
+> **Atualização pós-auditoria:** os achados A01–A09 foram corrigidos e
+> validados localmente. Ver `docs/audit/fase-2c-correcao-rastreabilidade.md`
+> e `docs/audit/fase-2c-correcao-validacao.md`. O Gate C (CI remoto
+> PostgreSQL 15/Redis) e o Gate H (aceite humano) permanecem pendentes.
+
 ## Entregas
 
 | Tarefa | Implementação | Testes |

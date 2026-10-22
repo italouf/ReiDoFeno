@@ -6,6 +6,7 @@ on:
       - main
       - fase-2a-seguranca-critica
       - fase-2b-integridade-estoque
+      - fase-2c-analytics-fiscal
   pull_request:
   workflow_dispatch:
 
