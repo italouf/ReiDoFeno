@@ -4,7 +4,7 @@ from datetime import date
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Q, Sum
 from django.utils import timezone
 
@@ -255,7 +255,22 @@ def enviar_para_emissao(pedido, client=None) -> NotaFiscal | None:
     nota.chave_acesso = resultado.get("chave", "")
     nota.link_documento = resultado.get("link", "")
     nota.ultimo_erro = ""
-    nota.save()
+    try:
+        with transaction.atomic():
+            nota.save()
+    except IntegrityError:
+        nota.status = NotaFiscal.Status.ERRO
+        nota.ultimo_erro = "Chave de acesso já registrada em outra nota."
+        nota.save(update_fields=["status", "ultimo_erro", "atualizado_em"])
+        Aviso.registrar(
+            tipo=Aviso.Tipo.FISCAL_ERRO,
+            mensagem=(
+                f"Chave duplicada ao emitir NF-e do pedido {pedido.numero}."
+            ),
+            objeto=nota,
+            severidade=Aviso.Severidade.ERRO,
+        )
+        return nota
     from core.auditoria import registrar_auditoria
 
     registrar_auditoria(

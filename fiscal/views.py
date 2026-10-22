@@ -2,8 +2,8 @@ import csv
 
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
-from django.core.exceptions import PermissionDenied
-from django.db import transaction
+from django.core.exceptions import PermissionDenied, ValidationError
+from django.db import IntegrityError, transaction
 from django.db.models import Case, IntegerField, Value, When
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect
@@ -56,16 +56,6 @@ class RegistrarNotaManualView(
     def form_valid(self, form):
         from .services import pedido_elegivel
 
-        nota_existente = NotaFiscal.objects.filter(
-            pedido=self.pedido, tipo=NotaFiscal.Tipo.SAIDA
-        ).first()
-        if nota_existente is None and not pedido_elegivel(self.pedido):
-            form.add_error(
-                None,
-                "O pedido precisa estar pago, conciliado e com documento válido.",
-            )
-            return self.form_invalid(form)
-
         numero = form.cleaned_data["numero"]
         chave = form.cleaned_data["chave_acesso"]
         cfop_informado = (form.cleaned_data.get("cfop") or "").strip()
@@ -74,12 +64,24 @@ class RegistrarNotaManualView(
             form.cleaned_data.get("evidencia_retificacao") or ""
         ).strip()
         link = form.cleaned_data.get("link_documento", "")
+        pedido_id = self.pedido.pk
         with transaction.atomic():
+            # Pedido primeiro, nota depois: mesma ordem de cancelamento e
+            # devolução. A ausência inicial de nota é serializada pelo lock
+            # da linha do pedido, que existe desde o checkout.
+            pedido = Pedido.objects.select_for_update().get(pk=pedido_id)
             nota = (
                 NotaFiscal.objects.select_for_update()
-                .filter(pedido=self.pedido, tipo=NotaFiscal.Tipo.SAIDA)
+                .filter(pedido=pedido, tipo=NotaFiscal.Tipo.SAIDA)
                 .first()
             )
+            if nota is None and not pedido_elegivel(pedido):
+                form.add_error(
+                    None,
+                    "O pedido precisa estar pago, conciliado e com documento "
+                    "válido.",
+                )
+                return self.form_invalid(form)
             if (
                 nota is not None
                 and nota.status == NotaFiscal.Status.CANCELADA
@@ -107,7 +109,7 @@ class RegistrarNotaManualView(
                 return self.form_invalid(form)
             antes = None
             if nota is None:
-                if not pedido_elegivel(self.pedido):
+                if not pedido_elegivel(pedido):
                     form.add_error(
                         None,
                         "O pedido precisa estar pago, conciliado e com "
@@ -115,10 +117,10 @@ class RegistrarNotaManualView(
                     )
                     return self.form_invalid(form)
                 nota = NotaFiscal(
-                    pedido=self.pedido, tipo=NotaFiscal.Tipo.SAIDA
+                    pedido=pedido, tipo=NotaFiscal.Tipo.SAIDA
                 )
                 cfop = cfop_informado or (
-                    "6.102" if self.pedido.interestadual else "5.102"
+                    "6.102" if pedido.interestadual else "5.102"
                 )
             else:
                 antes = {
@@ -145,8 +147,19 @@ class RegistrarNotaManualView(
             nota.chave_acesso = chave
             nota.cfop = cfop
             nota.link_documento = link
-            nota.full_clean()
-            nota.save()
+            try:
+                nota.full_clean()
+                with transaction.atomic():
+                    nota.save()
+            except ValidationError as erro:
+                form.add_error(None, erro.messages)
+                return self.form_invalid(form)
+            except IntegrityError:
+                form.add_error(
+                    "chave_acesso",
+                    "Já existe uma nota registrada com esta chave.",
+                )
+                return self.form_invalid(form)
 
             acao = (
                 "fiscal.nota_cfop_retificado"
@@ -169,7 +182,7 @@ class RegistrarNotaManualView(
             )
         messages.success(
             self.request,
-            f"NF-e manual {nota.numero} vinculada ao pedido {self.pedido.numero}.",
+            f"NF-e manual {nota.numero} vinculada ao pedido {pedido.numero}.",
         )
         return redirect(reverse("fiscal:relatorio_fiscal"))
 
@@ -236,7 +249,9 @@ class RegistrarNotaEntradaView(
         return contexto
 
     def form_valid(self, form):
+        pedido_id = self.nota.pedido_id
         with transaction.atomic():
+            Pedido.objects.select_for_update().get(pk=pedido_id)
             nota = NotaFiscal.objects.select_for_update().get(
                 pk=self.nota.pk, tipo=NotaFiscal.Tipo.ENTRADA
             )
@@ -312,8 +327,19 @@ class RegistrarNotaEntradaView(
             nota.link_documento = link
             nota.origem = NotaFiscal.Origem.MANUAL
             nota.status = NotaFiscal.Status.AUTORIZADA
-            nota.full_clean()
-            nota.save()
+            try:
+                nota.full_clean()
+                with transaction.atomic():
+                    nota.save()
+            except ValidationError as erro:
+                form.add_error(None, erro.messages)
+                return self.form_invalid(form)
+            except IntegrityError:
+                form.add_error(
+                    "chave_acesso",
+                    "Já existe uma nota registrada com esta chave.",
+                )
+                return self.form_invalid(form)
             registrar_auditoria(
                 acao="fiscal.nota_entrada_registrada",
                 instancia=nota,

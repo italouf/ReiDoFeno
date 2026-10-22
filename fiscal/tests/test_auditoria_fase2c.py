@@ -5,6 +5,7 @@ from decimal import Decimal
 
 from django.contrib.auth.models import Group
 from django.core.management import call_command
+from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -17,6 +18,7 @@ from sales.factories import (
     PedidoFactory,
 )
 from sales.models import Pagamento, Pedido
+from sales.services import cancelar_pedido_padrao
 from stock.models import MovimentoEstoque
 
 CHAVE_SAIDA = "29260812345678901234567890123456789012345678"
@@ -207,6 +209,27 @@ class A05RegistroEntradaTests(BaseFiscalAuditoriaTests):
         self.assertEqual(MovimentoEstoque.objects.count(), movimentos_antes)
 
 
+class A02ChaveUnicaTests(BaseFiscalAuditoriaTests):
+    def test_chave_nao_vazia_e_unica_no_banco(self):
+        pedido1 = self._pedido()
+        pedido2 = self._pedido()
+        NotaFiscal.objects.create(
+            pedido=pedido1,
+            tipo=NotaFiscal.Tipo.SAIDA,
+            status=NotaFiscal.Status.AUTORIZADA,
+            chave_acesso=CHAVE_SAIDA,
+        )
+
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                NotaFiscal.objects.create(
+                    pedido=pedido2,
+                    tipo=NotaFiscal.Tipo.SAIDA,
+                    status=NotaFiscal.Status.AUTORIZADA,
+                    chave_acesso=CHAVE_SAIDA,
+                )
+
+
 class A06CsvFiscalTests(BaseFiscalAuditoriaTests):
     def test_csv_fiscal_com_dados_deve_funcionar(self):
         self._pedido()
@@ -251,6 +274,29 @@ class A06CsvFiscalTests(BaseFiscalAuditoriaTests):
         self.assertIn("'=Planilha Perigosa", conteudo)
         self.assertIn("estorno", conteudo)
         self.assertIn("-100.00", conteudo)
+
+
+class A01RegistroAposCancelamentoTests(BaseFiscalAuditoriaTests):
+    def test_primeiro_registro_apos_cancelamento_e_rejeitado(self):
+        pedido = self._pedido(status=Pedido.Status.PAGO)
+        cancelar_pedido_padrao(
+            pedido=pedido,
+            justificativa="Antes da primeira nota",
+            usuario=self.gestor,
+        )
+        self.client.force_login(self.gestor)
+
+        resposta = self.client.post(
+            reverse("fiscal:nota_manual", args=[pedido.pk]),
+            {"numero": "R01", "chave_acesso": CHAVE_SAIDA},
+        )
+
+        self.assertEqual(resposta.status_code, 200)
+        self.assertFalse(
+            NotaFiscal.objects.filter(
+                pedido=pedido, tipo=NotaFiscal.Tipo.SAIDA
+            ).exists()
+        )
 
 
 class A07CfopTests(BaseFiscalAuditoriaTests):

@@ -58,7 +58,12 @@ class NotaFiscal(models.Model):
             models.UniqueConstraint(
                 fields=("pedido", "tipo"),
                 name="nota_fiscal_unica_por_pedido_tipo",
-            )
+            ),
+            models.UniqueConstraint(
+                fields=("chave_acesso",),
+                condition=~models.Q(chave_acesso=""),
+                name="nota_fiscal_chave_acesso_unica",
+            ),
         ]
 
     def __str__(self):
