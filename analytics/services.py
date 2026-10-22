@@ -76,10 +76,15 @@ def pagamentos_estornados(inicio: date, fim: date, vendedor=None):
 
 def _itens_vendidos(inicio: date, fim: date, vendedor=None):
     começo, término = _janela(inicio, fim)
-    query = ItemPedido.objects.filter(
-        pedido__pagamento__aprovado_em__range=(começo, término),
-        pedido__pagamento__aprovado_em__isnull=False,
-        pedido__status_financeiro__in=STATUS_FINANCEIROS_COM_RECEITA,
+    query = (
+        ItemPedido.objects.filter(
+            pedido__pagamento__aprovado_em__range=(começo, término),
+            pedido__pagamento__aprovado_em__isnull=False,
+            pedido__status_financeiro__in=STATUS_FINANCEIROS_COM_RECEITA,
+        ).exclude(
+            pedido__pagamento__status=Pagamento.Status.CANCELADO,
+            pedido__pagamento__estornado_em__isnull=True,
+        )
     )
     query = _excluir_aprovacao_pos_cancelamento(
         query, "pedido__pagamento__aprovado_em"
@@ -271,6 +276,19 @@ def metricas_do_periodo(
         or Decimal("0.00")
     )
     pedidos_vendidos = aprovados.values("pedido_id").distinct().count()
+    conciliacao = Pagamento.objects.filter(
+        aprovado_em__range=_janela(inicio, fim),
+        aprovado_em__isnull=False,
+        status=Pagamento.Status.CANCELADO,
+        estornado_em__isnull=True,
+        pedido__status_financeiro__in=STATUS_FINANCEIROS_COM_RECEITA,
+    )
+    if vendedor is not None:
+        conciliacao = conciliacao.filter(pedido__usuario_criador=vendedor)
+    receita_em_conciliacao = (
+        conciliacao.aggregate(total=Sum("valor"))["total"]
+        or Decimal("0.00")
+    )
 
     linhas = _linhas_itens(inicio, fim, vendedor=vendedor)
     receita_produtos = sum(
@@ -320,6 +338,7 @@ def metricas_do_periodo(
         "top_produtos": top_produtos,
         "receita_produtos": receita_produtos,
         "receita_frete": receita_frete,
+        "receita_em_conciliacao": receita_em_conciliacao,
         "cmv_total": cmv_total,
         "lucro_bruto": lucro_bruto,
         "despesas_total": despesas_total,

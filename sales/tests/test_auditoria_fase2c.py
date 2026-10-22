@@ -29,6 +29,7 @@ from sales.models import (
     Pedido,
 )
 from sales.services import (
+    _obrigacao_por_movimento,
     aplicar_resultado_pagamento,
     cancelar_pedido_padrao,
     estornar_pagamento,
@@ -388,6 +389,41 @@ class A02LegadoTests(BaseAuditoriaTests):
             1,
         )
         self.assertEqual(obrigacao.quantidade_baixada, Decimal("2.00"))
+
+    def test_motivo_ambiguo_nao_atribui_retorno_a_ninguem(self):
+        pedido1 = self._pedido()
+        pedido2 = self._pedido()
+        item1 = pedido1.itens.get()
+        movimento = MovimentoEstoque.objects.create(
+            produto=item1.produto,
+            unidade=pedido1.unidade,
+            tipo=MovimentoEstoque.Tipo.ENTRADA_DEVOLUCAO,
+            delta=Decimal("2.00"),
+            motivo=(
+                f"Devolução em conciliação: {pedido1.numero} ou "
+                f"{pedido2.numero}; sem atribuição confirmada"
+            ),
+        )
+
+        self.assertIsNone(_obrigacao_por_movimento(movimento))
+
+    def test_pagamento_cancelado_sem_data_nao_gera_frete_negativo(self):
+        pedido = self._pedido()
+        Pagamento.objects.filter(pedido=pedido).update(
+            status=Pagamento.Status.CANCELADO,
+            estornado_em=None,
+        )
+        hoje = timezone.localdate()
+
+        metricas = metricas_do_periodo(hoje, hoje)
+
+        self.assertEqual(metricas["receita"], Decimal("0.00"))
+        self.assertEqual(metricas["receita_produtos"], Decimal("0.00"))
+        self.assertEqual(metricas["receita_frete"], Decimal("0.00"))
+        self.assertEqual(metricas["cmv_total"], Decimal("0.00"))
+        self.assertEqual(
+            metricas["receita_em_conciliacao"], Decimal("100.00")
+        )
 
     def test_frete_e_receita_de_produtos_ficam_separados(self):
         pedido = PedidoFactory(

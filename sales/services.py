@@ -1375,14 +1375,31 @@ def _cancelar_obrigacoes_estoque(pedido: Pedido) -> None:
     )
 
 
+PADROES_LEGADOS_DEVOLUCAO = (
+    re.compile(r"^Cancelamento padrão do pedido (PF\d+)$"),
+    re.compile(
+        r"^Devolução do pedido (PF\d+)(?:: .*)?$",
+        re.DOTALL,
+    ),
+)
+
+
 def _obrigacao_por_movimento(movimento):
-    """Resolve obrigação de movimento legado criado antes do vínculo FK."""
+    """Resolve apenas formatos legados canônicos, sem inferência ambígua.
+
+    Texto livre com dois ou mais PF não é autoridade de vínculo. Nesses
+    casos o movimento permanece sem atribuição e vai para conciliação.
+    """
     if movimento.obrigacao_id:
         return movimento.obrigacao
-    match = re.search(r"\b(PF\d+)\b", movimento.motivo or "")
-    if not match:
+    motivo = (movimento.motivo or "").strip()
+    numeros = re.findall(r"\b(PF\d+)\b", motivo)
+    if len(numeros) != 1:
         return None
-    pedido = Pedido.objects.filter(numero=match.group(1)).first()
+    numero = numeros[0]
+    if not any(padrao.fullmatch(motivo) for padrao in PADROES_LEGADOS_DEVOLUCAO):
+        return None
+    pedido = Pedido.objects.filter(numero=numero).first()
     if pedido is None:
         return None
     return ObrigacaoEstoquePedido.objects.filter(
@@ -1739,7 +1756,12 @@ def registrar_devolucao(
         raise ValidationError(
             "Devolução exige pagamento aprovado ou estorno confirmado."
         )
-    nota_saida = pedido.nota_fiscal
+    nota_saida = (
+        NotaFiscal.objects.select_for_update()
+        .filter(pedido=pedido, tipo=NotaFiscal.Tipo.SAIDA)
+        .order_by("-pk")
+        .first()
+    )
     if nota_saida is None or nota_saida.status != "autorizada":
         raise ValidationError(
             "NF-e de saída autorizada é obrigatória para registrar devolução."
