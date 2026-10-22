@@ -30,8 +30,11 @@
    `excesso` não podem ser resolvidas pelo serviço de faltante: usar
    `python manage.py conciliar_obrigacao_historica <id> --decisao ... --movimento <id>
    --usuario <username> --justificativa "..."` (primeiro sem `--confirmar`) com ator
-   Administrador/Gestor. A conciliação registra antes/depois e não cria movimento.
-   O comando de reconstrução relê e trava cada obrigação antes de gravar.
+   Administrador/Gestor. A conciliação registra antes/depois, cria no máximo uma
+   alocação global por movimento e não cria movimento. Movimento já alocado a outro
+   pedido é recusado; conflitos históricos aparecem em `conflitos_alocacao` e
+   permanecem pendentes. O comando de reconstrução relê e trava cada obrigação antes
+   de gravar.
    Bases **povoadas exatamente na `sales/0001`** não são suportadas para
    atualização automática (limitação pré-existente da `sales/0002`); usar backup
    e importação para um ponto suportado ou intervenção DBA autorizada, com

@@ -5,7 +5,7 @@ from django.db import transaction
 
 from sales.models import ObrigacaoEstoquePedido, Pedido
 from sales.obrigacoes import reconstruir_obrigacao_evidencia
-from stock.models import MovimentoEstoque
+from stock.models import AlocacaoEvidenciaEstoque, MovimentoEstoque
 
 
 class Command(BaseCommand):
@@ -45,7 +45,10 @@ class Command(BaseCommand):
             ).iterator():
                 total += 1
                 dados = reconstruir_obrigacao_evidencia(
-                    obrigacao, Pedido=Pedido, Movimento=MovimentoEstoque
+                    obrigacao,
+                    Pedido=Pedido,
+                    Movimento=MovimentoEstoque,
+                    Alocacao=AlocacaoEvidenciaEstoque,
                 )
                 self._relatar(obrigacao, dados, aplicado=False)
             self.stdout.write(
@@ -65,7 +68,10 @@ class Command(BaseCommand):
                     continue
                 total += 1
                 dados = reconstruir_obrigacao_evidencia(
-                    obrigacao, Pedido=Pedido, Movimento=MovimentoEstoque
+                    obrigacao,
+                    Pedido=Pedido,
+                    Movimento=MovimentoEstoque,
+                    Alocacao=AlocacaoEvidenciaEstoque,
                 )
                 mudou = any(
                     getattr(obrigacao, campo) != valor

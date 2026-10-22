@@ -34,6 +34,10 @@ Criar `sales.ObrigacaoEstoquePedido`, uma obrigação persistente por
 - `conciliar_obrigacao_historica()` é a operação explícita para atribuir/descartar
   uma saída ambígua ou aceitar um excesso; exige ator, justificativa, lock e
   auditoria, e **não cria movimento**;
+- `stock.AlocacaoEvidenciaEstoque` é a autoridade global: no máximo uma alocação
+  por movimento (`OneToOne`), com FK `PROTECT` para a obrigação. A conciliação grava
+  a alocação sob lock do movimento; o JSON da obrigação é apenas trilha. Assim, uma
+  saída de 3 não pode ser creditada integralmente a dois pedidos;
 - cancelamento antes do pagamento marca as obrigações como `cancelada`; pedido pago com
   reserva/obrigação ativa registra pendência para revisão.
 
@@ -57,7 +61,15 @@ consumidas. A migration 0011 reconstrói `quantidade_baixada` por evidência atr
   aplicaram a 0009. O dry-run é o padrão.
 
 `evidencia_baixada` e `evidencia_detalhe` preservam os IDs, deltas, origem e decisões
-de conciliação da prova. `tipo_pendencia` separa falta, ambiguidade e excesso.
+de conciliação da prova. `tipo_pendencia` separa falta, ambiguidade e excesso. A
+reconstrução consulta `AlocacaoEvidenciaEstoque` quando disponível; o JSON não é
+autoridade suficiente para atribuir a mesma saída a outro pedido.
+
+A migration `stock/0011` cria a alocação e converte decisões JSON anteriores: uma
+reivindicação consistente vira alocação única; reivindicações concorrentes para o
+mesmo movimento são mantidas pendentes com `conflitos_alocacao` e IDs para revisão,
+sem escolher silenciosamente um dono. A alocação é imutável pela API e o movimento
+original continua imutável; nenhuma FK de movimento é reatribuída.
 
 ## Procedimento de atualização e conciliação
 

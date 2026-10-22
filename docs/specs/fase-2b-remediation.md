@@ -48,12 +48,15 @@
   excesso; preserva decisões de conciliação já registradas.
 - `stock/0010`: troca a FK de atribuição para `PROTECT` e atualiza o trigger
   imutável para incluir `obrigacao_id`; cobre bancos que já aplicaram `stock/0006`.
+- `stock/0011`: cria a autoridade global `AlocacaoEvidenciaEstoque` (uma alocação
+  por movimento), converte decisões JSON consistentes e diagnostica conflitos.
 
 ## Pontos de partida e limite U04
 
 - **Suportados:** banco vazio até HEAD; banco em `817d1e8` (que já tem `sales/0002`
-  aplicada) até HEAD; banco já em `sales/0009`/`0011` recebendo `sales/0012` e
-  `stock/0010`. O validador cobre 0001 vazio e a base histórica com fixtures.
+  aplicada) até HEAD; banco já em `sales/0009`/`0011` recebendo `sales/0012`,
+  `stock/0010` e `stock/0011`. O validador cobre 0001 vazio e a base histórica com
+  fixtures.
 - **Não suportado como atualização automática:** base **povoada exatamente na
   `sales/0001`** com pedido em separação e `Pagamento` aprovado. A `sales/0002`
   pode falhar com `cannot CREATE INDEX ... pending trigger events`; é uma
@@ -99,9 +102,9 @@
 
 ## Resultado da validação
 
-- SQLite local: **496 passed, 14 skipped, 241 subtests**.
-- PostgreSQL 15.8 local: **509 passed, 1 skipped (cache Redis), 241 subtests**,
-  incluindo B01/B03/R01/T01-T03/U01-U03, concorrência e constraints. Migração
+- SQLite local: **501 passed, 15 skipped, 241 subtests**.
+- PostgreSQL 15.8 local: **515 passed, 1 skipped (cache Redis), 241 subtests**,
+  incluindo B01/B03/R01/T01-T03/U01-U03/C01, concorrência e constraints. Migração
   histórica 0001→HEAD com 9 cenários e T01-A/T01-B também passou. A CI integral do
   novo SHA continua sendo o gate remoto; o Neon permaneceu indisponível para a rodada.
 - O PostgreSQL local emitiu o aviso de teardown por conexões remanescentes de testes
@@ -164,6 +167,31 @@
 | T02 | `resolver_pendencia_estoque` recebe uma obrigação existente; valida pedido/produto/unidade, financeiro pago/conciliado e pedido não cancelado/estornado; consome reservas ativas do mesmo produto/unidade ou recusa; não cria obrigação; usa saldo livre para o restante. A aprovação repetida libera reserva órfã de obrigação resolvida. | `sales/tests/test_r01_obrigacao_estoque.py` (unidade/produto divergente, não pago, cancelado, reserva ativa/órfã) |
 | T03 | Resolver exige usuário ativo, persistido em `resolvido_por`, com perfil Administrador/Gestor; justificativa obrigatória; auditoria na mesma transação e rollback em falha. | testes de usuário/None/inativo/sem grupo e falha de auditoria |
 
+## C01: conservação global da evidência
+
+**Invariante:** para cada `MovimentoEstoque` de saída, a quantidade total
+reconhecida como cumprimento de obrigações, somando todas as formas de
+atribuição e todos os pedidos, não pode exceder `abs(delta)`. A mesma evidência
+não pode ser reutilizada por outro pedido.
+
+A interface atual atribui o movimento inteiro; portanto a implementação usa
+**exclusividade global por movimento**, não o JSON de cada obrigação como
+autoridade isolada. Uma alocação persistida, com unicidade de movimento, é
+consultada e gravada sob lock na mesma transação da conciliação. O JSON
+permanece como trilha de decisão/auditoria, mas não pode sozinho declarar
+crédito para dois pedidos. Movimentos com FK ou texto não ambíguo já são
+naturalmente exclusivos; a alocação global cobre a atribuição manual de
+movimentos ambíguos.
+
+Bases com decisões JSON anteriores serão convertidas por migration: uma única
+reivindicação consistente vira alocação; reivindicações concorrentes para o mesmo
+movimento são diagnosticadas com IDs e mantidas pendentes, sem escolher um dono
+silenciosamente, apagar histórico ou criar movimento compensatório.
+
+| ID | Implementação | Evidência |
+|---|---|---|
+| C01 | `stock.AlocacaoEvidenciaEstoque` tem `OneToOne` do movimento (unicidade global) e FK `PROTECT` da obrigação; `stock/0011` cria a autoridade e converte decisões JSON. `conciliar_obrigacao_historica` grava a alocação sob lock do movimento; reconstrução e comando consultam a alocação, preservando a FK original e o trigger de U02. | `test_conciliation_capacity.py`: sequencial via CLI, concorrência PostgreSQL, positivo descartar/atribuir/nova baixa, conversão de JSON e conflito diagnóstico, rollback de auditoria |
+
 ## Correções U01-U03 (b725a2a)
 
 | ID | Invariante | Implementação | Evidência |
@@ -183,5 +211,5 @@
   integral deve rodar no PostgreSQL local da CI; Neon foi usado para sondagens dirigidas
   por latência/suspensão do compute.
 - A execução integral PostgreSQL foi concluída localmente em PostgreSQL 15.8
-  (509 passed/1 skipped); o Neon permaneceu indisponível. A CI integral do novo SHA
+  (515 passed/1 skipped); o Neon permaneceu indisponível. A CI integral do novo SHA
   ainda é o gate remoto.

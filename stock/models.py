@@ -272,6 +272,73 @@ class MovimentoEstoque(models.Model):
         )
 
 
+class AlocacaoEvidenciaEstoque(models.Model):
+    """Autoridade global de uso de um movimento como evidência histórica.
+
+    A FK imutável do movimento não é alterada pela conciliação manual; esta
+    alocação registra, uma única vez, qual obrigação pode consumir aquela saída.
+    O JSON da obrigação permanece como trilha de auditoria.
+    """
+
+    movimento = models.OneToOneField(
+        MovimentoEstoque,
+        on_delete=models.PROTECT,
+        related_name="alocacao_evidencia",
+        verbose_name="movimento de evidência",
+    )
+    obrigacao = models.ForeignKey(
+        "sales.ObrigacaoEstoquePedido",
+        on_delete=models.PROTECT,
+        related_name="alocacoes_evidencia",
+        verbose_name="obrigação atendida",
+    )
+    quantidade = models.DecimalField(
+        "quantidade alocada", max_digits=12, decimal_places=2
+    )
+    usuario = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="alocacoes_evidencia_estoque",
+        verbose_name="responsável",
+    )
+    justificativa = models.TextField("justificativa", blank=True)
+    criado_em = models.DateTimeField("criado em", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "alocação de evidência de estoque"
+        verbose_name_plural = "alocações de evidência de estoque"
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(
+                    quantidade__gt=Decimal("0.00"),
+                    quantidade__lt=Decimal("10000000000.00"),
+                ),
+                name="alocacao_evidencia_quantidade_valida",
+            ),
+        ]
+
+    def __str__(self):
+        return (
+            f"Movimento {self.movimento_id} -> "
+            f"obrigação {self.obrigacao_id} ({self.quantidade})"
+        )
+
+    def save(self, *args, **kwargs):
+        if self.pk is not None:
+            raise ValidationError(
+                "Alocação de evidência é imutável; crie uma decisão "
+                "de conciliação explícita."
+            )
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError(
+            "Alocação de evidência não pode ser excluída."
+        )
+
+
 class ReservaEstoque(models.Model):
     """Reserva identificada de estoque, vinculada a um pedido."""
 

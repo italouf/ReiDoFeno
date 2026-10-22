@@ -370,7 +370,10 @@ def conciliar_obrigacao_historica(
     request=None,
 ) -> ObrigacaoEstoquePedido:
     """Concilia ambiguidade/excesso sem criar movimento compensatório."""
-    from stock.models import MovimentoEstoque
+    from stock.models import (
+        AlocacaoEvidenciaEstoque,
+        MovimentoEstoque,
+    )
 
     from .obrigacoes import reconstruir_obrigacao_evidencia
 
@@ -427,7 +430,10 @@ def conciliar_obrigacao_historica(
         )
 
     dados_antes = reconstruir_obrigacao_evidencia(
-        obrigacao, Pedido=Pedido, Movimento=MovimentoEstoque
+        obrigacao,
+        Pedido=Pedido,
+        Movimento=MovimentoEstoque,
+        Alocacao=AlocacaoEvidenciaEstoque,
     )
     detalhe = dict(obrigacao.evidencia_detalhe or {})
     conciliacoes = list(detalhe.get("conciliacoes", []))
@@ -460,6 +466,20 @@ def conciliar_obrigacao_historica(
                 "Movimento já pertence a outra obrigação; não pode ser "
                 "reatribuído."
             )
+        alocacao = (
+            AlocacaoEvidenciaEstoque.objects.select_for_update()
+            .filter(movimento_id=movimento.pk)
+            .first()
+        )
+        if alocacao is not None and alocacao.obrigacao_id != obrigacao.pk:
+            raise ValidationError(
+                "Movimento já alocado como evidência de outro pedido; "
+                "a mesma saída não pode cumprir duas obrigações."
+            )
+        if decisao == "descartar" and alocacao is not None:
+            raise ValidationError(
+                "Movimento alocado não pode ser descartado nesta obrigação."
+            )
         if movimento.pk not in dados_antes["evidencia_detalhe"].get(
             "ambiguos", []
         ):
@@ -467,6 +487,14 @@ def conciliar_obrigacao_historica(
                 "Movimento não está entre as ambiguidades pertinentes."
             )
         quantidade_conciliada = abs(Decimal(movimento.delta))
+        if decisao == "atribuir" and alocacao is None:
+            AlocacaoEvidenciaEstoque.objects.create(
+                movimento_id=movimento.pk,
+                obrigacao_id=obrigacao.pk,
+                quantidade=quantidade_conciliada,
+                usuario=usuario,
+                justificativa=justificativa.strip()[:1000],
+            )
         conciliacoes.append(
             {
                 "decisao": decisao,
@@ -506,7 +534,10 @@ def conciliar_obrigacao_historica(
     detalhe["conciliacoes"] = conciliacoes
     obrigacao.evidencia_detalhe = detalhe
     dados = reconstruir_obrigacao_evidencia(
-        obrigacao, Pedido=Pedido, Movimento=MovimentoEstoque
+        obrigacao,
+        Pedido=Pedido,
+        Movimento=MovimentoEstoque,
+        Alocacao=AlocacaoEvidenciaEstoque,
     )
     campos = [
         "quantidade_baixada",

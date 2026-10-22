@@ -38,7 +38,9 @@ def _decisoes_existentes(obrigacao):
     return detalhe, conciliacoes, atribuidos, descartados, aceito_excesso
 
 
-def reconstruir_obrigacao_evidencia(obrigacao, *, Pedido, Movimento) -> dict:
+def reconstruir_obrigacao_evidencia(
+    obrigacao, *, Pedido, Movimento, Alocacao=None
+) -> dict:
     """Calcula a baixa histórica atribuível a uma obrigação.
 
     Evidência preferencial: FK ``movimento.obrigacao``. Para o legado sem FK,
@@ -55,12 +57,24 @@ def reconstruir_obrigacao_evidencia(obrigacao, *, Pedido, Movimento) -> dict:
         descartados,
         aceito_excesso,
     ) = _decisoes_existentes(obrigacao)
-    movimentos = Movimento.objects.filter(
-        produto_id=obrigacao.produto_id,
-        unidade_id=obrigacao.unidade_id,
-        tipo__in=TIPOS_BAIXA,
-        delta__lt=0,
-    ).order_by("pk")
+    movimentos = list(
+        Movimento.objects.filter(
+            produto_id=obrigacao.produto_id,
+            unidade_id=obrigacao.unidade_id,
+            tipo__in=TIPOS_BAIXA,
+            delta__lt=0,
+        ).order_by("pk")
+    )
+    alocacoes = {}
+    if Alocacao is not None:
+        alocacoes = {
+            alocacao.movimento_id: alocacao
+            for alocacao in Alocacao.objects.filter(
+                movimento__produto_id=obrigacao.produto_id,
+                movimento__unidade_id=obrigacao.unidade_id,
+            )
+        }
+    usar_json_manual = Alocacao is None
 
     total = Decimal("0.00")
     evidencias = []
@@ -68,10 +82,32 @@ def reconstruir_obrigacao_evidencia(obrigacao, *, Pedido, Movimento) -> dict:
     vistos = set()
 
     for movimento in movimentos:
+        alocacao = alocacoes.get(movimento.pk)
+        if alocacao is not None:
+            if alocacao.obrigacao_id != obrigacao.pk:
+                continue
+            quantidade = min(
+                Decimal(alocacao.quantidade),
+                abs(Decimal(movimento.delta)),
+            )
+            if quantidade <= 0 or movimento.pk in vistos:
+                continue
+            vistos.add(movimento.pk)
+            total += quantidade
+            evidencias.append(
+                {
+                    "movimento_id": movimento.pk,
+                    "delta": str(movimento.delta),
+                    "quantidade_atribuida": str(quantidade),
+                    "origem": "alocacao",
+                }
+            )
+            continue
+
         if movimento.pk in descartados and movimento.obrigacao_id is None:
             continue
 
-        if movimento.pk in atribuidos:
+        if usar_json_manual and movimento.pk in atribuidos:
             if (
                 movimento.obrigacao_id is not None
                 and movimento.obrigacao_id != obrigacao.pk

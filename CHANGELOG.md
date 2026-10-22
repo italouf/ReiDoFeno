@@ -58,13 +58,18 @@
 - **U04:** base povoada exatamente na `sales/0001` com pagamento aprovado não é
   suportada para atualização automática (limitação pré-existente da `sales/0002`);
   caminhos suportados e restrição documentados. Não é regressão deste commit.
-- **Validação:** SQLite 496 passed/14 skipped/241 subtests; PostgreSQL 15.8 local
-  509 passed/1 skipped (cache Redis)/241 subtests, incluindo U01-U03, concorrência e
-  constraints. Migração histórica 0001→HEAD validada em SQLite e PostgreSQL 15.8 com
-  9 cenários e T01-A/T01-B. O aviso de teardown por conexões remanescentes dos testes
-  concorrentes permanece visível e não é tratado como falha de negócio.
-  Ruff, Bandit (0 medium/high), pip-audit (0), check, check --deploy e
-  `makemigrations --check` limpos. A CI integral do novo SHA ainda não foi executada.
+- **C01:** cada saída passa a ter uma única alocação global de evidência
+  (`AlocacaoEvidenciaEstoque`, `OneToOne`), gravada sob lock na conciliação. A
+  reconstrução consulta essa autoridade, decisões JSON legadas são convertidas e
+  conflitos são diagnosticados com IDs, sem escolher dono silenciosamente.
+- **Validação:** SQLite 501 passed/15 skipped/241 subtests; PostgreSQL 15.8 local
+  515 passed/1 skipped (cache Redis)/241 subtests, incluindo U01-U03/C01,
+  concorrência e constraints. Migração histórica 0001→HEAD validada em SQLite e
+  PostgreSQL 15.8 com 9 cenários e T01-A/T01-B. O aviso de teardown por conexões
+  remanescentes dos testes concorrentes permanece visível e não é tratado como
+  falha de negócio. Ruff, Bandit (0 medium/high), pip-audit (0), check,
+  check --deploy e `makemigrations --check` limpos. A CI integral do novo SHA
+  ainda não foi executada.
 
 ## [Fase 2B — integridade financeira e estoque] — 2026-10-20
 

@@ -31,13 +31,20 @@ from sales.services import (
     resolver_pendencia_estoque,
 )
 from stock.factories import EstoqueFactory
-from stock.models import Estoque, MovimentoEstoque
+from stock.models import (
+    AlocacaoEvidenciaEstoque,
+    Estoque,
+    MovimentoEstoque,
+)
 from stock.services import registrar_movimento
 
 
 def _aplicar_reconstrucao(obrigacao):
     dados = reconstruir_obrigacao_evidencia(
-        obrigacao, Pedido=Pedido, Movimento=MovimentoEstoque
+        obrigacao,
+        Pedido=Pedido,
+        Movimento=MovimentoEstoque,
+        Alocacao=AlocacaoEvidenciaEstoque,
     )
     for campo, valor in dados.items():
         setattr(obrigacao, campo, valor)
