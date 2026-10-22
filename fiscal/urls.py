@@ -10,4 +10,9 @@ urlpatterns = [
         views.RegistrarNotaManualView.as_view(),
         name="nota_manual",
     ),
+    path(
+        "relatorios/",
+        views.RelatorioFiscalView.as_view(),
+        name="relatorio_fiscal",
+    ),
 ]

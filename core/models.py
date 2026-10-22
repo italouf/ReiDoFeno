@@ -48,6 +48,9 @@ class Unidade(models.Model):
 
     nome = models.CharField("nome", max_length=80, unique=True)
     cidade = models.CharField("cidade", max_length=80)
+    uf = models.CharField(
+        "UF", max_length=2, default="BA", blank=True
+    )
     tipo = models.CharField(
         "tipo", max_length=20, choices=Tipo.choices, default=Tipo.LOJA
     )

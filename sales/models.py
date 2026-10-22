@@ -131,6 +131,18 @@ class Pedido(models.Model):
     bairro = models.CharField("bairro", max_length=60, blank=True)
     cidade = models.CharField("cidade", max_length=60, blank=True)
     uf = models.CharField("UF", max_length=2, blank=True)
+    uf_entrega = models.CharField(
+        "UF de entrega", max_length=2, blank=True
+    )
+    interestadual = models.BooleanField(
+        "interestadual", default=False, db_index=True
+    )
+    aliquota_icms = models.DecimalField(
+        "alíquota de ICMS",
+        max_digits=5,
+        decimal_places=4,
+        default=Decimal("0.0000"),
+    )
     cep = models.CharField("CEP", max_length=9, blank=True)
     contato_email = models.EmailField("e-mail de contato", blank=True)
     contato_telefone = models.CharField("telefone de contato", max_length=20, blank=True)
@@ -229,6 +241,17 @@ class Pedido(models.Model):
     # ------------------------------------------------------------------ #
     def save(self, *args, **kwargs):
         criando = self.pk is None
+        if self.unidade_id:
+            from .interestadual import calcular_interestadual
+
+            self.interestadual, self.aliquota_icms = calcular_interestadual(
+                self
+            )
+            if kwargs.get("update_fields") is not None:
+                kwargs["update_fields"] = list(
+                    set(kwargs["update_fields"])
+                    | {"interestadual", "aliquota_icms"}
+                )
         super().save(*args, **kwargs)
         if criando and not self.numero:
             self.numero = f"PF{self.pk:06d}"

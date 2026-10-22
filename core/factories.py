@@ -10,6 +10,7 @@ class UnidadeFactory(factory.django.DjangoModelFactory):
 
     nome = "Feira de Santana"
     cidade = "Feira de Santana"
+    uf = "BA"
     tipo = Unidade.Tipo.LOJA
     ativa = True
 

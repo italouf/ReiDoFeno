@@ -1,8 +1,11 @@
 """Serviço fiscal: elegibilidade, envio ao ERP e reprocessamento."""
 import logging
+from datetime import date, datetime, time
+from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import Q, Sum
 from django.utils import timezone
 
 from analytics.models import Aviso
@@ -78,6 +81,54 @@ def cancelar_nota_fiscal(nota, *, motivo: str, usuario=None, request=None):
         },
     )
     return nota
+
+
+def relatorio_fiscal(inicio: date, fim: date) -> dict:
+    """Receita fiscal do período, separando operações internas e externas."""
+    from sales.models import Pagamento, Pedido
+
+    tz = timezone.get_current_timezone()
+    começo = datetime.combine(inicio, time.min, tzinfo=tz)
+    término = datetime.combine(fim, time.max, tzinfo=tz)
+    pagamentos = Pagamento.objects.filter(
+        aprovado_em__range=(começo, término),
+        aprovado_em__isnull=False,
+        pedido__status_financeiro=Pedido.StatusFinanceiro.PAGO,
+    ).select_related("pedido", "pedido__unidade")
+    totais = pagamentos.aggregate(
+        intrastadual=Sum(
+            "valor", filter=Q(pedido__interestadual=False)
+        ),
+        interestadual=Sum(
+            "valor", filter=Q(pedido__interestadual=True)
+        ),
+    )
+    linhas = [
+        {
+            "pedido": pagamento.pedido.numero,
+            "unidade": pagamento.pedido.unidade.nome,
+            "uf_entrega": (
+                pagamento.pedido.uf_entrega or pagamento.pedido.uf
+            ),
+            "interestadual": pagamento.pedido.interestadual,
+            "aliquota_icms": pagamento.pedido.aliquota_icms,
+            "valor": pagamento.valor,
+            "aprovado_em": pagamento.aprovado_em,
+        }
+        for pagamento in pagamentos.order_by("pedido__numero")
+    ]
+    return {
+        "inicio": inicio,
+        "fim": fim,
+        "vendas_intrastaduais": (
+            totais["intrastadual"] or Decimal("0.00")
+        ),
+        "vendas_interestaduais": (
+            totais["interestadual"] or Decimal("0.00")
+        ),
+        "aliquota_interestadual": Decimal("0.1200"),
+        "linhas": linhas,
+    }
 
 
 def pedido_elegivel(pedido) -> bool:

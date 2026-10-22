@@ -712,6 +712,7 @@ def criar_pedido_do_carrinho(request, formulario) -> Pedido:
         bairro=formulario.cleaned_data.get("bairro", ""),
         cidade=formulario.cleaned_data.get("cidade", ""),
         uf=formulario.cleaned_data.get("uf", ""),
+        uf_entrega=formulario.cleaned_data.get("uf", ""),
         cep=formulario.cleaned_data.get("cep", ""),
         contato_email=formulario.cleaned_data["email"],
         contato_telefone=formulario.cleaned_data.get("telefone", ""),
