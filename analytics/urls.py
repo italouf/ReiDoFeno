@@ -11,4 +11,9 @@ urlpatterns = [
         views.MarcarAvisoLidoView.as_view(),
         name="aviso_ler",
     ),
+    path(
+        "relatorios/vendas-por-produto/",
+        views.RelatorioVendasProdutoView.as_view(),
+        name="relatorio_vendas_produto",
+    ),
 ]

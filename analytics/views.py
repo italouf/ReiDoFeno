@@ -1,11 +1,20 @@
+import csv
+
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect
-from django.views.generic import ListView, View
+from django.utils import timezone
+from django.utils.dateparse import parse_date
+from django.views.generic import ListView, TemplateView, View
 
 from core.mixins import GRUPOS_INTERNOS, GrupoRequiredMixin
+from core.models import Unidade
 
 from .models import Aviso
+from .services import vendas_por_produto
+
+GRUPOS_GESTAO = ("Administrador", "Gestor")
 
 
 class AvisoListView(LoginRequiredMixin, GrupoRequiredMixin, ListView):
@@ -29,3 +38,89 @@ class MarcarAvisoLidoView(LoginRequiredMixin, GrupoRequiredMixin, View):
         aviso.save(update_fields=["lido"])
         messages.success(request, "Aviso marcado como lido.")
         return redirect("analytics:aviso_lista")
+
+
+class RelatorioVendasProdutoView(
+    LoginRequiredMixin, GrupoRequiredMixin, TemplateView
+):
+    """Vendas por produto/dia/unidade, com exportação CSV."""
+
+    template_name = "analytics/relatorio_vendas_produto.html"
+    grupos_permitidos = GRUPOS_GESTAO
+
+    def get(self, request, *args, **kwargs):
+        if request.GET.get("formato") == "csv" or request.GET.get("format") == "csv":
+            return self._exportar_csv()
+        return super().get(request, *args, **kwargs)
+
+    def _filtros(self):
+        hoje = timezone.localdate()
+        inicio = parse_date(self.request.GET.get("inicio") or "") or hoje.replace(
+            day=1
+        )
+        fim = parse_date(self.request.GET.get("fim") or "") or hoje
+        unidade_id = self.request.GET.get("unidade") or ""
+        unidade = None
+        if unidade_id:
+            unidade = Unidade.objects.filter(pk=unidade_id).first()
+        return inicio, fim, unidade
+
+    def get_context_data(self, **kwargs):
+        contexto = super().get_context_data(**kwargs)
+        inicio, fim, unidade = self._filtros()
+        vendas = vendas_por_produto(inicio, fim, unidade=unidade)
+        contexto.update(
+            {
+                "titulo": "Vendas por produto",
+                "inicio": inicio,
+                "fim": fim,
+                "unidade": unidade,
+                "unidades": Unidade.objects.filter(ativa=True),
+                "vendas": vendas,
+                "grafico": {
+                    "labels": [
+                        f"{v['produto']} · {v['unidade']} · {v['dia']:%d/%m}"
+                        for v in vendas
+                    ],
+                    "valores": [float(v["receita"]) for v in vendas],
+                },
+                "total_receita": sum(
+                    (v["receita"] for v in vendas), start=0
+                ),
+                "total_cmv": sum((v["cmv"] for v in vendas), start=0),
+            }
+        )
+        return contexto
+
+    def _exportar_csv(self):
+        inicio, fim, unidade = self._filtros()
+        vendas = vendas_por_produto(inicio, fim, unidade=unidade)
+        resposta = HttpResponse(content_type="text/csv")
+        resposta["Content-Disposition"] = (
+            'attachment; filename="vendas-por-produto.csv"'
+        )
+        escritor = csv.writer(resposta)
+        escritor.writerow(
+            [
+                "Produto",
+                "Unidade",
+                "Dia",
+                "Quantidade",
+                "Receita",
+                "CMV",
+                "Lucro bruto",
+            ]
+        )
+        for linha in vendas:
+            escritor.writerow(
+                [
+                    linha["produto"],
+                    linha["unidade"],
+                    linha["dia"].isoformat(),
+                    f"{linha['quantidade']:.2f}",
+                    f"{linha['receita']:.2f}",
+                    f"{linha['cmv']:.2f}",
+                    f"{linha['lucro_bruto']:.2f}",
+                ]
+            )
+        return resposta

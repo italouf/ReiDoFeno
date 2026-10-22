@@ -3,6 +3,7 @@ from datetime import date, datetime, time
 from decimal import Decimal
 
 from django.db.models import DateTimeField, DecimalField, Exists, F, Max, OuterRef, Q, Sum
+from django.db.models.functions import TruncDate
 from django.utils import timezone
 
 from costs.services import despesas_no_periodo
@@ -144,6 +145,62 @@ def metricas_do_periodo(
         "aguardando_pagamento": aguardando.select_related("cliente", "unidade"),
         "aguardando_total": aguardando.count(),
     }
+
+
+def vendas_por_produto(
+    inicio: date, fim: date, unidade=None, vendedor=None
+) -> list[dict]:
+    """Vendas agrupadas por produto, dia de aprovação e unidade.
+
+    A receita é a dos itens (preço × quantidade); frete não é receita de
+    produto. CMV usa o snapshot de custo do item (ADR-008).
+    """
+    começo, término = _janela(inicio, fim)
+    itens = ItemPedido.objects.filter(
+        pedido__pagamento__aprovado_em__range=(começo, término),
+        pedido__pagamento__aprovado_em__isnull=False,
+        pedido__status_financeiro=Pedido.StatusFinanceiro.PAGO,
+    ).exclude(pedido__status__in=STATUS_EXCLUIDOS_VENDA)
+    if unidade is not None:
+        itens = itens.filter(pedido__unidade=unidade)
+    if vendedor is not None:
+        itens = itens.filter(pedido__usuario_criador=vendedor)
+
+    linhas = (
+        itens.annotate(
+            dia=TruncDate("pedido__pagamento__aprovado_em")
+        )
+        .values("produto__nome", "pedido__unidade__nome", "dia")
+        .annotate(
+            quantidade_total=Sum("quantidade"),
+            receita=Sum(
+                F("preco_unitario") * F("quantidade"),
+                output_field=DecimalField(max_digits=14, decimal_places=2),
+            ),
+            cmv=Sum(
+                F("custo_unitario") * F("quantidade"),
+                output_field=DecimalField(max_digits=14, decimal_places=2),
+            ),
+        )
+        .order_by("dia", "produto__nome", "pedido__unidade__nome")
+    )
+
+    resultado = []
+    for linha in linhas:
+        receita = linha["receita"] or Decimal("0.00")
+        cmv = linha["cmv"] or Decimal("0.00")
+        resultado.append(
+            {
+                "produto": linha["produto__nome"],
+                "unidade": linha["pedido__unidade__nome"],
+                "dia": linha["dia"],
+                "quantidade": linha["quantidade_total"] or Decimal("0.00"),
+                "receita": receita,
+                "cmv": cmv,
+                "lucro_bruto": receita - cmv,
+            }
+        )
+    return resultado
 
 
 def clientes_para_recompra(dias: int, vendedor=None):
