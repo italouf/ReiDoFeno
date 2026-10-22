@@ -7,6 +7,8 @@ from decimal import Decimal
 from django.db.models import Sum
 
 from catalog.models import Produto
+from customers.models import Cliente
+from sales.pricing import calcular_preco_unitario
 from stock.models import Estoque
 
 _CHAVE_SESSAO = "carrinho"
@@ -15,6 +17,7 @@ _CHAVE_SESSAO = "carrinho"
 class Carrinho:
     def __init__(self, request):
         self.session = request.session
+        self.usuario = getattr(request, "user", None)
         self.data: dict[str, str] = dict(self.session.get(_CHAVE_SESSAO, {}))
 
     # ------------------------------------------------------------------ #
@@ -49,6 +52,13 @@ class Carrinho:
         return sum(int(q) for q in self.data.values())
 
     # ------------------------------------------------------------------ #
+    def _cliente_verificado(self):
+        if not getattr(self.usuario, "is_authenticated", False):
+            return None
+        return Cliente.objects.filter(
+            usuario=self.usuario, vinculo_verificado=True
+        ).first()
+
     def itens(self):
         """Lista [(produto, quantidade, subtotal)] apenas com produtos ativos."""
         ids = [int(k) for k in self.data.keys()]
@@ -58,13 +68,28 @@ class Carrinho:
                 "categoria"
             )
         }
+        cliente = self._cliente_verificado()
+        tabela_atacado = bool(
+            cliente and cliente.categoria == Cliente.Categoria.ATACADO
+        )
         itens = []
         for chave, quantidade_str in self.data.items():
             produto = produtos.get(int(chave))
             if produto is None:
                 continue  # produto inativo/removido some do carrinho
             quantidade = int(quantidade_str)
-            subtotal = produto.preco_online * Decimal(quantidade)
+            preco_base = (
+                produto.preco_balcao
+                if tabela_atacado
+                else produto.preco_online
+            )
+            preco = calcular_preco_unitario(
+                produto=produto,
+                cliente=cliente if tabela_atacado else None,
+                quantidade=quantidade,
+                preco_base=preco_base,
+            )
+            subtotal = preco * Decimal(quantidade)
             itens.append(
                 {
                     "produto": produto,

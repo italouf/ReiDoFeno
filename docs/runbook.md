@@ -1,5 +1,8 @@
 # Runbook Operacional — Rei do Feno
 
+> **Encerramento da Fase 2B:** ver
+> [`docs/audit/fase-2b-conclusao.md`](audit/fase-2b-conclusao.md).
+>
 > **Nota de fase:** o alvo da Fase 2A é PostgreSQL **local na VPS**
 > (ADR-001). As seções de Render abaixo permanecem como blueprint legado
 > até a migração de infraestrutura da Fase 3; em qualquer host, o contrato é
@@ -25,6 +28,20 @@
    segredos do quadro da seção 3.
 3. Executar `python manage.py migrate --noinput`,
    `python manage.py collectstatic --noinput` e `python manage.py seed_groups`.
+   Depois, rodar `python manage.py reconstruir_obrigacoes_estoque` em dry-run;
+   usar `--aplicar` somente após revisar o relatório. Pendências `ambigua` ou
+   `excesso` não podem ser resolvidas pelo serviço de faltante: usar
+   `python manage.py conciliar_obrigacao_historica <id> --decisao ... --movimento <id>
+   --usuario <username> --justificativa "..."` (primeiro sem `--confirmar`) com ator
+   Administrador/Gestor. A conciliação registra antes/depois, cria no máximo uma
+   alocação global por movimento e não cria movimento. Movimento já alocado a outro
+   pedido é recusado; conflitos históricos aparecem em `conflitos_alocacao` e
+   permanecem pendentes. O comando de reconstrução relê e trava cada obrigação antes
+   de gravar.
+   Bases **povoadas exatamente na `sales/0001`** não são suportadas para
+   atualização automática (limitação pré-existente da `sales/0002`); usar backup
+   e importação para um ponto suportado ou intervenção DBA autorizada, com
+   validação específica do procedimento.
 4. Subir Gunicorn atrás de Nginx/HTTPS, garantindo que o proxy preserve o
    IP real em `REMOTE_ADDR` e bloqueie acesso direto ao backend.
 5. Configurar os jobs da seção 6 em systemd timers (ou cron) e o webhook do
@@ -33,6 +50,38 @@
    vínculos/pagamentos apontados antes de liberar histórico/fiscal. Pedidos
    legados só avançam após
    `python manage.py reconciliar_pedido_financeiro <numero> --justificativa "..."`.
+
+### Atualização de estoque/obrigações
+
+Ordem relevante: `sales/0009` → `sales/0010` → `stock/0009` → `sales/0011` →
+`sales/0012` → `stock/0010` → `stock/0011`. O `migrate --noinput` aplica a ordem
+do grafo; não execute migrations isoladas fora das dependências.
+
+Pontos de partida suportados: banco vazio, banco em `817d1e8` (com `sales/0002`
+aplicada) e banco já em `sales/0009`/`0011`. **U04:** base povoada exatamente na
+`sales/0001`, com pedido em separação e pagamento aprovado, não tem atualização
+automática garantida; ver a limitação e o caminho DBA/importação em
+`docs/specs/fase-2b-remediation.md`.
+
+Antes de aplicar, fazer backup/inventário e conferir `showmigrations`; depois:
+
+```bash
+python manage.py reconstruir_obrigacoes_estoque
+python manage.py reconstruir_obrigacoes_estoque --aplicar
+python manage.py conciliar_obrigacao_historica <id> --decisao atribuir \
+  --movimento <id> --usuario <username> --justificativa "conferência" --confirmar
+```
+
+O primeiro comando é dry-run; o segundo relê/trava cada obrigação e registra
+antes/depois. Conflitos `conflitos_alocacao` não devem ser resolvidos por SQL ou
+editando JSON; use a conciliação explícita ou nova evidência física legítima.
+Uma nova baixa só é válida quando há movimento/estoque físico correspondente.
+
+**Neon QA:** o projeto `twilight-silence-34012623` permanece como QA temporário,
+com dados sintéticos e sem dependência de produção. Finalidade: QA; responsável e
+retenção não informados nesta documentação. Não excluir nem alterar credenciais
+sem autorização operacional específica. Roles de migration/runtime, ownership e
+restore de produção não foram verificados nesta fase.
 
 ### Render (blueprint legado)
 
@@ -76,22 +125,25 @@ Migrations destrutivas exigem compatibilidade reversa (estratégia expand/contra
 
 ## 4. Backups e restore
 
-**VPS (alvo):** `pg_dump` diário + retenção externa (S3/R2), com teste de
-restore periódico. Redis é cache efêmero; a fonte da verdade continua no
-PostgreSQL.
+**VPS (alvo):** `pg_dump` diário + retenção externa (S3/R2). Redis é cache
+efêmero; a fonte da verdade continua no PostgreSQL.
 
 **Render (legado):** backups diários gerenciados + cron semanal do script
 `scripts/backup_db.sh "$DATABASE_URL"` exportando `.sql.gz` ao storage
 externo.
 
-**Restore testado (obrigatório antes do go-live):**
+**Procedimento de restore — não executado nesta consolidação:** o estado de
+restore é **não verificado** nesta rodada. Antes do go-live, executar em ambiente
+descartável, com autorização e janela próprias:
 ```bash
 createdb reidofeno_restore
 gunzip -c backups/reidofeno-YYYYMMDD-HHMMSS.sql.gz | psql "$DATABASE_URL_RESTORE"
 # Apontar um serviço temporário para a URL de restore e validar:
 #   /healthz/, login admin, contagem de pedidos/notas, emissão de teste no Bling sandbox.
 ```
-Registrar evidência (data, tamanho, contagens) em `docs/relatorios/backup-restore.md`.
+Registrar data, tamanho, contagens e responsável em
+`docs/relatorios/backup-restore.md`. A ausência desse registro significa restore
+não comprovado; não trate o procedimento acima como ensaio concluído.
 
 ## 5. Monitoramento e alertas
 

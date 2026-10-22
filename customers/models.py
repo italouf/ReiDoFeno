@@ -1,14 +1,7 @@
 from django.conf import settings
 from django.db import models, transaction
 
-from .validators import DocumentoValidator
-
-
-def normalizar_documento(valor: str) -> str:
-    """Remove pontuação; documentos são armazenados apenas com dígitos."""
-    import re
-
-    return re.sub(r"\D", "", str(valor))
+from .validators import DocumentoValidator, normalizar_documento
 
 
 class Cliente(models.Model):

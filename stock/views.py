@@ -10,7 +10,7 @@ from core.models import Unidade
 
 from .forms import AjusteForm, MovimentoForm, TransferenciaForm
 from .models import Estoque, MovimentoEstoque
-from .services import registrar_movimento, transferir_estoque
+from .services import registrar_ajuste, registrar_movimento, transferir_estoque
 
 GRUPOS_ESTOQUE = ("Administrador", "Gestor")
 
@@ -103,11 +103,10 @@ class MovimentoAjusteView(MovimentoCreateBaseView):
 
     def form_valid(self, form):
         try:
-            movimento = registrar_movimento(
+            movimento = registrar_ajuste(
                 produto=form.cleaned_data["produto"],
                 unidade=form.cleaned_data["unidade"],
-                tipo=MovimentoEstoque.Tipo.AJUSTE,
-                quantidade=form.cleaned_data["quantidade"],
+                delta=form.cleaned_data["quantidade"],
                 motivo=form.cleaned_data["motivo"],
                 usuario=self.request.user,
                 request=self.request,

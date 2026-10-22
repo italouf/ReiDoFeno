@@ -4,6 +4,7 @@ import threading
 import unittest
 from decimal import Decimal
 
+import pytest
 from django.contrib.auth.models import Group
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
@@ -23,7 +24,10 @@ from sales.services import (
     marcar_pagamento_aprovado,
 )
 from stock.factories import EstoqueFactory
-from stock.models import Estoque, MovimentoEstoque
+from stock.models import Estoque, MovimentoEstoque, ReservaEstoque
+from stock.services import reservar, transferir_estoque
+
+pytestmark = pytest.mark.postgres
 
 
 class PostgresConcurrencyTests(TransactionTestCase):
@@ -45,7 +49,7 @@ class PostgresConcurrencyTests(TransactionTestCase):
             produto=self.produto,
             unidade=self.unidade,
             quantidade="10.00",
-            quantidade_bloqueada=Decimal("2.00"),
+            quantidade_bloqueada=Decimal("0.00"),
         )
 
     def _pedido(self, *, com_pagamento=False):
@@ -54,6 +58,8 @@ class PostgresConcurrencyTests(TransactionTestCase):
             status_financeiro=Pedido.StatusFinanceiro.PENDENTE,
             financeiro_conciliado=False,
             unidade=self.unidade,
+            subtotal="20.00",
+            frete="0.00",
             total="20.00",
         )
         ItemPedidoFactory(
@@ -61,6 +67,13 @@ class PostgresConcurrencyTests(TransactionTestCase):
             produto=self.produto,
             quantidade=Decimal("2.00"),
             preco_unitario=Decimal("10.00"),
+        )
+        reservar(
+            produto=self.produto,
+            unidade=self.unidade,
+            quantidade=Decimal("2.00"),
+            pedido=pedido,
+            item_pedido=pedido.itens.get(),
         )
         if com_pagamento:
             Pagamento.objects.create(
@@ -127,6 +140,134 @@ class PostgresConcurrencyTests(TransactionTestCase):
                 produto=self.produto, unidade=self.unidade
             ).count(),
             1,
+        )
+
+    def test_cancelamento_vs_aprovacao_com_reserva_vinculada(self):
+        produto = ProdutoFactory(preco_online="10.00")
+        unidade = UnidadeFactory(nome="Unidade Reserva Concorrente")
+        EstoqueFactory(
+            produto=produto, unidade=unidade, quantidade="10.00"
+        )
+        pedido = PedidoFactory(
+            status=Pedido.Status.AGUARDANDO_PAGAMENTO,
+            status_financeiro=Pedido.StatusFinanceiro.PENDENTE,
+            financeiro_conciliado=False,
+            unidade=unidade,
+            subtotal="20.00",
+            frete="0.00",
+            total="20.00",
+        )
+        item = ItemPedidoFactory(
+            pedido=pedido,
+            produto=produto,
+            quantidade=Decimal("2.00"),
+            preco_unitario=Decimal("10.00"),
+        )
+        reserva = reservar(
+            produto=produto,
+            unidade=unidade,
+            quantidade=Decimal("2.00"),
+            pedido=pedido,
+            item_pedido=item,
+        )
+        erros = []
+
+        def aprovar():
+            close_old_connections()
+            try:
+                marcar_pagamento_aprovado(pedido, id_externo="pay-reserva")
+            except Exception as erro:
+                erros.append(erro)
+            finally:
+                close_old_connections()
+
+        def cancelar():
+            close_old_connections()
+            try:
+                cancelar_pedido(pedido)
+            except Exception as erro:
+                erros.append(erro)
+            finally:
+                close_old_connections()
+
+        self._rodar(
+            [threading.Thread(target=aprovar), threading.Thread(target=cancelar)]
+        )
+
+        pedido.refresh_from_db()
+        reserva.refresh_from_db()
+        estoque = Estoque.objects.get(produto=produto, unidade=unidade)
+        self.assertFalse(erros, erros)
+        self.assertEqual(estoque.quantidade_bloqueada, Decimal("0"))
+        self.assertIn(estoque.quantidade, (Decimal("8"), Decimal("10")))
+        self.assertIn(
+            pedido.status_financeiro,
+            (
+                Pedido.StatusFinanceiro.PAGO,
+                Pedido.StatusFinanceiro.CANCELADO,
+            ),
+        )
+        self.assertIn(
+            reserva.status,
+            (
+                ReservaEstoque.Status.CONSUMIDA,
+                ReservaEstoque.Status.LIBERADA,
+            ),
+        )
+        self.assertLessEqual(
+            MovimentoEstoque.objects.filter(
+                produto=produto, unidade=unidade
+            ).count(),
+            1,
+        )
+
+    def test_pagamento_e_transferencia_nao_geram_deadlock(self):
+        outra_unidade = UnidadeFactory(nome="Unidade B Pagamento")
+        EstoqueFactory(
+            produto=self.produto,
+            unidade=outra_unidade,
+            quantidade="10.00",
+        )
+        pedido = self._pedido()
+        barreira = threading.Barrier(2)
+        erros = []
+
+        def aprovar():
+            close_old_connections()
+            try:
+                barreira.wait(timeout=10)
+                marcar_pagamento_aprovado(pedido, id_externo="pay-transfer")
+            except Exception as erro:
+                erros.append(erro)
+            finally:
+                close_old_connections()
+
+        def transferir():
+            close_old_connections()
+            try:
+                barreira.wait(timeout=10)
+                transferir_estoque(
+                    produto=self.produto,
+                    unidade_origem=self.unidade,
+                    unidade_destino=outra_unidade,
+                    quantidade=1,
+                )
+            except Exception as erro:
+                erros.append(erro)
+            finally:
+                close_old_connections()
+
+        self._rodar(
+            [
+                threading.Thread(target=aprovar),
+                threading.Thread(target=transferir),
+            ]
+        )
+
+        self.assertFalse(erros, erros)
+        pedido.refresh_from_db()
+        self.assertEqual(
+            pedido.status_financeiro, Pedido.StatusFinanceiro.PAGO
         )
 
     def test_avanco_vs_estorno_nao_libera_apos_estorno(self):

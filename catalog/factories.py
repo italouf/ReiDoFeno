@@ -26,4 +26,5 @@ class ProdutoFactory(factory.django.DjangoModelFactory):
     custo = factory.LazyFunction(lambda: Decimal("80.00"))
     preco_balcao = factory.LazyFunction(lambda: Decimal("120.00"))
     preco_online = factory.LazyFunction(lambda: Decimal("110.00"))
+    preco_atacado = None
     ativo = True

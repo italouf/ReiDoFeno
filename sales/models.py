@@ -3,6 +3,7 @@ from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.db.models.functions import Round
 
 from accounts.models import Usuario
 from catalog.models import Produto
@@ -159,6 +160,42 @@ class Pedido(models.Model):
         verbose_name = "pedido"
         verbose_name_plural = "pedidos"
         ordering = ["-criado_em"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(subtotal__gte=Decimal("0.00")),
+                name="pedido_subtotal_nao_negativo",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(frete__gte=Decimal("0.00")),
+                name="pedido_frete_nao_negativo",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(total__gte=Decimal("0.00")),
+                name="pedido_total_nao_negativo",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    total=Round(
+                        models.F("subtotal") + models.F("frete"), 2
+                    )
+                ),
+                name="pedido_total_igual_subtotal_mais_frete",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    subtotal__lt=Decimal("10000000000.00")
+                ),
+                name="pedido_subtotal_dentro_do_limite",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(frete__lt=Decimal("10000000000.00")),
+                name="pedido_frete_dentro_do_limite",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(total__lt=Decimal("10000000000.00")),
+                name="pedido_total_dentro_do_limite",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.numero or '(sem número)'} — {self.cliente.nome} [{self.status}]"
@@ -170,6 +207,32 @@ class Pedido(models.Model):
         if criando and not self.numero:
             self.numero = f"PF{self.pk:06d}"
             super().save(update_fields=["numero"])
+
+    def clean(self):
+        super().clean()
+        erros = {}
+        valores = {}
+        for campo in ("subtotal", "frete", "total"):
+            valor = getattr(self, campo)
+            if valor is None:
+                continue
+            try:
+                numero = Decimal(valor)
+            except (ArithmeticError, TypeError, ValueError):
+                erros[campo] = "Valor inválido."
+                continue
+            if not numero.is_finite():
+                erros[campo] = "Valor deve ser finito."
+                continue
+            valores[campo] = numero
+            if numero < 0:
+                erros[campo] = "Valor não pode ser negativo."
+        if len(valores) == 3 and valores["total"] != (
+            valores["subtotal"] + valores["frete"]
+        ):
+            erros["total"] = "Total deve ser igual a subtotal + frete."
+        if erros:
+            raise ValidationError(erros)
 
     def tem_prova_financeira(self) -> bool:
         """Prova explícita (provedor validado ou reconciliação autorizada)."""
@@ -203,6 +266,16 @@ class Pedido(models.Model):
             raise ValidationError(
                 "O andamento só pode avançar com pagamento confirmado e "
                 "prova financeira conciliada."
+            )
+        if (
+            novo_status in self.EXIGE_FINANCEIRO_PAGO
+            and self.obrigacoes_estoque.filter(
+                status=ObrigacaoEstoquePedido.Status.PENDENTE
+            ).exists()
+        ):
+            raise ValidationError(
+                "O andamento só pode avançar após a baixa de estoque; "
+                "existem obrigações pendentes para este pedido."
             )
         status_anterior = self.status
         self.status = novo_status
@@ -255,11 +328,17 @@ class Pedido(models.Model):
         )
 
     def recalcular_totais(self) -> None:
+        if not Decimal(self.frete).is_finite():
+            raise ValidationError("Frete deve ser finito.")
+        if Decimal(self.frete) < 0:
+            raise ValidationError("Frete não pode ser negativo.")
         self.subtotal = sum(
             (item.subtotal for item in self.itens.all()), Decimal("0.00")
         )
         self.total = self.subtotal + Decimal(self.frete)
-        self.save(update_fields=["subtotal", "total", "atualizado_em"])
+        self.save(
+            update_fields=["subtotal", "frete", "total", "atualizado_em"]
+        )
 
 
 class ItemPedido(models.Model):
@@ -283,9 +362,53 @@ class ItemPedido(models.Model):
     class Meta:
         verbose_name = "item do pedido"
         verbose_name_plural = "itens do pedido"
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(quantidade__gt=Decimal("0.00")),
+                name="item_quantidade_positiva",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(preco_unitario__gte=Decimal("0.00")),
+                name="item_preco_nao_negativo",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    quantidade__lt=Decimal("10000000000.00")
+                ),
+                name="item_quantidade_dentro_do_limite",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    preco_unitario__lt=Decimal("10000000000.00")
+                ),
+                name="item_preco_dentro_do_limite",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.quantidade}× {self.produto_nome}"
+
+    def clean(self):
+        super().clean()
+        erros = {}
+        for campo in ("quantidade", "preco_unitario"):
+            valor = getattr(self, campo)
+            if valor is None:
+                continue
+            try:
+                numero = Decimal(valor)
+            except (ArithmeticError, TypeError, ValueError):
+                erros[campo] = "Valor inválido."
+                continue
+            if not numero.is_finite():
+                erros[campo] = "Valor deve ser finito."
+                continue
+            if campo == "quantidade" and numero <= 0:
+                erros[campo] = "Quantidade deve ser maior que zero."
+            if campo == "preco_unitario" and numero < 0:
+                erros[campo] = "Preço unitário não pode ser negativo."
+        if erros:
+            raise ValidationError(erros)
 
     @property
     def subtotal(self) -> Decimal:
@@ -330,9 +453,34 @@ class Pagamento(models.Model):
     class Meta:
         verbose_name = "pagamento"
         verbose_name_plural = "pagamentos"
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(valor__gte=Decimal("0.00")),
+                name="pagamento_valor_nao_negativo",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(valor__lt=Decimal("10000000000.00")),
+                name="pagamento_valor_dentro_do_limite",
+            ),
+        ]
 
     def __str__(self):
         return f"Pagamento {self.pedido.numero} [{self.status}] R$ {self.valor}"
+
+    def clean(self):
+        super().clean()
+        if self.valor is None:
+            return
+        try:
+            valor = Decimal(self.valor)
+        except (ArithmeticError, TypeError, ValueError) as erro:
+            raise ValidationError({"valor": "Valor inválido."}) from erro
+        if not valor.is_finite():
+            raise ValidationError({"valor": "Valor deve ser finito."})
+        if valor < 0:
+            raise ValidationError(
+                {"valor": "Valor do pagamento não pode ser negativo."}
+            )
 
 
 class PagamentoWebhookEvento(models.Model):
@@ -359,3 +507,160 @@ class PagamentoWebhookEvento(models.Model):
             f"{self.provedor}:{self.referencia_externa} "
             f"({'ok' if self.processado else 'pendente'})"
         )
+
+
+class ObrigacaoEstoquePedido(models.Model):
+    """Obrigação persistente de baixa de estoque por pedido/produto.
+
+    Protege a transição operacional quando o pagamento foi reconhecido, mas a
+    baixa não pôde ser concluída. A baixa complementar atualiza
+    ``quantidade_baixada`` na mesma transação do movimento.
+    """
+
+    class Status(models.TextChoices):
+        PENDENTE = "pendente", "Pendente"
+        RESOLVIDA = "resolvida", "Resolvida"
+        CANCELADA = "cancelada", "Cancelada"
+
+    class TipoPendencia(models.TextChoices):
+        NENHUMA = "", "Nenhuma"
+        FALTA = "falta", "Falta comprovada"
+        AMBIGUA = "ambigua", "Atribuição ambígua"
+        EXCESSO = "excesso", "Excesso histórico"
+
+    pedido = models.ForeignKey(
+        Pedido,
+        on_delete=models.PROTECT,
+        related_name="obrigacoes_estoque",
+        verbose_name="pedido",
+    )
+    produto = models.ForeignKey(
+        Produto,
+        on_delete=models.PROTECT,
+        related_name="obrigacoes_estoque",
+        verbose_name="produto",
+    )
+    unidade = models.ForeignKey(
+        Unidade,
+        on_delete=models.PROTECT,
+        related_name="obrigacoes_estoque",
+        verbose_name="unidade",
+    )
+    quantidade_devida = models.DecimalField(
+        "quantidade devida", max_digits=12, decimal_places=2
+    )
+    quantidade_baixada = models.DecimalField(
+        "quantidade baixada",
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+    evidencia_baixada = models.DecimalField(
+        "quantidade com evidência",
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal("0.00"),
+        help_text="Soma das saídas atribuíveis ao pedido/produto/unidade.",
+    )
+    evidencia_detalhe = models.JSONField(
+        "detalhe da evidência", default=dict, blank=True
+    )
+    status = models.CharField(
+        "status",
+        max_length=12,
+        choices=Status.choices,
+        default=Status.PENDENTE,
+        db_index=True,
+    )
+    tipo_pendencia = models.CharField(
+        "tipo de pendência",
+        max_length=10,
+        choices=TipoPendencia.choices,
+        default=TipoPendencia.NENHUMA,
+        blank=True,
+        db_index=True,
+    )
+    motivo_pendencia = models.TextField("motivo da pendência", blank=True)
+    criado_em = models.DateTimeField("criado em", auto_now_add=True)
+    atualizado_em = models.DateTimeField("atualizado em", auto_now=True)
+    resolvido_em = models.DateTimeField("resolvido em", null=True, blank=True)
+    resolvido_por = models.ForeignKey(
+        Usuario,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="obrigacoes_estoque_resolvidas",
+        verbose_name="resolvido por",
+    )
+
+    class Meta:
+        verbose_name = "obrigação de estoque do pedido"
+        verbose_name_plural = "obrigações de estoque do pedido"
+        constraints = [
+            models.UniqueConstraint(
+                fields=("pedido", "produto", "unidade"),
+                name="obrigacao_estoque_unica_por_pedido_produto_unidade",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(quantidade_devida__gt=Decimal("0.00")),
+                name="obrigacao_estoque_devida_positiva",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    quantidade_baixada__gte=Decimal("0.00")
+                ),
+                name="obrigacao_estoque_baixada_nao_negativa",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    quantidade_baixada__lte=models.F("quantidade_devida")
+                ),
+                name="obrigacao_estoque_baixada_dentro_da_devida",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    quantidade_devida__lt=Decimal("10000000000.00")
+                ),
+                name="obrigacao_estoque_devida_dentro_do_limite",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    evidencia_baixada__gte=Decimal("0.00")
+                ),
+                name="obrigacao_estoque_evidencia_nao_negativa",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    evidencia_baixada__lt=Decimal("10000000000.00")
+                ),
+                name="obrigacao_estoque_evidencia_dentro_do_limite",
+            ),
+        ]
+
+    def __str__(self):
+        return (
+            f"Obrigação {self.pedido.numero}/{self.produto.nome}@"
+            f"{self.unidade.nome}: {self.quantidade_baixada}/"
+            f"{self.quantidade_devida} [{self.status}]"
+        )
+
+    @property
+    def pendente(self) -> bool:
+        return self.status == self.Status.PENDENTE
+
+    def clean(self):
+        super().clean()
+        erros = {}
+        for campo in ("quantidade_devida", "quantidade_baixada", "evidencia_baixada"):
+            valor = getattr(self, campo)
+            if valor is None:
+                continue
+            try:
+                numero = Decimal(valor)
+            except (ArithmeticError, TypeError, ValueError):
+                erros[campo] = "Valor inválido."
+                continue
+            if not numero.is_finite():
+                erros[campo] = "Valor deve ser finito."
+        if erros:
+            raise ValidationError(erros)

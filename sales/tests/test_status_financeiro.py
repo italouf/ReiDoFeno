@@ -290,6 +290,8 @@ class ResultadoPagamentoTests(TestCase):
             status_financeiro=Pedido.StatusFinanceiro.PAGO,
             financeiro_conciliado=False,
             total="10.00",
+            subtotal="10.00",
+            frete="0.00",
         )
         pagamento = Pagamento.objects.create(
             pedido=pedido,
@@ -321,6 +323,8 @@ class ResultadoPagamentoTests(TestCase):
             status_financeiro=Pedido.StatusFinanceiro.PAGO,
             financeiro_conciliado=False,
             total="10.00",
+            subtotal="10.00",
+            frete="0.00",
         )
         Pagamento.objects.create(
             pedido=pedido,
@@ -356,6 +360,8 @@ class ResultadoPagamentoTests(TestCase):
             status_financeiro=Pedido.StatusFinanceiro.PAGO,
             financeiro_conciliado=False,
             total="10.00",
+            subtotal="10.00",
+            frete="0.00",
         )
         pagamento = Pagamento.objects.create(
             pedido=pedido,
@@ -382,6 +388,8 @@ class ResultadoPagamentoTests(TestCase):
             status_financeiro=Pedido.StatusFinanceiro.PAGO,
             financeiro_conciliado=False,
             total="10.00",
+            subtotal="10.00",
+            frete="0.00",
         )
         pagamento = Pagamento.objects.create(
             pedido=pedido,

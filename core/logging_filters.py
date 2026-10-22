@@ -1,7 +1,17 @@
 """Filtro de logging que mascara possíveis CPFs/CNPJs em mensagens."""
 import re
 
-_PADRAO_DOCUMENTOS = re.compile(r"(?<!\d)\d{11}(?!\d)|(?<!\d)\d{14}(?!\d)")
+_PADRAO_DOCUMENTOS = re.compile(
+    r"\b\d{3}\.\d{3}\.\d{3}-\d{2}\b"
+    r"|\b\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2}\b"
+    r"|\b[A-Za-z0-9]{2}\.[A-Za-z0-9]{3}\."
+    r"[A-Za-z0-9]{3}/[A-Za-z0-9]{4}-\d{2}\b"
+    r"|(?<!\d)\d{11}(?!\d)"
+    r"|(?<!\d)\d{14}(?!\d)"
+    r"|(?<![A-Za-z0-9])"
+    r"(?=[A-Za-z0-9]{0,13}[A-Za-z])(?=[A-Za-z0-9]{0,13}\d)"
+    r"[A-Za-z0-9]{14}(?![A-Za-z0-9])"
+)
 
 
 def _mascarar(texto: str) -> str:

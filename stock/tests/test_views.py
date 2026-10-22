@@ -117,6 +117,27 @@ class MovimentacaoFluxoTests(TestCase):
         self.assertEqual(resposta.status_code, 200)
         self.assertIn("obrigat", resposta.content.decode())
 
+    def test_ajuste_negativo_grava_tipo_especifico(self):
+        EstoqueFactory(
+            produto=self.produto, unidade=self.feira, quantidade="10.00"
+        )
+        resposta = self.client.post(
+            reverse("stock:movimento_ajuste"),
+            {
+                "produto": self.produto.pk,
+                "unidade": self.feira.pk,
+                "quantidade": "-2.00",
+                "motivo": "quebra no manuseio",
+            },
+            follow=True,
+        )
+        self.assertRedirects(resposta, reverse("stock:movimento_lista"))
+        movimento = MovimentoEstoque.objects.latest("id")
+        self.assertEqual(
+            movimento.tipo, MovimentoEstoque.Tipo.AJUSTE_NEGATIVO
+        )
+        self.assertEqual(movimento.delta, Decimal("-2.00"))
+
     def test_transferencia_via_post(self):
         EstoqueFactory(
             produto=self.produto, unidade=self.feira, quantidade="50"
@@ -136,8 +157,12 @@ class MovimentacaoFluxoTests(TestCase):
         destino = Estoque.objects.get(produto=self.produto, unidade=self.iacu)
         self.assertEqual(origem.quantidade, Decimal("35"))
         self.assertEqual(destino.quantidade, Decimal("15"))
-        saida = MovimentoEstoque.objects.filter(tipo="saida").latest("id")
-        entrada = MovimentoEstoque.objects.filter(tipo="entrada").latest("id")
+        saida = MovimentoEstoque.objects.filter(
+            tipo="transferencia_saida"
+        ).latest("id")
+        entrada = MovimentoEstoque.objects.filter(
+            tipo="transferencia_entrada"
+        ).latest("id")
         self.assertEqual(saida.movimento_par, entrada)
 
     def test_ledger_exibe_movimentos(self):

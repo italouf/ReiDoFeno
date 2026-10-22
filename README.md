@@ -21,6 +21,15 @@ python manage.py seed_groups
 python manage.py runserver
 ```
 
+Estoque demo (somente banco descartável):
+
+```bash
+ALLOW_DEMO_SEED=1 python manage.py semear_estoque_demo
+```
+
+O comando ajusta o saldo via ledger, preserva reservas/bloqueios e é idempotente.
+A variável é obrigatória também no SQLite para evitar execução acidental.
+
 Testes e qualidade:
 
 ```bash
@@ -100,8 +109,26 @@ pip-audit -r requirements.txt
 
 ## Documentação
 
+- `docs/specs/fase-2b-spec.md`
+- `docs/specs/fase-2b-remediation.md`
+- `docs/audit/fase-2b-conclusao.md`
 - `docs/adrs/ADR-001-postgres-local.md`
 - `docs/adrs/ADR-002-status-financeiro.md`
+- `docs/adrs/ADR-003-reservas-vinculadas.md`
+- `docs/adrs/ADR-013-ledger-imutavel.md`
+- `docs/adrs/ADR-014-cnpj-alfanumerico.md`
+- `docs/adrs/ADR-015-obrigacao-estoque.md`
 - `docs/runbook.md`
 - `docs/incidentes.md`
-- `rfenodocs/docs/technical-audit.md` (material de auditoria, não versionado)
+- `rfenodocs/docs/technical-audit.md` (material de auditoria, não versionado; não é fonte canônica)
+
+## Preço de atacado
+
+- Clientes com categoria **ATACADO** recebem `Produto.preco_atacado` quando
+  compram **mais de 50 fardos** de um produto cuja unidade de medida é `fardo`.
+- A tabela exige vínculo comprovado do titular ou pedido criado por vendedor
+  interno; visitante que informa CNPJ alheio usa o preço online.
+- O limiar é estrito: 50 fardos usam o preço-base do canal.
+- Clientes VAREJO, produtos que não são fardos e produtos sem preço de atacado
+  usam o preço-base (loja: `preco_online`; atacadista: `preco_balcao`).
+- O preço é congelado em `ItemPedido.preco_unitario` no checkout.

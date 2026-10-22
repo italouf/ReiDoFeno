@@ -14,6 +14,7 @@ class ProdutoForm(forms.ModelForm):
             "custo",
             "preco_balcao",
             "preco_online",
+            "preco_atacado",
             "ativo",
         )
 

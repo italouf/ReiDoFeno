@@ -75,7 +75,7 @@ class ItensTotaisTests(TestCase):
         self.assertEqual(item.subtotal, Decimal("75.00"))
 
     def test_recalcular_totais_soma_itens_e_frete(self):
-        pedido = PedidoFactory(frete="10.00")
+        pedido = PedidoFactory()
         ItemPedido.objects.create(
             pedido=pedido,
             produto=ProdutoFactory(preco_online="20.00"),
@@ -83,6 +83,11 @@ class ItensTotaisTests(TestCase):
             quantidade=2,
             preco_unitario=Decimal("20.00"),
         )
+        pedido.recalcular_totais()
+        self.assertEqual(pedido.subtotal, Decimal("40.00"))
+        self.assertEqual(pedido.total, Decimal("40.00"))
+
+        pedido.frete = Decimal("10.00")
         pedido.recalcular_totais()
         self.assertEqual(pedido.subtotal, Decimal("40.00"))
         self.assertEqual(pedido.total, Decimal("50.00"))

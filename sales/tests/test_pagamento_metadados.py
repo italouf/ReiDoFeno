@@ -18,6 +18,8 @@ class CorrecaoMetadadosPagamentoTests(TestCase):
             status_financeiro=Pedido.StatusFinanceiro.PAGO,
             financeiro_conciliado=True,
             total="20.00",
+            subtotal="20.00",
+            frete="0.00",
         )
         self.pagamento = Pagamento.objects.create(
             pedido=self.pedido,

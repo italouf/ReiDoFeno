@@ -3,6 +3,14 @@
 {% block content %}
 <h1>Meus pedidos</h1>
 
+{% if vinculo_pendente %}
+<div class="alerta alerta--info" role="status" style="margin-bottom:var(--espaco-4);">
+  Seu vínculo ainda não foi comprovado. Confirme o e-mail enviado para
+  <a href="{% url 'accounts:vincular_cliente' %}">vincular seu cadastro</a>
+  e liberar o histórico de pedidos.
+</div>
+{% endif %}
+
 {% if pedidos %}
 <div class="lista-pedidos">
   {% for pedido in pedidos %}

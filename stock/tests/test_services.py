@@ -9,10 +9,11 @@ from django.test import TestCase, TransactionTestCase
 from analytics.models import Aviso
 from catalog.factories import ProdutoFactory
 from core.factories import UnidadeFactory
+from sales.factories import ItemPedidoFactory, PedidoFactory
 from stock.factories import EstoqueFactory
 from stock.models import Estoque, MovimentoEstoque
 from stock.services import (
-    dar_baixa_definitiva,
+    baixar_saldo_livre,
     liberar_reserva,
     registrar_movimento,
     reservar,
@@ -112,8 +113,12 @@ class RegistrarMovimentoTests(TestCase):
         self.assertEqual(destino.quantidade, Decimal("12"))
         self.assertEqual(saida.movimento_par, entrada)
         self.assertEqual(entrada.movimento_par, saida)
-        self.assertEqual(saida.tipo, MovimentoEstoque.Tipo.SAIDA)
-        self.assertEqual(entrada.tipo, MovimentoEstoque.Tipo.ENTRADA)
+        self.assertEqual(
+            saida.tipo, MovimentoEstoque.Tipo.TRANSFERENCIA_SAIDA
+        )
+        self.assertEqual(
+            entrada.tipo, MovimentoEstoque.Tipo.TRANSFERENCIA_ENTRADA
+        )
 
     def test_movimento_registra_usuario(self):
         from accounts.models import Usuario
@@ -152,13 +157,26 @@ class ImutabilidadeMovimentoTests(TestCase):
 
 
 class ReservaTests(TestCase):
+    def _reservar(self, produto, unidade, quantidade):
+        pedido = PedidoFactory(unidade=unidade)
+        item = ItemPedidoFactory(
+            pedido=pedido, produto=produto, quantidade=quantidade
+        )
+        return reservar(
+            produto=produto,
+            unidade=unidade,
+            quantidade=quantidade,
+            pedido=pedido,
+            item_pedido=item,
+        )
+
     def test_reserva_bloqueia_disponibilidade(self):
         produto = ProdutoFactory()
         unidade = UnidadeFactory()
         EstoqueFactory(
             produto=produto, unidade=unidade, quantidade="10"
         )
-        reservar(produto=produto, unidade=unidade, quantidade=6)
+        self._reservar(produto, unidade, 6)
         estoque = Estoque.objects.get(produto=produto, unidade=unidade)
         self.assertEqual(estoque.disponivel, Decimal("4"))
 
@@ -169,32 +187,69 @@ class ReservaTests(TestCase):
             produto=produto, unidade=unidade, quantidade="3"
         )
         with self.assertRaises(ValidationError):
-            reservar(produto=produto, unidade=unidade, quantidade=4)
+            self._reservar(produto, unidade, 4)
 
     def test_liberar_reserva_devolve_disponibilidade(self):
         produto = ProdutoFactory()
         unidade = UnidadeFactory()
         EstoqueFactory(
             produto=produto, unidade=unidade,
-            quantidade="10", quantidade_bloqueada="6",
+            quantidade="10", quantidade_bloqueada="0",
         )
-        liberar_reserva(produto=produto, unidade=unidade, quantidade=6)
+        reserva = self._reservar(produto, unidade, 6)
+        liberar_reserva(reserva)
         estoque = Estoque.objects.get(produto=produto, unidade=unidade)
         self.assertEqual(estoque.disponivel, Decimal("10"))
 
-    def test_baixa_definitiva_apos_aprovacao(self):
+    def test_baixa_saldo_livre_nao_altera_bloqueio(self):
         produto = ProdutoFactory()
         unidade = UnidadeFactory()
         EstoqueFactory(
             produto=produto, unidade=unidade,
             quantidade="10", quantidade_bloqueada="4",
         )
-        dar_baixa_definitiva(
+        baixar_saldo_livre(
             produto=produto, unidade=unidade, quantidade=4, pedido="#123"
         )
         estoque = Estoque.objects.get(produto=produto, unidade=unidade)
         self.assertEqual(estoque.quantidade, Decimal("6"))
-        self.assertEqual(estoque.quantidade_bloqueada, Decimal("0"))
+        self.assertEqual(estoque.quantidade_bloqueada, Decimal("4"))
+
+    def test_baixa_saldo_livre_rejeita_se_livre_insuficiente(self):
+        produto = ProdutoFactory()
+        unidade = UnidadeFactory()
+        EstoqueFactory(
+            produto=produto, unidade=unidade,
+            quantidade="10", quantidade_bloqueada="8",
+        )
+        with self.assertRaises(ValidationError):
+            baixar_saldo_livre(
+                produto=produto, unidade=unidade, quantidade=3
+            )
+        estoque = Estoque.objects.get(produto=produto, unidade=unidade)
+        self.assertEqual(estoque.quantidade, Decimal("10"))
+        self.assertEqual(estoque.quantidade_bloqueada, Decimal("8"))
+
+    def test_falha_no_movimento_reverte_liberacao_do_bloqueio(self):
+        from unittest import mock
+
+        produto = ProdutoFactory()
+        unidade = UnidadeFactory()
+        EstoqueFactory(
+            produto=produto, unidade=unidade,
+            quantidade="10", quantidade_bloqueada="4",
+        )
+        with mock.patch(
+            "stock.services.registrar_movimento",
+            side_effect=RuntimeError("falha no ledger"),
+        ):
+            with self.assertRaises(RuntimeError):
+                baixar_saldo_livre(
+                    produto=produto, unidade=unidade, quantidade=4
+                )
+        estoque = Estoque.objects.get(produto=produto, unidade=unidade)
+        self.assertEqual(estoque.quantidade_bloqueada, Decimal("4"))
+        self.assertEqual(estoque.quantidade, Decimal("10"))
 
 
 class ConcurrencyStockTests(TransactionTestCase):

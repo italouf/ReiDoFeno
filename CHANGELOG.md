@@ -1,5 +1,114 @@
 # Changelog
 
+## [Fase 2B — remediação da auditoria independente] — 2026-10-20, encerrada em 2026-10-22
+
+- **B01:** removido o fallback que reduzia `quantidade_bloqueada` sem identidade;
+  cancelamento/expiração só liberam reservas do próprio pedido e a aprovação baixa
+  somente reservas identificadas + saldo livre, registrando `Aviso`/auditoria quando
+  falta saldo. Operações de A não afetam reservas de B.
+- **B02:** migração histórica dividida em schema (0002), reservas (0003), quarentena/
+  evidência (0004), dados (0005) e constraints/trigger (0006); validada em PostgreSQL 15
+  com `validar_migracao_legado --criar/--verificar`.
+- **B03:** contrato de reserva valida pedido, estado, produto, unidade e quantidade
+  agregada; reserva consumida não baixa de novo; item/pedido com reserva usam PROTECT.
+- **B04:** `semear_estoque_demo` grava via ledger, preserva bloqueios e exige
+  `ALLOW_DEMO_SEED=1` fora do SQLite; `seed_demo` também tem guarda de ambiente.
+- **B05:** `ReconciliacaoEstoqueLegado` registra ajuste sem prova, transferência ambígua,
+  baseline e reserva parcial; `BloqueioLegado` mantém bloqueio sem dono em quarentena;
+  movimento de quantidade zero falha com diagnóstico em vez de virar 0,01.
+- **H02:** locks ordenados em transferências e checkouts de múltiplos produtos; teste
+  PostgreSQL de transferências inversas sem deadlock.
+- **H03:** `_update_permitido` só aceita `movimento_par`; trigger valida tipo/par e
+  bloqueia `TRUNCATE` fora do GUC de teste.
+- **H04/H05:** PII formatada/minúscula mascarada; NaN/Infinity rejeitados no serviço e
+  por limites no banco.
+- **H06:** cotação do carrinho movida para `sales/pricing.py`, compartilhada com o
+  checkout e exibindo o preço final para atacadista verificado.
+- **R01:** `ObrigacaoEstoquePedido` persistente por pedido/produto/unidade; transições
+  para separação/entrega/conclusão bloqueadas enquanto houver baixa pendente; resolução
+  autorizada, auditada e idempotente por saldo livre (ADR-015, migration `sales/0009`).
+- **R02:** `select_for_update(of=("self",))` nas reservas e locks ordenados; teste
+  PostgreSQL de pagamento × transferência sem deadlock.
+- **R03:** testes de seed autorizam `ALLOW_DEMO_SEED=1` localmente; teste negativo
+  restaura o ambiente; a guarda exige confirmação explícita em qualquer banco.
+- **R04:** nova reserva desconta o que já foi consumido e respeita a obrigação restante.
+- **R05:** resolução de quarentena exige justificativa e recusa estado sem cobertura de
+  reservas/bloqueios.
+- **R06:** limpeza do `seed_demo` é atômica por pedido/produto e não apaga pagamento antes
+  de falhar em PROTECT.
+- **R07:** limites de finitude em reserva, quarentena e evidências (migration
+  `stock/0008`), com testes SQL no PostgreSQL.
+- **T01:** reconstrução de obrigações por evidência (FK ou motivo com exatamente um
+  pedido), com `sales/0011`, `evidencia_baixada`/`evidencia_detalhe` e comando
+  `reconstruir_obrigacoes_estoque`; status pago não presume baixa e motivo ambíguo fica
+  pendente.
+- **T02:** resolvedor recebe obrigação existente, valida pedido/unidade/financeiro,
+  consome reservas ativas do mesmo produto/unidade ou recusa, e não cria obrigação.
+- **T03:** resolvedor exige usuário ativo Administrador/Gestor, persiste `resolvido_por`,
+  justificativa e auditoria transacional com rollback.
+- **U01:** reparo de obrigações roda em transação por unidade, com lock e releitura
+  após o lock; não sobrescreve baixa concorrente e registra antes/depois.
+- **U02:** `stock/0010` torna a atribuição `MovimentoEstoque.obrigacao` imutável
+  (`PROTECT` + trigger PostgreSQL com `obrigacao_id`); SQL direto não reatribui/remove
+  a prova. Bancos que já aplicaram `stock/0006` recebem a atualização.
+- **U03:** `tipo_pendencia` separa falta, ambiguidade e excesso; o resolvedor não
+  decide ambiguidade/excesso incidentalmente. `conciliar_obrigacao_historica` registra
+  atribuição, descarte ou aceite de excesso com ator/justificativa/auditoria, sem criar
+  movimento. Ambiguidades alheias ao pedido não bloqueiam.
+- **U04:** base povoada exatamente na `sales/0001` com pagamento aprovado não é
+  suportada para atualização automática (limitação pré-existente da `sales/0002`);
+  caminhos suportados e restrição documentados. Não é regressão deste commit.
+- **C01:** cada saída passa a ter uma única alocação global de evidência
+  (`AlocacaoEvidenciaEstoque`, `OneToOne`), gravada sob lock na conciliação. A
+  reconstrução consulta essa autoridade, decisões JSON legadas são convertidas e
+  conflitos são diagnosticados com IDs, sem escolher dono silenciosamente.
+- **Validação:** SQLite 501 passed/15 skipped/241 subtests; PostgreSQL 15.8 local
+  515 passed/1 skipped (cache Redis)/241 subtests, incluindo U01-U03/C01,
+  concorrência e constraints. A execução independente em PostgreSQL 16.2 +
+  Redis 7.4.2 registrou 516 passed/zero skips/241 subtests, SQLite 501/15 e 21
+  regressões externas; são números de origem distinta, não da CI. Migração
+  histórica 0001→HEAD validada em SQLite e PostgreSQL 15.8 com 9 cenários e
+  T01-A/T01-B; upgrades reais 817d1e8→HEAD e b1cc7d2→HEAD passaram. A CI
+  `39774481256` do SHA `5ae6bfc0b3ab1fca4789295803aadd07efd0d16b` está verde
+  (tests PostgreSQL 15 + Redis, check de produção, migração histórica, lint,
+  security e semgrep). Restaram os avisos conhecidos de `URLField` e datetime
+  sem timezone; o aviso de teardown de uma execução intermediária não apareceu
+  na execução independente final. Ruff, Bandit (0 medium/high), pip-audit (0),
+  check, check --deploy e `makemigrations --check` limpos.
+- **Documentação de encerramento:** relatório canônico em
+  `docs/audit/fase-2b-conclusao.md`; o SHA de código validado é `5ae6bfc` e o
+  commit documental posterior tem SHA próprio.
+
+## [Fase 2B — integridade financeira e estoque] — 2026-10-20
+
+- **STO-01:** `MovimentoEstoque.delta` assinado como fonte de verdade;
+  `quantidade` derivada; imutabilidade em instância, QuerySet, bulk e trigger
+  PostgreSQL; migração reconcilia o saldo legado e tipos de transferência
+  passam a ser `transferencia_entrada`/`transferencia_saida`.
+- **ADR-003:** `ReservaEstoque` vinculada a pedido/item, com unique parcial,
+  consumo/liberação idempotentes, reconciliação com `quantidade_bloqueada` e
+  integração no checkout, pagamento aprovado, cancelamento e expiração. A baixa
+  cobre reservas parciais de pedidos legados sem deixar saldo remanescente.
+- **DAT-01:** check constraints de valores não negativos e
+  `total = subtotal + frete`; a igualdade usa arredondamento de 2 casas para ser
+  portátil entre SQLite e PostgreSQL; migration valida o legado antes de aplicar.
+- **CUS-01:** CPF, CNPJ numérico e CNPJ alfanumérico (ASCII - 48, módulo 11);
+  normalização preserva letras maiúsculas; fiscal e filtro de PII atualizados.
+- **ADR-005:** `meus-pedidos` exige vínculo comprovado e pedido do titular;
+  exportação LGPD sem vínculo retorna 403; tela orienta o usuário pendente.
+- **Atacado:** `Produto.preco_atacado` e regra estrita de mais de 50 fardos
+  para cliente ATACADO com vínculo comprovado (ou pedido de vendedor interno),
+  com preço congelado no `ItemPedido`.
+- **Migração histórica:** `validar_migracao_legado` passa a criar estoque,
+  movimentos legados e reserva parcial no schema 0001 e valida ledger, reservas
+  e alocação após migrar até HEAD.
+- **Validação local:** 433 passed, 6 skipped (5 PostgreSQL + 1 Redis), 233
+  subtests; cobertura `stock/services.py` 99,02%, `sales/services.py` 93,89%,
+  `customers/services.py` 94,55%, total 91,41%; Ruff, Bandit (0 medium/high),
+  pip-audit (0 vulnerabilidades), `manage.py check`, `makemigrations --check`
+  e migração completa em SQLite aprovados. Trigger e concorrência PostgreSQL
+  ficam cobertos pelos testes `@pytest.mark.postgres` na CI.
+
 Todas as mudanças relevantes deste projeto são registradas aqui.
 
 ## [Fase 2A — fechamento local E01/E02] — 2026-10-20

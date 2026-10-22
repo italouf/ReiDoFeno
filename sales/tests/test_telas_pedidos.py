@@ -97,13 +97,10 @@ class PedidosInternosTests(TestCase):
         self.assertEqual(resposta.status_code, 403)
 
     def test_transicao_por_gestor_avanca_pedido(self):
+        from sales.services import marcar_pagamento_aprovado
+
         pedido = fluxo_checkout(self.client, quantidade=1)
-        pedido.definir_status_financeiro(
-            Pedido.StatusFinanceiro.PAGO,
-            motivo="teste",
-        )
-        pedido.financeiro_conciliado = True
-        pedido.save(update_fields=["financeiro_conciliado"])
+        marcar_pagamento_aprovado(pedido, id_externo="teste")
         self.client.force_login(self.usuarios["gestor"])
         resposta = self.client.post(
             reverse("sales:pedido_atualizar_status", args=[pedido.pk]),

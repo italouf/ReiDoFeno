@@ -3,6 +3,7 @@ import json
 import logging
 import uuid
 
+from django.core.exceptions import PermissionDenied
 from django.utils import timezone
 
 from customers.models import Cliente
@@ -47,7 +48,15 @@ def abrir_solicitacao(*, cliente: Cliente, tipo: str) -> SolicitacaoTitular:
 
 
 def exportar_dados_do_titular(cliente: Cliente) -> dict:
-    """Agrega todos os dados pessoais do titular em estrutura portável."""
+    """Agrega todos os dados pessoais do titular em estrutura portável.
+
+    Só o titular comprovado pode exportar: sem ``vinculo_verificado`` não há
+    prova de que o solicitante controla o cadastro.
+    """
+    if not cliente.vinculo_verificado:
+        raise PermissionDenied(
+            "Exportação requer vínculo verificado. Confirme seu e-mail."
+        )
     pedidos = []
     for pedido in cliente.pedidos.filter(
         identidade_verificada=True

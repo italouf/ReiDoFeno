@@ -1,6 +1,7 @@
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
-from django.http import HttpResponse
+from django.core.exceptions import PermissionDenied
+from django.http import HttpResponse, HttpResponseForbidden
 from django.shortcuts import redirect
 from django.utils import timezone
 from django.views.generic import FormView, TemplateView, View
@@ -74,13 +75,22 @@ class NovaSolicitacaoView(LoginRequiredMixin, FormView):
 
     def form_valid(self, form):
         cliente = _cliente_do_usuario(self.request.user)
+        tipo = form.cleaned_data["tipo"]
         if cliente is None:
+            if tipo == SolicitacaoTitular.Tipo.EXPORTACAO:
+                return HttpResponseForbidden(
+                    "Exportação requer vínculo verificado. Confirme seu e-mail."
+                )
             messages.error(self.request, "Nenhum cadastro vinculado ao usuário.")
             return redirect("sales:meus_pedidos")
 
-        tipo = form.cleaned_data["tipo"]
         if tipo == SolicitacaoTitular.Tipo.EXPORTACAO:
-            dados = exportar_dados_do_titular(cliente)
+            try:
+                dados = exportar_dados_do_titular(cliente)
+            except PermissionDenied:
+                return HttpResponseForbidden(
+                    "Exportação requer vínculo verificado. Confirme seu e-mail."
+                )
             solicitacao = abrir_solicitacao(cliente=cliente, tipo=tipo)
             solicitacao.status = solicitacao.Status.CONCLUIDA
             solicitacao.responsavel = self.request.user

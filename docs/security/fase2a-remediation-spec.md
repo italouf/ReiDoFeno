@@ -284,8 +284,11 @@ do ADR-002.
 | Item | Objetivo | Critério de aceite | Gate |
 |---|---|---|---|
 | Idempotência externa da preferência | Confirmar o contrato real de `POST /checkout/preferences` para retry/chave repetida | Teste documentado no provedor/sandbox sem preferência duplicada e com o mesmo resultado | Antes de pagamentos reais |
-| Reserva de estoque por pedido | Rastrear reservas e liberações por pedido sob concorrência | Teste PostgreSQL de reserva/liberação dupla e recuperação após falha | Fase 2B |
 | Outbox de efeitos externos | Retirar e-mail/webhook/fiscal da transação crítica com retry e idempotência | Falha externa não perde nem duplica efeito; estado reconciliável | Fase 2B/operação |
 | Imutabilidade de logs | Impedir alteração/exclusão de eventos de auditoria no banco | Update/delete bloqueados e tentativa registrada em ambiente de teste | Antes de produção |
 | Proxy/IP e rate limiting | Resolver IP real com proxy confiável sem confiar em cabeçalho arbitrário | Testes de conexão direta e proxy; limites por IP correto | Implantação |
 | Backup/restore | Definir RPO/RTO e comprovar restauração | Evidência de restore com data, tamanho e contagens | Go-live |
+
+> **Fase 2B:** o item "Reserva de estoque por pedido" foi implementado em
+> `stock.ReservaEstoque` (ADR-003), com consumo/liberação idempotentes e teste de
+> concorrência PostgreSQL na CI.
