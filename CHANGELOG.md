@@ -17,8 +17,8 @@
 - **A08:** gráficos deixam CDN/script inline e usam `static/js/relatorios.js`;
   validados em navegador sob CSP padrão.
 - **A09:** workflow de push inclui `fase-2c-analytics-fiscal`.
-- **Validação local:** SQLite 616 passed/16 skipped/240 subtests; cobertura
-  `analytics/services.py` 97,85%, `sales/services.py` 85,09%,
+- **Validação local:** SQLite 627 passed/16 skipped/240 subtests; cobertura
+  `analytics/services.py` 94,79%, `sales/services.py` 84,82%,
   `fiscal/services.py` 90,20%; gate histórico 0001→HEAD aprovado; Ruff,
   check, check --deploy, Bandit 0 medium/high e pip-audit 0.
   PostgreSQL 15 + Redis e CI remoto permanecem pendentes de execução
