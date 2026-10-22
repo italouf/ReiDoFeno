@@ -12,7 +12,7 @@ from core.mixins import GRUPOS_INTERNOS, GrupoRequiredMixin
 from core.models import Unidade
 
 from .models import Aviso
-from .services import vendas_por_produto
+from .services import comparativo_unidades, vendas_por_produto
 
 GRUPOS_GESTAO = ("Administrador", "Gestor")
 
@@ -95,6 +95,7 @@ class RelatorioVendasProdutoView(
     def _exportar_csv(self):
         inicio, fim, unidade = self._filtros()
         vendas = vendas_por_produto(inicio, fim, unidade=unidade)
+        # CSV com os mesmos filtros da tela.
         resposta = HttpResponse(content_type="text/csv")
         resposta["Content-Disposition"] = (
             'attachment; filename="vendas-por-produto.csv"'
@@ -124,3 +125,36 @@ class RelatorioVendasProdutoView(
                 ]
             )
         return resposta
+
+
+class ComparativoUnidadesView(
+    LoginRequiredMixin, GrupoRequiredMixin, TemplateView
+):
+    """Comparação lado a lado entre as unidades ativas."""
+
+    template_name = "analytics/comparativo_unidades.html"
+    grupos_permitidos = GRUPOS_GESTAO
+
+    def get_context_data(self, **kwargs):
+        contexto = super().get_context_data(**kwargs)
+        hoje = timezone.localdate()
+        inicio = parse_date(self.request.GET.get("inicio") or "") or hoje.replace(
+            day=1
+        )
+        fim = parse_date(self.request.GET.get("fim") or "") or hoje
+        linhas = comparativo_unidades(inicio, fim)
+        contexto.update(
+            {
+                "titulo": "Comparativo de unidades",
+                "inicio": inicio,
+                "fim": fim,
+                "linhas": linhas,
+                "grafico": {
+                    "labels": [linha["unidade"] for linha in linhas],
+                    "receita": [float(linha["receita"]) for linha in linhas],
+                    "cmv": [float(linha["cmv"]) for linha in linhas],
+                    "lucro": [float(linha["lucro_bruto"]) for linha in linhas],
+                },
+            }
+        )
+        return contexto

@@ -2,7 +2,17 @@
 from datetime import date, datetime, time
 from decimal import Decimal
 
-from django.db.models import DateTimeField, DecimalField, Exists, F, Max, OuterRef, Q, Sum
+from django.db.models import (
+    Count,
+    DateTimeField,
+    DecimalField,
+    Exists,
+    F,
+    Max,
+    OuterRef,
+    Q,
+    Sum,
+)
 from django.db.models.functions import TruncDate
 from django.utils import timezone
 
@@ -198,6 +208,64 @@ def vendas_por_produto(
                 "receita": receita,
                 "cmv": cmv,
                 "lucro_bruto": receita - cmv,
+            }
+        )
+    return resultado
+
+
+def comparativo_unidades(inicio: date, fim: date) -> list[dict]:
+    """Receita, CMV, lucro, pedidos e ticket médio por unidade ativa."""
+    from core.models import Unidade
+
+    começo, término = _janela(inicio, fim)
+    pagamentos = (
+        Pagamento.objects.filter(
+            aprovado_em__range=(começo, término),
+            aprovado_em__isnull=False,
+            pedido__status_financeiro=Pedido.StatusFinanceiro.PAGO,
+        )
+        .values("pedido__unidade_id")
+        .annotate(
+            receita=Sum("valor"),
+            num_pedidos=Count("pedido_id", distinct=True),
+        )
+    )
+    cmv = (
+        ItemPedido.objects.filter(
+            pedido__pagamento__aprovado_em__range=(começo, término),
+            pedido__pagamento__aprovado_em__isnull=False,
+            pedido__status_financeiro=Pedido.StatusFinanceiro.PAGO,
+        )
+        .exclude(pedido__status__in=STATUS_EXCLUIDOS_VENDA)
+        .values("pedido__unidade_id")
+        .annotate(
+            total=Sum(
+                F("custo_unitario") * F("quantidade"),
+                output_field=DecimalField(max_digits=14, decimal_places=2),
+            )
+        )
+    )
+    receitas = {linha["pedido__unidade_id"]: linha for linha in pagamentos}
+    cmvs = {linha["pedido__unidade_id"]: linha["total"] for linha in cmv}
+
+    resultado = []
+    for unidade in Unidade.objects.filter(ativa=True).order_by("nome"):
+        dados = receitas.get(unidade.pk, {})
+        receita = dados.get("receita") or Decimal("0.00")
+        num_pedidos = dados.get("num_pedidos") or 0
+        custo = cmvs.get(unidade.pk) or Decimal("0.00")
+        resultado.append(
+            {
+                "unidade": unidade.nome,
+                "receita": receita,
+                "cmv": custo,
+                "lucro_bruto": receita - custo,
+                "num_pedidos": num_pedidos,
+                "ticket_medio": (
+                    receita / num_pedidos
+                    if num_pedidos
+                    else Decimal("0.00")
+                ),
             }
         )
     return resultado

@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}Comparativo de unidades — Rei do Feno{% endblock %}
+{% block content %}
+{% include "components/cabecalho_pagina.html" with titulo="Comparativo de unidades" descricao="Feira de Santana e Iaçu no mesmo período." %}
+
+<form method="get" class="filtro-barra">
+  <div class="campo">
+    <label for="inicio">Início</label>
+    <input type="date" id="inicio" name="inicio" value="{{ inicio|date:'Y-m-d' }}">
+  </div>
+  <div class="campo">
+    <label for="fim">Fim</label>
+    <input type="date" id="fim" name="fim" value="{{ fim|date:'Y-m-d' }}">
+  </div>
+  <button type="submit" class="btn">Comparar</button>
+</form>
+
+<section class="cartao">
+  <h2>Receita, CMV e lucro</h2>
+  <canvas id="grafico-unidades" height="90" aria-label="Gráfico comparativo por unidade"></canvas>
+</section>
+
+<section class="cartao">
+  <h2>Comparação lado a lado</h2>
+  <div class="tabela-envolve">
+    <table class="tabela">
+      <thead>
+        <tr>
+          <th scope="col">Unidade</th>
+          <th scope="col" class="num">Receita</th>
+          <th scope="col" class="num">CMV</th>
+          <th scope="col" class="num">Lucro bruto</th>
+          <th scope="col" class="num">Pedidos</th>
+          <th scope="col" class="num">Ticket médio</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for linha in linhas %}
+        <tr>
+          <td>{{ linha.unidade }}</td>
+          <td class="num">R$ {{ linha.receita|floatformat:2 }}</td>
+          <td class="num">R$ {{ linha.cmv|floatformat:2 }}</td>
+          <td class="num">R$ {{ linha.lucro_bruto|floatformat:2 }}</td>
+          <td class="num">{{ linha.num_pedidos }}</td>
+          <td class="num">R$ {{ linha.ticket_medio|floatformat:2 }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="6">Nenhuma unidade ativa cadastrada.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+{{ grafico|json_script:"dados-unidades" }}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+  (function () {
+    const dados = JSON.parse(document.getElementById("dados-unidades").textContent);
+    const canvas = document.getElementById("grafico-unidades");
+    if (!canvas || !window.Chart || !dados.labels.length) return;
+    new Chart(canvas, {
+      type: "bar",
+      data: {
+        labels: dados.labels,
+        datasets: [
+          { label: "Receita", data: dados.receita, backgroundColor: "#2f6b4f" },
+          { label: "CMV", data: dados.cmv, backgroundColor: "#b07d3f" },
+          { label: "Lucro bruto", data: dados.lucro, backgroundColor: "#3d7d63" }
+        ]
+      },
+      options: {
+        responsive: true,
+        scales: { y: { beginAtZero: true } }
+      }
+    });
+  })();
+</script>
+{% endblock %}
