@@ -182,6 +182,49 @@ class RelatorioVendasProdutoTests(TestCase):
         self.assertEqual(resposta["Content-Type"], "text/csv")
         self.assertIn("Feno CSV", resposta.content.decode("utf-8"))
 
+    def test_csv_nao_interpreta_nome_como_formula(self):
+        produto = ProdutoFactory(nome="=HYPERLINK(\"x\")")
+        unidade = UnidadeFactory()
+        _pedido_pago(
+            produto=produto, unidade=unidade, quantidade=1,
+            preco=Decimal("10.00"),
+        )
+        call_command("seed_groups", verbosity=0)
+        gestor = Usuario.objects.create_user(
+            username="gestor_formula", password="senha-forte-123"
+        )
+        gestor.groups.add(Group.objects.get(name="Gestor"))
+        self.client.force_login(gestor)
+
+        resposta = self.client.get(
+            reverse("analytics:relatorio_vendas_produto"),
+            {"formato": "csv", "inicio": DIA.isoformat(), "fim": DIA.isoformat()},
+        )
+
+        self.assertIn("'=HYPERLINK", resposta.content.decode("utf-8"))
+
+    def test_graficos_nao_dependem_de_cdn_nem_script_inline(self):
+        call_command("seed_groups", verbosity=0)
+        gestor = Usuario.objects.create_user(
+            username="gestor_csp", password="senha-forte-123"
+        )
+        gestor.groups.add(Group.objects.get(name="Gestor"))
+        self.client.force_login(gestor)
+
+        vendas = self.client.get(reverse("analytics:relatorio_vendas_produto"))
+        comparativo = self.client.get(
+            reverse("analytics:comparativo_unidades")
+        )
+
+        for resposta in (vendas, comparativo):
+            texto = resposta.content.decode()
+            self.assertNotIn("cdn.jsdelivr.net", texto)
+            self.assertIn("js/relatorios.js", texto)
+            self.assertIn(
+                "default-src 'self'",
+                resposta["Content-Security-Policy"],
+            )
+
     def test_vendedor_recebe_403_no_relatorio(self):
         call_command("seed_groups", verbosity=0)
         vendedor = Usuario.objects.create_user(

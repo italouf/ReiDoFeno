@@ -17,7 +17,7 @@
 
 <section class="cartao">
   <h2>Receita, CMV e lucro</h2>
-  <canvas id="grafico-unidades" height="90" aria-label="Gráfico comparativo por unidade"></canvas>
+  <canvas id="grafico-unidades" data-chart="grouped" data-labels="{{ grafico_labels }}" data-series="{{ grafico_series }}" height="240" aria-label="Gráfico comparativo por unidade"></canvas>
 </section>
 
 <section class="cartao">
@@ -52,28 +52,6 @@
   </div>
 </section>
 
-{{ grafico|json_script:"dados-unidades" }}
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-<script>
-  (function () {
-    const dados = JSON.parse(document.getElementById("dados-unidades").textContent);
-    const canvas = document.getElementById("grafico-unidades");
-    if (!canvas || !window.Chart || !dados.labels.length) return;
-    new Chart(canvas, {
-      type: "bar",
-      data: {
-        labels: dados.labels,
-        datasets: [
-          { label: "Receita", data: dados.receita, backgroundColor: "#2f6b4f" },
-          { label: "CMV", data: dados.cmv, backgroundColor: "#b07d3f" },
-          { label: "Lucro bruto", data: dados.lucro, backgroundColor: "#3d7d63" }
-        ]
-      },
-      options: {
-        responsive: true,
-        scales: { y: { beginAtZero: true } }
-      }
-    });
-  })();
-</script>
+{% load static %}
+<script src="{% static 'js/relatorios.js' %}" defer></script>
 {% endblock %}

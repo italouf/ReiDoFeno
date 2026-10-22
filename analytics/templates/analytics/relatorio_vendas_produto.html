@@ -27,7 +27,7 @@
 
 <section class="cartao">
   <h2>Receita por produto</h2>
-  <canvas id="grafico-vendas" height="90" aria-label="Gráfico de receita por produto"></canvas>
+  <canvas id="grafico-vendas" data-chart="bar" data-labels="{{ grafico_labels }}" data-values="{{ grafico_valores }}" height="220" aria-label="Gráfico de receita por produto"></canvas>
 </section>
 
 <section class="cartao">
@@ -40,7 +40,8 @@
           <th scope="col">Produto</th>
           <th scope="col">Unidade</th>
           <th scope="col">Dia</th>
-          <th scope="col" class="num">Qtd.</th>
+          <th scope="col" class="num">Qtd. vendida</th>
+          <th scope="col" class="num">Qtd. devolvida</th>
           <th scope="col" class="num">Receita</th>
           <th scope="col" class="num">CMV</th>
           <th scope="col" class="num">Lucro bruto</th>
@@ -53,6 +54,7 @@
           <td>{{ v.unidade }}</td>
           <td>{{ v.dia|date:"d/m/Y" }}</td>
           <td class="num">{{ v.quantidade|floatformat:2 }}</td>
+          <td class="num">{{ v.quantidade_devolvida|floatformat:2 }}</td>
           <td class="num">R$ {{ v.receita|floatformat:2 }}</td>
           <td class="num">R$ {{ v.cmv|floatformat:2 }}</td>
           <td class="num">R$ {{ v.lucro_bruto|floatformat:2 }}</td>
@@ -66,25 +68,6 @@
   {% endif %}
 </section>
 
-{{ grafico|json_script:"dados-vendas" }}
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-<script>
-  (function () {
-    const dados = JSON.parse(document.getElementById("dados-vendas").textContent);
-    const canvas = document.getElementById("grafico-vendas");
-    if (!canvas || !window.Chart || !dados.labels.length) return;
-    new Chart(canvas, {
-      type: "bar",
-      data: {
-        labels: dados.labels,
-        datasets: [{ label: "Receita (R$)", data: dados.valores, backgroundColor: "#2f6b4f" }]
-      },
-      options: {
-        responsive: true,
-        plugins: { legend: { display: false } },
-        scales: { y: { beginAtZero: true } }
-      }
-    });
-  })();
-</script>
+{% load static %}
+<script src="{% static 'js/relatorios.js' %}" defer></script>
 {% endblock %}

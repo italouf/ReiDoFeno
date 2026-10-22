@@ -1,4 +1,5 @@
 import csv
+import json
 
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
@@ -15,6 +16,13 @@ from .models import Aviso
 from .services import comparativo_unidades, vendas_por_produto
 
 GRUPOS_GESTAO = ("Administrador", "Gestor")
+
+
+def _csv_seguro(valor) -> str:
+    texto = str(valor or "")
+    if texto.startswith(("=", "+", "-", "@")):
+        return "'" + texto
+    return texto
 
 
 class AvisoListView(LoginRequiredMixin, GrupoRequiredMixin, ListView):
@@ -77,13 +85,16 @@ class RelatorioVendasProdutoView(
                 "unidade": unidade,
                 "unidades": Unidade.objects.filter(ativa=True),
                 "vendas": vendas,
-                "grafico": {
-                    "labels": [
+                "grafico_labels": json.dumps(
+                    [
                         f"{v['produto']} · {v['unidade']} · {v['dia']:%d/%m}"
                         for v in vendas
                     ],
-                    "valores": [float(v["receita"]) for v in vendas],
-                },
+                    ensure_ascii=False,
+                ),
+                "grafico_valores": json.dumps(
+                    [float(v["receita"]) for v in vendas]
+                ),
                 "total_receita": sum(
                     (v["receita"] for v in vendas), start=0
                 ),
@@ -106,7 +117,8 @@ class RelatorioVendasProdutoView(
                 "Produto",
                 "Unidade",
                 "Dia",
-                "Quantidade",
+                "Quantidade vendida",
+                "Quantidade devolvida",
                 "Receita",
                 "CMV",
                 "Lucro bruto",
@@ -115,10 +127,11 @@ class RelatorioVendasProdutoView(
         for linha in vendas:
             escritor.writerow(
                 [
-                    linha["produto"],
-                    linha["unidade"],
+                    _csv_seguro(linha["produto"]),
+                    _csv_seguro(linha["unidade"]),
                     linha["dia"].isoformat(),
                     f"{linha['quantidade']:.2f}",
+                    f"{linha['quantidade_devolvida']:.2f}",
                     f"{linha['receita']:.2f}",
                     f"{linha['cmv']:.2f}",
                     f"{linha['lucro_bruto']:.2f}",
@@ -149,12 +162,35 @@ class ComparativoUnidadesView(
                 "inicio": inicio,
                 "fim": fim,
                 "linhas": linhas,
-                "grafico": {
-                    "labels": [linha["unidade"] for linha in linhas],
-                    "receita": [float(linha["receita"]) for linha in linhas],
-                    "cmv": [float(linha["cmv"]) for linha in linhas],
-                    "lucro": [float(linha["lucro_bruto"]) for linha in linhas],
-                },
+                "grafico_labels": json.dumps(
+                    [linha["unidade"] for linha in linhas],
+                    ensure_ascii=False,
+                ),
+                "grafico_series": json.dumps(
+                    [
+                        {
+                            "label": "Receita",
+                            "color": "#2f6b4f",
+                            "values": [
+                                float(linha["receita"]) for linha in linhas
+                            ],
+                        },
+                        {
+                            "label": "CMV",
+                            "color": "#b07d3f",
+                            "values": [
+                                float(linha["cmv"]) for linha in linhas
+                            ],
+                        },
+                        {
+                            "label": "Lucro bruto",
+                            "color": "#3d7d63",
+                            "values": [
+                                float(linha["lucro_bruto"]) for linha in linhas
+                            ],
+                        },
+                    ]
+                ),
             }
         )
         return contexto
