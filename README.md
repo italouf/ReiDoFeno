@@ -109,11 +109,18 @@ pip-audit -r requirements.txt
 
 ## Documentação
 
+- `docs/specs/fase-2b-spec.md`
+- `docs/specs/fase-2b-remediation.md`
+- `docs/audit/fase-2b-conclusao.md`
 - `docs/adrs/ADR-001-postgres-local.md`
 - `docs/adrs/ADR-002-status-financeiro.md`
+- `docs/adrs/ADR-003-reservas-vinculadas.md`
+- `docs/adrs/ADR-013-ledger-imutavel.md`
+- `docs/adrs/ADR-014-cnpj-alfanumerico.md`
+- `docs/adrs/ADR-015-obrigacao-estoque.md`
 - `docs/runbook.md`
 - `docs/incidentes.md`
-- `rfenodocs/docs/technical-audit.md` (material de auditoria, não versionado)
+- `rfenodocs/docs/technical-audit.md` (material de auditoria, não versionado; não é fonte canônica)
 
 ## Preço de atacado
 

@@ -1,15 +1,18 @@
 # Remediação da Fase 2B — invariantes de estoque, migração e evidência
 
 **Branch:** `fase-2b-integridade-estoque`
-**Base auditada:** `db3c610`
-**Objetivo:** fechar B01–B05 e os riscos P2 relevantes (H02–H06), sem regredir a Fase 2A.
+**Base histórica da remediação:** `db3c610`
+**SHA final do código validado:** `5ae6bfc0b3ab1fca4789295803aadd07efd0d16b`
+**Encerramento canônico:** [`docs/audit/fase-2b-conclusao.md`](../audit/fase-2b-conclusao.md)
+**Objetivo:** fechar B01–B05, os riscos P2 relevantes (H02–H06) e os achados
+posteriores R/T/U/C, sem regredir a Fase 2A.
 
 ## Matriz achado → invariante → teste → implementação → evidência
 
 | Achado | Invariante | Teste de aceite | Implementação | Evidência |
 |---|---|---|---|---|
 | B01 fallback sem dono | Cancelar/aprovar/expirar A nunca altera bloqueio de B; sem prova, só saldo livre ou pendência auditada | Estoque 10, B reserva 10, A legado item 3; cancelar/aprovar A mantém bloqueio 10 e registra pendência | `_baixar_estoque_do_pedido` sem fallback de bloqueio; `cancelar_pedido` só libera reservas; `Aviso`/`LogAuditoria` de pendência | Testes `test_b01_*` SQLite/PostgreSQL |
-| B02 migração histórica | Base histórica migra com segurança e repetibilidade; nenhuma migration posterior esconde passo anterior | Sequência CI `sales 0001 → stock 0001 → fixtures → migrate → verificar` em PostgreSQL 15 | 0002 só schema + delta default 0; 0004 quarentena; 0005 dados/evidência; 0006 constraints/trigger idempotentes | Comando `validar_migracao_legado --criar/--verificar` em SQLite e PostgreSQL 15.8 local; CI pendente |
+| B02 migração histórica | Base histórica migra com segurança e repetibilidade; nenhuma migration posterior esconde passo anterior | Sequência CI `sales 0001 → stock 0001 → fixtures → migrate → verificar` em PostgreSQL 15 | 0002 só schema + delta default 0; 0004 quarentena; 0005 dados/evidência; 0006 constraints/trigger idempotentes | Comando `validar_migracao_legado --criar/--verificar` em SQLite/PostgreSQL 15.8 e CI `39774481256` |
 | B03 contrato de reserva | Reserva respeita pedido, produto, unidade, quantidade agregada e estado; baixa nunca excede o devido | Reserva cancelada/produto divergente/quantidade maior rejeitadas; reserva consumida não baixa de novo; over-reserva não baixa | `reservar` valida contrato sob lock; `consumir_reserva` valida devido; `_baixar_estoque...` considera consumidas e registra pendência | Testes `test_b03_*` |
 | B04 escritores alternativos | Toda alteração de saldo passa por serviço/ledger; seed não zera bloqueio nem altera saldo sem evento | Rodar seed com estoque/ledger/reserva; saldo e ledger reconciliam; seed recusa ambiente não descartável | Comando `semear_estoque_demo` via `registrar_ajuste`; guarda `ALLOW_DEMO_SEED=1` em qualquer banco | Teste do comando + docs |
 | B05 evidência histórica | Não inventar 0,01; preservar dados/proveniência; baseline e quarentena explícitas | Fixtures com ajuste sem auditoria, transferência ambígua, zero, reserva parcial e bloqueio sem dono | `ReconciliacaoEstoqueLegado`, `BloqueioLegado`, delta 0 como sentinela, falha diagnosticada para zero | `validar_migracao_legado` + testes de migração |
@@ -103,17 +106,27 @@
 ## Resultado da validação
 
 - SQLite local: **501 passed, 15 skipped, 241 subtests**.
-- PostgreSQL 15.8 local: **515 passed, 1 skipped (cache Redis), 241 subtests**,
-  incluindo B01/B03/R01/T01-T03/U01-U03/C01, concorrência e constraints. Migração
-  histórica 0001→HEAD com 9 cenários e T01-A/T01-B também passou. A CI integral do
-  novo SHA continua sendo o gate remoto; o Neon permaneceu indisponível para a rodada.
-- O PostgreSQL local emitiu o aviso de teardown por conexões remanescentes de testes
-  concorrentes; o pytest terminou com exit 0. Os testes U01 novos fecham suas
-  conexões explicitamente. O aviso não é ocultado nem tratado como falha de negócio.
+- PostgreSQL 15.8 local (agente): **515 passed, 1 skipped (cache Redis), 241
+  subtests**, incluindo B01/B03/R01/T01-T03/U01-U03/C01, concorrência e constraints.
+  Migração histórica 0001→HEAD com 9 cenários e T01-A/T01-B também passou.
+- Execução independente (auditoria de 22/10/2026), PostgreSQL 16.2 + Redis 7.4.2:
+  **516 passed, zero skips, 241 subtests**; SQLite **501 passed/15 skipped**; 21
+  regressões externas; upgrades 817d1e8→HEAD e b1cc7d2→HEAD. São números de outra
+  origem/ambiente, não da CI.
+- CI do SHA `5ae6bfc0b3ab1fca4789295803aadd07efd0d16b`
+  ([run 39774481256](https://github.com/italouf/ReiDoFeno/actions/runs/39774481256)):
+  tests PostgreSQL 15 + Redis, check de produção, migração histórica, lint, security
+  e semgrep concluídos com sucesso. A CI não publicou aqui uma contagem de testes;
+  não atribua a ela os números locais/independentes.
+- A execução independente final não teve aviso de teardown; restaram os dois avisos
+  conhecidos de `URLField` e datetime sem timezone. O aviso de conexão remanescente
+  apareceu em uma execução intermediária do agente e está registrado sem ser tratado
+  como falha de negócio.
 - `ruff`, `manage.py check`, `manage.py check --deploy`, `makemigrations --check`,
-  Bandit (0 medium/high) e pip-audit (0) aprovados.
-- Cobertura desta rodada não foi usada como gate; os números de cobertura anteriores
-  não foram reaproveitados como prova das novas invariantes.
+  Bandit (0 medium/high) e pip-audit (0) aprovados. Bandit `-ll` não revisa os 174
+  alertas low individualmente; Semgrep comunitário é tolerante a falhas no workflow.
+- Cobertura independente: `stock/services.py` 94,61%, `sales/services.py` 84,51%,
+  total 85,31%, com migrations omitidas e recorte próprio. Cobertura não é gate.
 - Invariantes verificados no banco local: nenhum ledger divergente, nenhum bloqueio
   divergente e nenhum `delta` nulo/zero.
 
@@ -190,7 +203,7 @@ silenciosamente, apagar histórico ou criar movimento compensatório.
 
 | ID | Implementação | Evidência |
 |---|---|---|
-| C01 | `stock.AlocacaoEvidenciaEstoque` tem `OneToOne` do movimento (unicidade global) e FK `PROTECT` da obrigação; `stock/0011` cria a autoridade e converte decisões JSON. `conciliar_obrigacao_historica` grava a alocação sob lock do movimento; reconstrução e comando consultam a alocação, preservando a FK original e o trigger de U02. | `test_conciliation_capacity.py`: sequencial via CLI, concorrência PostgreSQL, positivo descartar/atribuir/nova baixa, conversão de JSON e conflito diagnóstico, rollback de auditoria |
+| C01 | `stock.AlocacaoEvidenciaEstoque` tem `OneToOne` do movimento (unicidade global), FK `PROTECT` da obrigação e trigger PostgreSQL imutável; `stock/0011` cria a autoridade e converte decisões JSON. `conciliar_obrigacao_historica` grava a alocação sob lock do movimento; reconstrução e comando consultam a alocação, preservando a FK original e o trigger de U02. | `test_conciliation_capacity.py`: sequencial via CLI, concorrência PostgreSQL, positivo descartar/atribuir/nova baixa, conversão de JSON e conflito diagnóstico, rollback de auditoria; proteção SQL coberta pela regressão externa |
 
 ## Correções U01-U03 (b725a2a)
 
@@ -199,7 +212,7 @@ silenciosamente, apagar histórico ou criar movimento compensatório.
 | U01 | Reconstrução não sobrescreve baixa/obrigação confirmada concorrentemente. | `reconstruir_obrigacoes_estoque --aplicar` executa uma transação por obrigação, `select_for_update`, relê a obrigação/movimentos depois do lock, grava somente campos calculados e registra `LogAuditoria` antes/depois. Dry-run não escreve. | `RebuildRaceTests` em `sales/tests/test_evidence_safety.py` (duas conexões PostgreSQL) |
 | U02 | Movimento persistido não muda de obrigação; atribuição é evidência protegida. | `stock/0010` faz `AlterField` para `on_delete=PROTECT` e substitui a função/trigger PostgreSQL incluindo `NEW.obrigacao_id IS NOT DISTINCT FROM OLD.obrigacao_id`. INSERT válido continua permitido; UPDATE/NULL/reatribuição e DELETE da obrigação referenciada são recusados. | `ImmutableAssignmentTests` (SQL direto, remoção e `ProtectedError`) |
 | U03 | Falta comprovada, ambiguidade pertinente e excesso são distintos; conciliação é explícita e auditável. | `tipo_pendencia` (`falta`/`ambigua`/`excesso`), helper preserva decisões em `evidencia_detalhe`, resolvedor/`_baixar` recusam ambígua/excesso, e `conciliar_obrigacao_historica` registra `atribuir`/`descartar`/`aceitar_excesso` sem criar movimento. Ambiguidades sem o pedido atual não bloqueiam. | `EvidenceSemanticsTests` (ambiguidade, excesso, não pertinente, atribuição, aceite idempotente) |
-| U04 | Limite de atualização delimitado. | Base **povoada na 0001** com pagamento aprovado + separação não é suportada devido à fragilidade pré-existente da `sales/0002`; pontos suportados e caminho de backup/importação documentados. Não é regressão de b725a2a. | ADR-015, runbook e seção “Pontos de partida e limite U04” |
+| U04 | Limite de atualização delimitado. | Base **povoada na 0001** com pagamento aprovado + separação não é suportada devido à fragilidade pré-existente da `sales/0002`; pontos suportados documentados e eventual DBA/importação **não validado automaticamente**. Não é regressão de b725a2a. | ADR-015, runbook e seção “Pontos de partida e limite U04” |
 
 ### Decisões e limites adicionais
 
@@ -211,5 +224,5 @@ silenciosamente, apagar histórico ou criar movimento compensatório.
   integral deve rodar no PostgreSQL local da CI; Neon foi usado para sondagens dirigidas
   por latência/suspensão do compute.
 - A execução integral PostgreSQL foi concluída localmente em PostgreSQL 15.8
-  (515 passed/1 skipped); o Neon permaneceu indisponível. A CI integral do novo SHA
-  ainda é o gate remoto.
+  (515 passed/1 skipped) e a execução independente em 16.2 (516/0). A CI do SHA
+  `5ae6bfc` também foi aprovada; o Neon permaneceu indisponível para a rodada.

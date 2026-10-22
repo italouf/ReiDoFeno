@@ -2,9 +2,11 @@
 
 **Branch:** `fase-2b-integridade-estoque`
 **Base:** `main` em `f3e3353` (merge da Fase 2A)
-**Data:** 2026-10-20
+**Data:** 2026-10-20 — atualizado em 2026-10-22
 **Objetivo:** estoque confiável e ledger reconstruível, sem regressão das garantias da
 Fase 2A.
+**SHA de código validado:** `5ae6bfc0b3ab1fca4789295803aadd07efd0d16b`.
+**Encerramento canônico:** [`docs/audit/fase-2b-conclusao.md`](../audit/fase-2b-conclusao.md).
 
 ## Escopo entregue
 
@@ -33,13 +35,16 @@ Fase 2A.
    não podem ser negativos (ou zero, no caso da quantidade). A igualdade é comparada
    com arredondamento de 2 casas para ser portátil entre SQLite e PostgreSQL. NaN e
    Infinity são rejeitados no serviço e por limites de coluna.
-5. CPF, CNPJ numérico e CNPJ alfanumérico são aceitos; letras são preservadas em
+6. CPF, CNPJ numérico e CNPJ alfanumérico são aceitos; letras são preservadas em
    maiúsculas e o DV oficial é validado.
-6. `meus-pedidos` e exportação LGPD exigem `vinculo_verificado` e pedido do próprio
+7. `meus-pedidos` e exportação LGPD exigem `vinculo_verificado` e pedido do próprio
    titular; pedidos de visitante não aparecem.
-7. Preço de atacado só se aplica a cliente ATACADO com vínculo comprovado (ou pedido
+8. Preço de atacado só se aplica a cliente ATACADO com vínculo comprovado (ou pedido
    criado por vendedor interno), produto em fardo, quantidade > 50 e `preco_atacado`
    preenchido; o preço é congelado no `ItemPedido`.
+9. Para cada movimento de saída, a quantidade total reconhecida em obrigações não
+   excede `abs(delta)`; `AlocacaoEvidenciaEstoque` é a autoridade global por
+   movimento e o JSON da obrigação é apenas trilha.
 
 ## Migrations aditivas
 
@@ -55,8 +60,10 @@ Fase 2A.
   já migrados.
 - `sales/0007_dat01_check_constraints` + `sales/0008_limites_finitos`: checks
   financeiros e limites contra NaN/Infinity.
-- `stock/0011_alocacao_evidencia`: cria a autoridade global de alocação por
-  movimento e converte decisões JSON legadas, diagnosticando conflitos.
+- `sales/0009`–`0012` + `stock/0009`–`0011`: obrigação persistente, evidência
+  (`evidencia_baixada`/`evidencia_detalhe`), reconstrução, classificação
+  `tipo_pendencia`, FK imutável e alocação global; `stock/0011` também converte
+  decisões JSON legadas e diagnostica conflitos.
 - `catalog/0002_produto_preco_atacado`: adiciona `preco_atacado` nulo.
 
 Nenhuma migration aplicada em produção foi reescrita; a compatibilidade com bancos que
@@ -89,21 +96,27 @@ já aplicaram a versão anterior da 0002/0003 é tratada por 0004–0006 idempot
 - [x] STO-01, ADR-003, DAT-01, CUS-01, ADR-005 e atacado implementados e testados.
 - [x] Suíte SQLite local: 501 passed, 15 skipped (14 PostgreSQL + 1 cache), 241
       subtests.
-- [x] Migração histórica 0001 → HEAD validada em SQLite e PostgreSQL 15.8,
-      incluindo T01-A/T01-B (ledger, reservas, quarentena e evidências).
-- [x] PostgreSQL 15.8 local: 515 passed, 1 skipped (cache Redis), 241 subtests,
-      incluindo B01/B03/R01/T01-T03/U01-U03/C01, concorrência e constraints.
+- [x] Migração histórica 0001 → HEAD validada no SQLite e no PostgreSQL local
+      15.8, incluindo T01-A/T01-B (ledger, reservas, quarentena e evidências).
+- [x] PostgreSQL 15.8 local (agente): 515 passed, 1 skipped (cache Redis), 241
+      subtests, incluindo B01/B03/R01/T01-T03/U01-U03/C01, concorrência e
+      constraints.
+- [x] Execução independente PostgreSQL 16.2 + Redis 7.4.2: 516 passed, zero skips,
+      241 subtests; SQLite 501 passed/15 skipped; 21 regressões externas; upgrades
+      817d1e8→HEAD e b1cc7d2→HEAD.
+- [x] CI do SHA `5ae6bfc` (`39774481256`): jobs tests PostgreSQL 15 + Redis, check
+      de produção, migração histórica, lint, security e semgrep concluídos com
+      sucesso. A contagem de testes não foi inferida da execução independente.
 - [x] U01/U02/U03: reconstrução concorrente, atribuição imutável e conciliação
       explícita de ambígua/excesso cobertos por testes PostgreSQL.
 - [x] C01: autoridade global de alocação por movimento, com unicidade, conversão
       de JSON legado e diagnóstico de conflitos.
 - [x] U04: limite de base povoada na 0001 documentado; não é regressão e não há
       promessa de compatibilidade universal.
-- [ ] Rodada integral PostgreSQL no novo SHA/CI.
+- [x] Trigger/concorrência PostgreSQL validados na CI e no PostgreSQL independente.
 - [x] `ruff check`, `manage.py check`, `makemigrations --check --dry-run`.
 - [x] Migration completa em banco SQLite vazio.
-- [ ] Trigger/concorrência PostgreSQL validados na CI (workflow inclui o branch).
-- [x] Specs em `docs/specs/fase-2b/` e ADRs 003/013/014.
-- [ ] Cobertura atualizada deste SHA; não é usada como gate. Os números anteriores
-      (R01-R07) não foram reaproveitados como prova desta rodada.
+- [x] Specs em `docs/specs/fase-2b/` e ADRs 001/002/003/013/014/015.
+- [x] Cobertura independente: `stock/services.py` 94,61%, `sales/services.py`
+      84,51%, total 85,31% (migrations omitidas; não é gate).
 - [x] Bandit: 0 medium/high no escopo de código; pip-audit: 0; `ruff`: limpo.

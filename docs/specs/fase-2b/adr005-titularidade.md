@@ -35,8 +35,8 @@ A Fase 2A criou `Cliente.vinculo_verificado` e a prova de vínculo por nonce.
 
 ## Critérios de aceite
 
-- [ ] `meus-pedidos` filtra vínculo verificado e identidade do pedido.
-- [ ] Estado vazio orienta o usuário sem vínculo.
-- [ ] Exportação sem vínculo retorna 403 (view e service).
-- [ ] Pedido de outro cliente não aparece.
-- [ ] Testes passam em SQLite e PostgreSQL.
+- [x] `meus-pedidos` filtra vínculo verificado e identidade do pedido.
+- [x] Estado vazio orienta o usuário sem vínculo.
+- [x] Exportação sem vínculo retorna 403 (view e service).
+- [x] Pedido de outro cliente não aparece.
+- [x] Testes passam em SQLite e PostgreSQL.

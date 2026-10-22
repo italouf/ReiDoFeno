@@ -1,6 +1,6 @@
 # Changelog
 
-## [Fase 2B — remediação da auditoria independente] — 2026-10-20
+## [Fase 2B — remediação da auditoria independente] — 2026-10-20, encerrada em 2026-10-22
 
 - **B01:** removido o fallback que reduzia `quantidade_bloqueada` sem identidade;
   cancelamento/expiração só liberam reservas do próprio pedido e a aprovação baixa
@@ -64,12 +64,20 @@
   conflitos são diagnosticados com IDs, sem escolher dono silenciosamente.
 - **Validação:** SQLite 501 passed/15 skipped/241 subtests; PostgreSQL 15.8 local
   515 passed/1 skipped (cache Redis)/241 subtests, incluindo U01-U03/C01,
-  concorrência e constraints. Migração histórica 0001→HEAD validada em SQLite e
-  PostgreSQL 15.8 com 9 cenários e T01-A/T01-B. O aviso de teardown por conexões
-  remanescentes dos testes concorrentes permanece visível e não é tratado como
-  falha de negócio. Ruff, Bandit (0 medium/high), pip-audit (0), check,
-  check --deploy e `makemigrations --check` limpos. A CI integral do novo SHA
-  ainda não foi executada.
+  concorrência e constraints. A execução independente em PostgreSQL 16.2 +
+  Redis 7.4.2 registrou 516 passed/zero skips/241 subtests, SQLite 501/15 e 21
+  regressões externas; são números de origem distinta, não da CI. Migração
+  histórica 0001→HEAD validada em SQLite e PostgreSQL 15.8 com 9 cenários e
+  T01-A/T01-B; upgrades reais 817d1e8→HEAD e b1cc7d2→HEAD passaram. A CI
+  `39774481256` do SHA `5ae6bfc0b3ab1fca4789295803aadd07efd0d16b` está verde
+  (tests PostgreSQL 15 + Redis, check de produção, migração histórica, lint,
+  security e semgrep). Restaram os avisos conhecidos de `URLField` e datetime
+  sem timezone; o aviso de teardown de uma execução intermediária não apareceu
+  na execução independente final. Ruff, Bandit (0 medium/high), pip-audit (0),
+  check, check --deploy e `makemigrations --check` limpos.
+- **Documentação de encerramento:** relatório canônico em
+  `docs/audit/fase-2b-conclusao.md`; o SHA de código validado é `5ae6bfc` e o
+  commit documental posterior tem SHA próprio.
 
 ## [Fase 2B — integridade financeira e estoque] — 2026-10-20
 

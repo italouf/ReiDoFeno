@@ -48,13 +48,17 @@ preço promocional no carrinho pode ser tratada em fase posterior.
 
 ## Critérios de aceite
 
-- [ ] Campo `preco_atacado` e migration aditiva.
-- [ ] 51 fardos para cliente ATACADO usa atacado.
-- [ ] 50 fardos usa preço-base.
-- [ ] Cliente VAREJO nunca usa atacado.
-- [ ] Visitante sem vínculo usando CNPJ de atacadista paga preço online.
-- [ ] Vendedor interno pode aplicar a tabela para cliente cadastrado.
-- [ ] Produto sem `preco_atacado` usa preço-base.
-- [ ] Produto que não é fardo não aplica a regra.
-- [ ] Checkout grava o preço calculado no `ItemPedido`.
-- [ ] `help_text`, formulário e README atualizados.
+- [x] Campo `preco_atacado` e migration aditiva.
+- [x] 51 fardos para cliente ATACADO usa atacado.
+- [x] 50 fardos usa preço-base.
+- [x] Cliente VAREJO nunca usa atacado.
+- [x] Visitante sem vínculo usando CNPJ de atacadista paga preço online.
+- [x] Vendedor interno pode aplicar a tabela para cliente cadastrado.
+- [x] Produto sem `preco_atacado` usa preço-base.
+- [x] Produto que não é fardo não aplica a regra.
+- [x] Checkout grava o preço calculado no `ItemPedido`.
+- [x] `help_text`, formulário e README atualizados.
+
+**Nota de aceite:** o checklist acima comprova implementação e testes técnicos. A
+confirmação comercial da regra com a operação permanece separada e pendente; não é
+substituída por estes testes.

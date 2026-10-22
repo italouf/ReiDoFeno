@@ -39,9 +39,9 @@ rejeitada.
 
 ## Critérios de aceite
 
-- [ ] `00.000.000/E08G-12` é normalizado para `00000000E08G12` e aceito.
-- [ ] Minúsculas são convertidas para maiúsculas.
-- [ ] DV inválido é rejeitado.
-- [ ] CNPJ numérico e CPF continuam válidos.
-- [ ] `DocumentoValidator` e `validar_documento()` aceitam alfanumérico.
-- [ ] Fiscal e mascaramento de PII preservam/protegem letras.
+- [x] `00.000.000/E08G-12` é normalizado para `00000000E08G12` e aceito.
+- [x] Minúsculas são convertidas para maiúsculas.
+- [x] DV inválido é rejeitado.
+- [x] CNPJ numérico e CPF continuam válidos.
+- [x] `DocumentoValidator` e `validar_documento()` aceitam alfanumérico.
+- [x] Fiscal e mascaramento de PII preservam/protegem letras.

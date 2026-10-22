@@ -1,9 +1,10 @@
 # ADR-015 — Obrigação persistente de baixa de estoque
 
 **Status:** Aceito
-**Data:** 2026-10-21
-**Fase:** 2B — remediação R01 e T01-T03
+**Data:** 2026-10-21 — atualizado em 2026-10-22
+**Fase:** 2B — remediação R01, T01-T03, U01-U04 e C01
 **Relaciona-se:** ADR-003 (reservas), ADR-013 (ledger)
+**Encerramento:** [`docs/audit/fase-2b-conclusao.md`](../audit/fase-2b-conclusao.md)
 
 ## Contexto
 
@@ -68,14 +69,16 @@ autoridade suficiente para atribuir a mesma saída a outro pedido.
 A migration `stock/0011` cria a alocação e converte decisões JSON anteriores: uma
 reivindicação consistente vira alocação única; reivindicações concorrentes para o
 mesmo movimento são mantidas pendentes com `conflitos_alocacao` e IDs para revisão,
-sem escolher silenciosamente um dono. A alocação é imutável pela API e o movimento
-original continua imutável; nenhuma FK de movimento é reatribuída.
+sem escolher silenciosamente um dono. A alocação é imutável pela API e por trigger
+PostgreSQL contra UPDATE/DELETE; o movimento original continua imutável e nenhuma FK
+de movimento é reatribuída.
 
 ## Procedimento de atualização e conciliação
 
 1. Aplicar as migrations. A `sales/0011` corrige automaticamente bases que já
    aplicaram a `0009` e bases que ainda vão aplicá-la; `sales/0012` classifica a
-   pendência e `stock/0010` protege a atribuição. Não há escrita no ledger.
+   pendência, `stock/0010` protege a atribuição e `stock/0011` cria a alocação
+   global e converte decisões JSON. Não há escrita no ledger.
 2. Executar `python manage.py reconstruir_obrigacoes_estoque` (dry-run) e revisar o
    relatório; usar `--aplicar` somente após conferir os candidatos. O comando trava
    cada obrigação e relê a evidência antes de salvar.
@@ -94,7 +97,8 @@ A atualização automática de uma base **povoada exatamente na `sales/0001`** c
 pedido em separação e pagamento aprovado não é suportada. A `sales/0002` é uma
 limitação pré-existente (`cannot CREATE INDEX ... pending trigger events`) e não uma
 regressão deste ADR. Os pontos suportados são banco vazio, `817d1e8` (com `sales/0002`
-já aplicada) e bases já em `0009`/`0011`. Para uma base nesse estado, usar backup e
+já aplicada) e bases já em `0009`/`0011`, incluindo `stock/0011`. Para uma base nesse
+estado, usar backup e
 importação para um ponto suportado ou intervenção DBA autorizada; esse caminho não é
 validado automaticamente e não se deve executar `0001 → HEAD` diretamente.
 

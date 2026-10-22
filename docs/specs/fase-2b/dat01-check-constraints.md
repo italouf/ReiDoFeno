@@ -47,8 +47,8 @@ por ambos os backends. A igualdade `total = subtotal + frete` é comparada com
 
 ## Critérios de aceite
 
-- [ ] Constraints presentes na migration e no modelo.
-- [ ] Testes de violação passam em SQLite e PostgreSQL.
-- [ ] Dados legados validados antes da migration.
-- [ ] `recalcular_totais()` continua produzindo `total = subtotal + frete`.
-- [ ] NaN/Infinity rejeitados pelo serviço e pelo banco.
+- [x] Constraints presentes na migration e no modelo.
+- [x] Testes de violação passam em SQLite e PostgreSQL.
+- [x] Dados legados validados antes da migration.
+- [x] `recalcular_totais()` continua produzindo `total = subtotal + frete`.
+- [x] NaN/Infinity rejeitados pelo serviço e pelo banco.

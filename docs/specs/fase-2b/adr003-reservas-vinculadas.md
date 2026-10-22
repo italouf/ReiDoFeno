@@ -61,11 +61,11 @@ Constraints:
 
 ## Critérios de aceite
 
-- [ ] Modelo e migration aditiva criados.
-- [ ] `reservar` exige pedido e cria vínculo.
-- [ ] `consumir_reserva` idempotente e gera movimento de baixa.
-- [ ] `liberar_reserva` idempotente e não gera movimento.
-- [ ] Checkout/pagamento/cancelamento integrados.
-- [ ] Reconciliação validada por teste.
-- [ ] Concorrência validada em PostgreSQL (CI).
-- [ ] Reserva parcial de legado baixa a diferença na aprovação.
+- [x] Modelo e migration aditiva criados.
+- [x] `reservar` exige pedido e cria vínculo.
+- [x] `consumir_reserva` idempotente e gera movimento de baixa.
+- [x] `liberar_reserva` idempotente e não gera movimento.
+- [x] Checkout/pagamento/cancelamento integrados.
+- [x] Reconciliação validada por teste.
+- [x] Concorrência validada em PostgreSQL (CI).
+- [x] Reserva parcial de legado baixa a diferença na aprovação.

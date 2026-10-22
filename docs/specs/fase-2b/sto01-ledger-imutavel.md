@@ -61,12 +61,12 @@ mas `QuerySet.update()`/`delete()` e SQL direto contornam a proteção.
 
 ## Critérios de aceite
 
-- [ ] Campo `delta` existe e é não nulo após a migration.
-- [ ] Ajuste de `-2` grava `delta=-2` e `quantidade=2`.
-- [ ] `SUM(delta)` reconcilia com `Estoque.quantidade` em todos os estoques migrados.
-- [ ] `save()`/`delete()` de instância existente e `QuerySet.update()`/`delete()`
+- [x] Campo `delta` existe e é não nulo após a migration.
+- [x] Ajuste de `-2` grava `delta=-2` e `quantidade=2`.
+- [x] `SUM(delta)` reconcilia com `Estoque.quantidade` em todos os estoques migrados.
+- [x] `save()`/`delete()` de instância existente e `QuerySet.update()`/`delete()`
       levantam `ImutabilidadeViolation`.
-- [ ] Trigger PostgreSQL bloqueia UPDATE/DELETE direto (CI).
-- [ ] Tipos positivos/negativos rejeitam sinal contrário.
-- [ ] Testes passam em SQLite e PostgreSQL.
-- [ ] Cobertura de `stock/services.py` ≥ 90% no escopo da fase.
+- [x] Trigger PostgreSQL bloqueia UPDATE/DELETE direto (CI).
+- [x] Tipos positivos/negativos rejeitam sinal contrário.
+- [x] Testes passam em SQLite e PostgreSQL.
+- [x] Cobertura de `stock/services.py` ≥ 90% no escopo da fase.
