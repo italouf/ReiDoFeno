@@ -241,6 +241,12 @@ class Pedido(models.Model):
     # ------------------------------------------------------------------ #
     def save(self, *args, **kwargs):
         criando = self.pk is None
+        if not self.uf_entrega and self.uf:
+            self.uf_entrega = self.uf
+            if kwargs.get("update_fields") is not None:
+                kwargs["update_fields"] = list(
+                    set(kwargs["update_fields"]) | {"uf_entrega"}
+                )
         if self.unidade_id:
             from .interestadual import calcular_interestadual
 
@@ -286,6 +292,8 @@ class Pedido(models.Model):
     @property
     def nota_fiscal(self):
         """Nota de saída do pedido (compatibilidade com o vínculo antigo)."""
+        if self.pk is None:
+            return None
         return self.notas_fiscais.filter(tipo="saida").order_by("-pk").first()
 
     def tem_prova_financeira(self) -> bool:

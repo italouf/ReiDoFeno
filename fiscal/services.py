@@ -53,6 +53,10 @@ def calcular_cfop_inverso(cfop: str) -> str:
     return f"{prefixo}.{normalizado[1:]}"
 
 
+# Compatibilidade com o nome interno previsto na especificação da Fase 2C.
+_calcular_cfop_inverso = calcular_cfop_inverso
+
+
 @transaction.atomic
 def cancelar_nota_fiscal(nota, *, motivo: str, usuario=None, request=None):
     """Cancela uma NF-e autorizada; idempotente e auditado."""
