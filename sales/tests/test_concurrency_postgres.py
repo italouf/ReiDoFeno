@@ -21,6 +21,8 @@ from sales.services import (
     alterar_status_operacional,
     aplicar_resultado_pagamento,
     cancelar_pedido,
+    cancelar_pedido_padrao,
+    estornar_pagamento,
     marcar_pagamento_aprovado,
 )
 from stock.factories import EstoqueFactory
@@ -92,6 +94,55 @@ class PostgresConcurrencyTests(TransactionTestCase):
             thread.join(timeout=20)
             if thread.is_alive():
                 raise AssertionError("thread não terminou")
+
+    def test_cancelamento_padrao_vs_estorno_nao_trava(self):
+        pedido = self._pedido(com_pagamento=True)
+        marcar_pagamento_aprovado(pedido, id_externo="pay-conc")
+        pedido.refresh_from_db()
+        erros = []
+
+        def cancelar():
+            close_old_connections()
+            try:
+                cancelar_pedido_padrao(
+                    pedido=pedido,
+                    justificativa="Corrida de teste",
+                    usuario=self.gestor,
+                )
+            except ValidationError:
+                pass
+            except Exception as erro:
+                erros.append(erro)
+            finally:
+                close_old_connections()
+
+        def estornar():
+            close_old_connections()
+            try:
+                estornar_pagamento(
+                    pedido.pagamento,
+                    status_pedido=Pedido.StatusFinanceiro.ESTORNADO,
+                    motivo="Corrida de teste",
+                    usuario=self.gestor,
+                )
+            except ValidationError:
+                pass
+            except Exception as erro:
+                erros.append(erro)
+            finally:
+                close_old_connections()
+
+        self._rodar([threading.Thread(target=cancelar),
+                     threading.Thread(target=estornar)])
+
+        self.assertFalse(erros, erros)
+        self.assertIn(
+            Pedido.objects.get(pk=pedido.pk).status_financeiro,
+            (
+                Pedido.StatusFinanceiro.CANCELADO,
+                Pedido.StatusFinanceiro.ESTORNADO,
+            ),
+        )
 
     def test_cancelamento_vs_aprovacao_nao_duplica_efeito(self):
         pedido = self._pedido()

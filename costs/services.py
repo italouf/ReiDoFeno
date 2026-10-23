@@ -22,12 +22,15 @@ def _meses_entre(inicio: date, fim: date) -> list[date]:
     return meses
 
 
-def despesas_no_periodo(inicio: date, fim: date) -> Decimal:
+def despesas_no_periodo(
+    inicio: date, fim: date, usuario=None
+) -> Decimal:
     """Soma as despesas apropriadas ao período [inicio, fim].
 
     - Única: conta se a data cai no período.
     - Mensal: conta em cada mês iniciado a partir do mês da despesa.
     - Anual: conta em cada ano iniciado a partir do ano da despesa.
+    - Com ``usuario``, considera apenas despesas sob sua responsabilidade.
     """
     if inicio > fim:
         return Decimal("0.00")
@@ -36,7 +39,11 @@ def despesas_no_periodo(inicio: date, fim: date) -> Decimal:
     meses = _meses_entre(inicio, fim)
     anos = sorted({mes.year for mes in meses})
 
-    for despesa in Despesa.objects.all():
+    despesas = Despesa.objects.all()
+    if usuario is not None:
+        despesas = despesas.filter(usuario_responsavel=usuario)
+
+    for despesa in despesas:
         if despesa.recorrencia == Despesa.Recorrencia.UNICA:
             if inicio <= despesa.data <= fim:
                 total += despesa.valor

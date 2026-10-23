@@ -5,12 +5,23 @@ from django.contrib.auth.models import Group
 from django.core.management import call_command
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from accounts.models import Usuario
 from catalog.factories import ProdutoFactory
 from costs.factories import DespesaFactory
-from sales.factories import ItemPedidoFactory, PedidoFactory
-from sales.models import Pedido
+from sales.factories import ItemPedidoFactory, PagamentoFactory, PedidoFactory
+from sales.models import Pagamento, Pedido
+
+
+def _pagar(pedido, *, quando=None):
+    pagamento = PagamentoFactory(
+        pedido=pedido,
+        valor=pedido.total,
+        status=Pagamento.Status.APROVADO,
+        aprovado_em=quando or timezone.now(),
+    )
+    return pagamento
 
 
 class PainelMetricasTests(TestCase):
@@ -23,15 +34,25 @@ class PainelMetricasTests(TestCase):
         cls.gestor.groups.add(Group.objects.get(name="Gestor"))
 
     def test_vendas_lucro_e_cancelados_fora_das_metricas(self):
-        produto = ProdutoFactory(preco_online="100.00")
+        produto = ProdutoFactory(
+            preco_online="100.00", custo=Decimal("0.00")
+        )
         pedido_bom = PedidoFactory(status=Pedido.Status.PAGO)
         ItemPedidoFactory(pedido=pedido_bom, produto=produto,
                           quantidade=2, preco_unitario=Decimal("100.00"))
         pedido_bom.recalcular_totais()
+        _pagar(pedido_bom)
 
         cancelado = PedidoFactory(status=Pedido.Status.PAGO)
         ItemPedidoFactory(pedido=cancelado, produto=produto,
                           quantidade=9, preco_unitario=Decimal("100.00"))
+        cancelado.recalcular_totais()
+        pagamento_cancelado = _pagar(cancelado)
+        pagamento_cancelado.status = Pagamento.Status.CANCELADO
+        pagamento_cancelado.estornado_em = timezone.now()
+        pagamento_cancelado.save(update_fields=["status", "estornado_em"])
+        cancelado.status_financeiro = Pedido.StatusFinanceiro.ESTORNADO
+        cancelado.save(update_fields=["status_financeiro"])
         cancelado.transicionar(Pedido.Status.CANCELADO)
 
         DespesaFactory(valor=Decimal("150.00"), recorrencia="unica",
@@ -59,8 +80,10 @@ class PainelMetricasTests(TestCase):
         pedido = PedidoFactory(status=Pedido.Status.PAGO)
         ItemPedidoFactory(pedido=pedido, produto=produto, quantidade=1,
                           preco_unitario=Decimal("10.00"))
-        passado = date.today() - timedelta(days=90)
+        pedido.recalcular_totais()
+        passado = timezone.now() - timedelta(days=90)
         Pedido.objects.filter(pk=pedido.pk).update(criado_em=passado)
+        _pagar(pedido, quando=passado)
 
         self.client.force_login(self.gestor)
         hoje_iso = date.today().isoformat()
@@ -84,6 +107,7 @@ class PainelMetricasTests(TestCase):
             preco_unitario=Decimal("100.00"),
         )
         pedido.recalcular_totais()
+        _pagar(pedido)
 
         self.client.force_login(self.gestor)
         resposta = self.client.get(reverse("core:painel"))

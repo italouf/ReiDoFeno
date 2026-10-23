@@ -31,6 +31,15 @@ class Aviso(models.Model):
         help_text="Label do modelo relacionado (ex.: app_label.ModelName).",
     )
     objeto_id = models.CharField("id do objeto", max_length=50, blank=True)
+    evento_chave = models.CharField(
+        "chave do evento",
+        max_length=150,
+        blank=True,
+        db_index=True,
+        help_text=(
+            "Vazio para aviso agregado; identifica um evento fiscal durável."
+        ),
+    )
     lido = models.BooleanField("lido", default=False)
     criado_em = models.DateTimeField("criado em", auto_now_add=True)
 
@@ -38,6 +47,13 @@ class Aviso(models.Model):
         verbose_name = "aviso"
         verbose_name_plural = "avisos"
         ordering = ["-criado_em"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=("evento_chave",),
+                condition=~models.Q(evento_chave=""),
+                name="aviso_evento_chave_unica",
+            )
+        ]
 
     def __str__(self):
         return f"[{self.get_severidade_display()}] {self.mensagem}"
@@ -47,20 +63,32 @@ class Aviso(models.Model):
         cls, *, tipo: str, mensagem: str, objeto=None,
         severidade: str = Severidade.ALERTA,
     ) -> "Aviso":
-        """Cria (ou reutiliza) um aviso para o objeto; idempotente enquanto não lido."""
+        """Cria ou reutiliza o aviso agregado do objeto enquanto não lido."""
         objeto_tipo = objeto_id = ""
         if objeto is not None:
             objeto_tipo = f"{objeto._meta.app_label}.{objeto.__class__.__name__}"
             objeto_id = str(objeto.pk)
 
-        aviso, criado = cls.objects.get_or_create(
+        aviso = (
+            cls.objects.filter(
+                tipo=tipo,
+                objeto_tipo=objeto_tipo,
+                objeto_id=objeto_id,
+                lido=False,
+                evento_chave="",
+            )
+            .exclude(mensagem__startswith="Resposta externa ")
+            .order_by("pk")
+            .first()
+        )
+        if aviso is not None:
+            return aviso
+        return cls.objects.create(
             tipo=tipo,
             objeto_tipo=objeto_tipo,
             objeto_id=objeto_id,
             lido=False,
-            defaults={
-                "mensagem": mensagem,
-                "severidade": severidade,
-            },
+            evento_chave="",
+            mensagem=mensagem,
+            severidade=severidade,
         )
-        return aviso

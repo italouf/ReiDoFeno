@@ -6,4 +6,4 @@ from .models import Unidade
 class UnidadeForm(forms.ModelForm):
     class Meta:
         model = Unidade
-        fields = ("nome", "cidade", "tipo", "ativa")
+        fields = ("nome", "cidade", "uf", "tipo", "ativa")

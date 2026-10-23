@@ -1,12 +1,18 @@
 from django.core.management import call_command
 from django.test import TestCase
+from django.utils import timezone
 
 from analytics.models import Aviso
 from customers.factories import ClienteFactory
 from customers.models import Cliente
 from fiscal.models import NotaFiscal
-from sales.factories import ItemPedidoFactory, PedidoFactory
-from sales.models import Pedido
+from sales.factories import (
+    ItemPedidoFactory,
+    PagamentoFactory,
+    PedidoFactory,
+)
+from sales.models import Pagamento, Pedido
+from sales.services import registrar_devolucao
 
 
 def pedido_pago(cliente=None):
@@ -28,10 +34,49 @@ class EmissaoFiscalTests(TestCase):
         self.assertEqual(nota.status, NotaFiscal.Status.AUTORIZADA)
         self.assertTrue(nota.numero)
         self.assertTrue(nota.chave_acesso)
+        self.assertEqual(len(nota.chave_acesso), 44)
+        self.assertEqual(nota.cfop, "5.102")
         self.assertEqual(nota.origem, NotaFiscal.Origem.API)
         self.assertFalse(
             Aviso.objects.filter(tipo=Aviso.Tipo.PAGO_SEM_NFE).exists()
         )
+
+    def test_nota_emitida_permite_devolucao_com_cfop_inverso(self):
+        pedido = pedido_pago()
+        PagamentoFactory(
+            pedido=pedido,
+            valor=pedido.total,
+            status=Pagamento.Status.APROVADO,
+            aprovado_em=timezone.now(),
+        )
+        call_command("processar_fiscal", verbosity=0)
+        nota_saida = NotaFiscal.objects.get(
+            pedido=pedido, tipo=NotaFiscal.Tipo.SAIDA
+        )
+
+        nota_entrada = registrar_devolucao(
+            pedido=pedido,
+            justificativa="Devolução após entrega",
+            usuario=self._usuario_fiscal(),
+        )
+
+        self.assertEqual(nota_saida.cfop, "5.102")
+        self.assertEqual(nota_entrada.cfop, "1.202")
+        self.assertEqual(
+            nota_entrada.chave_referenciada, nota_saida.chave_acesso
+        )
+
+    def _usuario_fiscal(self):
+        from django.contrib.auth.models import Group
+
+        from accounts.models import Usuario
+
+        Grupo = Group.objects.get_or_create(name="Administrador")[0]
+        usuario = Usuario.objects.create_user(
+            username="fiscal_teste", password="senha-forte-123"
+        )
+        usuario.groups.add(Grupo)
+        return usuario
 
     def test_financeiro_pago_com_andamento_aguardando_e_emitido(self):
         pedido = PedidoFactory(

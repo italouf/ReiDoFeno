@@ -24,13 +24,15 @@ from customers.models import Cliente
 
 from .cart import Carrinho
 from .emails import email_pedido_criado
-from .forms import CheckoutForm
+from .forms import CancelamentoForm, CheckoutForm
 from .models import Pagamento, Pedido
 from .services import (
     ResultadoPagamentoInvalido,
     alterar_status_operacional,
+    cancelar_pedido_padrao,
     criar_pedido_do_carrinho,
     pedidos_visiveis_para,
+    registrar_devolucao,
 )
 
 logger = logging.getLogger(__name__)
@@ -558,24 +560,44 @@ class MinhasMetricasView(LoginRequiredMixin, GrupoRequiredMixin, TemplateView):
     grupos_permitidos = GRUPOS_INTERNOS
 
     def get_context_data(self, **kwargs):
-        from datetime import date
-
-        from django.db.models import Sum
         from django.utils import timezone
+
+        from analytics.services import metricas_do_periodo
 
         contexto = super().get_context_data(**kwargs)
         meus = Pedido.objects.filter(usuario_criador=self.request.user)
         hoje = timezone.localdate()
-
-        contexto["pedidos_hoje"] = meus.filter(criado_em__date=hoje).count()
-        vendas = meus.filter(
-            status_financeiro=Pedido.StatusFinanceiro.PAGO
-        ).exclude(status=Pedido.Status.CANCELADO)
-        contexto["vendas_total"] = (
-            vendas.aggregate(soma=Sum("total"))["soma"] or 0
+        metricas = metricas_do_periodo(
+            hoje.replace(day=1),
+            hoje,
+            vendedor=self.request.user,
         )
+
+        contexto["metricas"] = metricas
+        contexto["receita"] = metricas["receita"]
+        contexto["num_pedidos"] = metricas["num_pedidos"]
+        contexto["receita_produtos"] = metricas["receita_produtos"]
+        contexto["receita_frete"] = metricas["receita_frete"]
+        contexto["receita_em_conciliacao"] = metricas[
+            "receita_em_conciliacao"
+        ]
+        contexto["cmv_total"] = metricas["cmv_total"]
+        contexto["lucro_bruto"] = metricas["lucro_bruto"]
+        contexto["despesas_total"] = metricas["despesas_total"]
+        contexto["pedidos_hoje"] = meus.filter(criado_em__date=hoje).count()
+        contexto["vendas_total"] = metricas["receita"]
         contexto["clientes_atendidos"] = (
-            vendas.values("cliente").distinct().count()
+            Pagamento.objects.filter(
+                aprovado_em__isnull=False,
+                pedido__usuario_criador=self.request.user,
+                pedido__status_financeiro__in=(
+                    Pedido.StatusFinanceiro.PAGO,
+                    Pedido.StatusFinanceiro.ESTORNADO,
+                ),
+            )
+            .values("pedido__cliente_id")
+            .distinct()
+            .count()
         )
         contexto["pendentes"] = meus.filter(
             status_financeiro=Pedido.StatusFinanceiro.PENDENTE,
@@ -585,7 +607,7 @@ class MinhasMetricasView(LoginRequiredMixin, GrupoRequiredMixin, TemplateView):
             ),
         ).count()
         contexto["interacoes_hoje"] = self.request.user.interacoes.filter(
-            criado_em__date=date.today()
+            criado_em__date=hoje
         ).count()
         return contexto
 
@@ -608,8 +630,10 @@ class PedidoInternoDetailView(LoginRequiredMixin, GrupoRequiredMixin, DetailView
     grupos_permitidos = GRUPOS_INTERNOS
 
     def get_queryset(self):
-        return pedidos_visiveis_para(self.request.user).select_related(
-            "cliente", "unidade"
+        return (
+            pedidos_visiveis_para(self.request.user)
+            .select_related("cliente", "unidade")
+            .prefetch_related("itens", "notas_fiscais")
         )
 
     def get_context_data(self, **kwargs):
@@ -625,6 +649,56 @@ class PedidoInternoDetailView(LoginRequiredMixin, GrupoRequiredMixin, DetailView
             for valor in sorted(permitidos)
         ]
         return contexto
+
+
+class PedidoCancelamentoView(
+    LoginRequiredMixin, GrupoRequiredMixin, FormView
+):
+    """Workflow de cancelamento padrão e devolução fiscal."""
+
+    template_name = "sales/pedido_cancelamento_form.html"
+    form_class = CancelamentoForm
+    grupos_permitidos = GRUPOS_INTERNOS
+
+    def dispatch(self, request, *args, **kwargs):
+        if not request.user.is_authenticated:
+            return self.handle_no_permission()
+        self.pedido = get_object_or_404(
+            pedidos_visiveis_para(request.user), pk=self.kwargs["pk"]
+        )
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_context_data(self, **kwargs):
+        contexto = super().get_context_data(**kwargs)
+        contexto["pedido"] = self.pedido
+        return contexto
+
+    def form_valid(self, form):
+        try:
+            if form.cleaned_data["tipo"] == Pedido.TipoCancelamento.PADRAO:
+                cancelar_pedido_padrao(
+                    pedido=self.pedido,
+                    justificativa=form.cleaned_data["justificativa"],
+                    usuario=self.request.user,
+                    request=self.request,
+                )
+            else:
+                registrar_devolucao(
+                    pedido=self.pedido,
+                    justificativa=form.cleaned_data["justificativa"],
+                    usuario=self.request.user,
+                    request=self.request,
+                )
+        except ValidationError as erro:
+            form.add_error(None, erro.message)
+            return self.form_invalid(form)
+        messages.success(
+            self.request,
+            f"Cancelamento registrado para o pedido {self.pedido.numero}.",
+        )
+        return redirect(
+            "sales:pedido_interno_detail", pk=self.pedido.pk
+        )
 
 
 class PedidoAtualizarStatusView(LoginRequiredMixin, GrupoRequiredMixin, View):

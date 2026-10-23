@@ -42,6 +42,7 @@ class NotaManualTests(TestCase):
         nota = NotaFiscal.objects.get(pedido=pedido)
         self.assertEqual(nota.origem, NotaFiscal.Origem.MANUAL)
         self.assertEqual(nota.status, NotaFiscal.Status.AUTORIZADA)
+        self.assertEqual(nota.cfop, "5.102")
         registro = LogAuditoria.objects.get(acao="fiscal.nota_manual_registrada")
         self.assertEqual(registro.depois["numero"], "123456")
 
@@ -50,6 +51,59 @@ class NotaManualTests(TestCase):
         self.client.force_login(self.usuarios["vendedor"])
         resposta = self.client.get(reverse("fiscal:nota_manual", args=[pedido.pk]))
         self.assertEqual(resposta.status_code, 403)
+
+    def test_chave_curta_e_rejeitada(self):
+        pedido = PedidoFactory(status=Pedido.Status.PAGO)
+        self.client.force_login(self.usuarios["gestor"])
+
+        resposta = self.client.post(
+            reverse("fiscal:nota_manual", args=[pedido.pk]),
+            {"numero": "123", "chave_acesso": "123"},
+        )
+
+        self.assertEqual(resposta.status_code, 200)
+        self.assertFalse(NotaFiscal.objects.filter(pedido=pedido).exists())
+
+    def test_nota_autorizada_nao_pode_ser_sobrescrita(self):
+        pedido = PedidoFactory(status=Pedido.Status.PAGO)
+        self.client.force_login(self.usuarios["gestor"])
+        self.client.post(
+            reverse("fiscal:nota_manual", args=[pedido.pk]),
+            {
+                "numero": "123",
+                "chave_acesso": "29260812345678901234567890123456789012345678",
+            },
+        )
+        resposta = self.client.post(
+            reverse("fiscal:nota_manual", args=[pedido.pk]),
+            {
+                "numero": "999",
+                "chave_acesso": "29260899999999999999999999999999999999999999",
+            },
+        )
+
+        self.assertEqual(resposta.status_code, 200)
+        nota = NotaFiscal.objects.get(pedido=pedido)
+        self.assertEqual(nota.numero, "123")
+
+    def test_nota_manual_interestadual_usa_cfop_6_102(self):
+        pedido = PedidoFactory(
+            status=Pedido.Status.PAGO,
+            uf_entrega="MG",
+            subtotal="100.00",
+            total="100.00",
+        )
+        self.client.force_login(self.usuarios["gestor"])
+
+        self.client.post(
+            reverse("fiscal:nota_manual", args=[pedido.pk]),
+            {
+                "numero": "321",
+                "chave_acesso": "29260812345678901234567890123456789012345678",
+            },
+        )
+
+        self.assertEqual(NotaFiscal.objects.get(pedido=pedido).cfop, "6.102")
 
     def test_falha_na_auditoria_reverte_nota_manual(self):
         pedido = PedidoFactory(status=Pedido.Status.PAGO)

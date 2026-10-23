@@ -15,7 +15,7 @@ from customers.factories import ClienteFactory
 
 # (nome_url, kwargs, perfis com acesso 200)
 URLS_INTERNAS = (
-    ("core:painel", {}, {"administrador", "gestor", "vendedor"}),
+    ("core:painel", {}, {"administrador", "gestor"}),
     (
         "core:unidade_lista",
         {},

@@ -7,7 +7,13 @@ Permissões são referenciadas por natural key: ``"app_label.codename"``.
 Novas fases devem acrescentar suas permissões aqui.
 """
 
-GRUPOS = ("Administrador", "Gestor", "Vendedor", "Cliente")
+GRUPOS = (
+    "Administrador",
+    "Gestor",
+    "Vendedor",
+    "Emissor Fiscal",
+    "Cliente",
+)
 
 # O grupo Administrador recebe automaticamente todas as permissões existentes.
 GRUPO_ADMINISTRADOR = "Administrador"
@@ -33,6 +39,13 @@ PERMISSOES_POR_GRUPO = {
         # Consulta de clientes para pedidos e interações
         "customers.view_cliente",
         # Fase 2/3 (sales, interações) será acrescentada aqui.
+    ],
+    "Emissor Fiscal": [
+        # Emissão e manutenção das notas, sem edição da operação.
+        "fiscal.view_notafiscal",
+        "fiscal.add_notafiscal",
+        "fiscal.change_notafiscal",
+        "sales.view_pedido",
     ],
     "Cliente": [
         # Direitos LGPD próprios serão acrescentados na Fase 4.

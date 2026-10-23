@@ -6,6 +6,7 @@ on:
       - main
       - fase-2a-seguranca-critica
       - fase-2b-integridade-estoque
+      - fase-2c-analytics-fiscal
   pull_request:
   workflow_dispatch:
 
@@ -23,6 +24,11 @@ jobs:
           pip install ruff==0.16.4
       - name: Ruff
         run: ruff check .
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Teste determinístico dos gráficos
+        run: node --test static/js/relatorios.test.mjs
 
   tests:
     runs-on: ubuntu-latest

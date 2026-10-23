@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.core.validators import MinValueValidator
 from django.db import models
 
@@ -43,6 +44,15 @@ class Despesa(models.Model):
     )
     data = models.DateField("data")
     observacao = models.TextField("observação", blank=True)
+    usuario_responsavel = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="despesas_responsavel",
+        verbose_name="responsável",
+        help_text="Vendedor responsável; usado no recorte de métricas.",
+    )
     criado_em = models.DateTimeField("criado em", auto_now_add=True)
 
     class Meta:

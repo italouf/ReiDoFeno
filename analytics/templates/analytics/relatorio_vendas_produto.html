@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Vendas por produto — Rei do Feno{% endblock %}
+{% block content %}
+{% include "components/cabecalho_pagina.html" with titulo="Vendas por produto" descricao="Receita, CMV e lucro por produto, dia e unidade." %}
+
+<form method="get" class="filtro-barra">
+  <div class="campo">
+    <label for="inicio">Início</label>
+    <input type="date" id="inicio" name="inicio" value="{{ inicio|date:'Y-m-d' }}">
+  </div>
+  <div class="campo">
+    <label for="fim">Fim</label>
+    <input type="date" id="fim" name="fim" value="{{ fim|date:'Y-m-d' }}">
+  </div>
+  <div class="campo">
+    <label for="unidade">Unidade</label>
+    <select id="unidade" name="unidade">
+      <option value="">Todas</option>
+      {% for u in unidades %}
+      <option value="{{ u.pk }}" {% if unidade and unidade.pk == u.pk %}selected{% endif %}>{{ u.nome }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <button type="submit" class="btn">Filtrar</button>
+  <a class="btn btn--secundario" href="?formato=csv&amp;inicio={{ inicio|date:'Y-m-d' }}&amp;fim={{ fim|date:'Y-m-d' }}{% if unidade %}&amp;unidade={{ unidade.pk }}{% endif %}">Exportar CSV</a>
+</form>
+
+<section class="cartao">
+  <h2>Receita por produto</h2>
+  <canvas id="grafico-vendas" data-chart="bar" data-labels="{{ grafico_labels }}" data-values="{{ grafico_valores }}" height="220" aria-label="Gráfico de receita por produto"></canvas>
+</section>
+
+<section class="cartao">
+  <h2>Detalhamento</h2>
+  {% if vendas %}
+  <div class="tabela-envolve">
+    <table class="tabela">
+      <thead>
+        <tr>
+          <th scope="col">Produto</th>
+          <th scope="col">Unidade</th>
+          <th scope="col">Dia</th>
+          <th scope="col" class="num">Qtd. vendida</th>
+          <th scope="col" class="num">Qtd. devolvida</th>
+          <th scope="col" class="num">Receita</th>
+          <th scope="col" class="num">CMV</th>
+          <th scope="col" class="num">Lucro bruto</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for v in vendas %}
+        <tr>
+          <td>{{ v.produto }}</td>
+          <td>{{ v.unidade }}</td>
+          <td>{{ v.dia|date:"d/m/Y" }}</td>
+          <td class="num">{{ v.quantidade|floatformat:2 }}</td>
+          <td class="num">{{ v.quantidade_devolvida|floatformat:2 }}</td>
+          <td class="num">R$ {{ v.receita|floatformat:2 }}</td>
+          <td class="num">R$ {{ v.cmv|floatformat:2 }}</td>
+          <td class="num">R$ {{ v.lucro_bruto|floatformat:2 }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  {% include "components/estado_vazio.html" with icone="i-grafico" titulo="Sem vendas no período." descricao="Ajuste o filtro ou aguarde novos pagamentos aprovados." %}
+  {% endif %}
+</section>
+
+{% load static %}
+<script src="{% static 'js/relatorios.js' %}" defer></script>
+{% endblock %}

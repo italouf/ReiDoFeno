@@ -83,7 +83,7 @@ class BlingFake:
             raise ErroFiscal("Rejeitado pelo SEFAZ (simulado).")
         return {
             "numero": f"9000{pedido.pk}",
-            "chave": f"292608{pedido.numero}0001000000001",
+            "chave": f"292608{pedido.pk:038d}",
             "link": f"https://fake.bling.com.br/danfe/{pedido.numero}",
         }
 

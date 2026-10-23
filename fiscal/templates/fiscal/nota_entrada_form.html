@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Registrar NF-e de entrada — {{ nota.pedido.numero }}{% endblock %}
+{% block content %}
+<div class="cartao form-cartao">
+  <h1>Registrar NF-e de entrada</h1>
+  <p style="color:var(--tinta-700);">
+    Pedido <strong>{{ nota.pedido.numero }}</strong> · {{ nota.pedido.cliente.nome }}<br>
+    CFOP de entrada: <strong>{{ nota.cfop|default:"—" }}</strong> ·
+    Chave referenciada da saída: <strong>{{ nota.chave_referenciada|default:"—" }}</strong>
+  </p>
+  <form method="post" data-enviar>
+    {% csrf_token %}
+    {% include "components/form_campos.html" with form=form %}
+    <div class="form-acoes">
+      <button type="submit" class="btn">Confirmar documento de entrada</button>
+      <a class="btn btn--secundario" href="{% url 'fiscal:nota_entrada_lista' %}">Cancelar</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

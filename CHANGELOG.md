@@ -1,5 +1,163 @@
 # Changelog
 
+## [Fase 2C — correção L02/L03 de avisos e eventos] — 2026-10-23
+
+- **L02:** `Aviso.evento_chave` separa aviso agregado (`""`) de aviso por
+  evento (chave durável). `Aviso.registrar()` busca somente agregados e não
+  lança `MultipleObjectsReturned` quando há vários avisos da mesma nota.
+- **L02 compatibilidade:** `analytics/0004_aviso_evento_chave.py` preserva
+  avisos antigos, converte eventos do SHA anterior para `legado:<pk>` e cria
+  constraint condicional de unicidade.
+- **L03:** a identidade `fiscal.resultado_externo:<nota>:<tentativa>:<tipo>`
+  é verificada antes de criar evento; a projeção JSON mantém 20 eventos, mas
+  a deduplicação sobrevive à rotação, releitura e nova transação.
+- **L03 legado/concorrência:** eventos apenas em auditoria são reconhecidos;
+  replays concorrentes usam lock da Nota e chave única. O histórico completo
+  permanece em `LogAuditoria`.
+- **Validação local:** SQLite **655 passed, 24 skipped, 240 subtests**;
+  cobertura total **86,39%**, `fiscal/services.py` **93,50%**,
+  `analytics/models.py` **97,67%**; Node R05 2/2; Ruff, `check`,
+  `makemigrations --check`, `check --deploy`, Bandit (0 medium/high) e
+  `pip-audit` (0) limpos; gate histórico `0001 → HEAD` aprovado em SQLite.
+- **Publicação e reauditoria:** SHA `2a7a30096f7d3c00b7bba9b5bd7dd12e78894a70`
+  publicado; CI `39953967926` success, incluindo PostgreSQL 15 + Redis e
+  migração histórica. Gate T aprovado com observações não bloqueantes; Gate C
+  aprovado; **Gate H pendente**.
+
+## [Fase 2C — correção L01 da autoridade fiscal] — 2026-10-22
+
+- **L01-A/B/C/D:** cada tentativa fiscal recebe `tentativa_atual` (UUID) e a
+  conclusão de sucesso/erro só altera o documento se o token relido ainda for
+  o dono do claim. Documento confirmado, cancelado ou resultado de tentativa
+  mais nova não é sobrescrito/rebaixado/limpo.
+- **Manual:** registro durante lease ativo retorna erro de domínio; após
+  expiração pode assumir o claim, limpa token/lease antigos e audita
+  `fiscal.tentativa_manual_assumida`.
+- **Evidência externa:** respostas tardias/conflitantes ficam em
+  `NotaFiscal.resultado_externo`, com `Aviso` e auditoria
+  `fiscal.resultado_externo_obsoleto`, sem reabrir pedido, repetir estoque ou
+  estorno. Repetição do mesmo token/tipo é idempotente.
+- **Cancelamento:** `cancelar_nota_fiscal` invalida o claim e preserva a
+  terminalidade; retry ordinário de cancelada continua bloqueado.
+- **Schema:** `fiscal/0006_tentativa_emissao.py` adiciona os campos de forma
+  aditiva; o gate histórico `0001 → HEAD` inclui a nova migração.
+- **Validação local:** SQLite **649 passed, 22 skipped, 240 subtests**;
+  cobertura total **86,38%**, `fiscal/services.py` **93,94%**,
+  `fiscal/views.py` **89,84%**; Node R05 2/2; Ruff, `check`,
+  `makemigrations --check`, `check --deploy`, Bandit (0 medium/high) e
+  `pip-audit` (0) limpos. PostgreSQL 15 + Redis, CI no novo SHA e aceite
+  humano permanecem pendentes.
+
+## [Fase 2C — fechamento N01–N03] — 2026-10-22
+
+- **N01:** teste concorrente R01 corrigido para `TransactionTestCase`, com
+  `setUp` por teste, login/erros dentro das threads, start único e liberação
+  de eventos/conexões em falha.
+- **N02:** receita financeira/produtos e CMV passam a ter populações
+  distintas; pagamento inconclusivo fica em `receita_em_conciliacao` sem
+  apagar CMV comprovado. A reversão de CMV continua dependendo de retorno
+  físico.
+- **N03:** integração fiscal em duas fases com claim/lease, sem lock durante
+  a chamada externa; autorização tardia após cancelamento preserva o fato
+  externo com aviso/auditoria, e nota cancelada não é reautorizada pela
+  integração nem pela fila.
+- **Validação local:** SQLite 636 passed/18 skipped/240 subtests; cobertura
+  `analytics/services.py` 95,24%, `sales/services.py` 84,91%,
+  `fiscal/services.py` 89,52%; Node test R05 2/2; gate histórico
+  0001→HEAD aprovado. PostgreSQL 15/Redis, N01/N03 concorrentes e aceite
+  humano permanecem pendentes.
+
+## [Fase 2C — reauditoria R01–R05] — 2026-10-22
+
+- **R01:** registro manual de saída relê e trava o Pedido antes da primeira
+  nota, na ordem `Pedido → NotaFiscal`; cancelamento e primeiro registro
+  deixam de intercalar com estado obsoleto.
+- **R02:** chave de acesso não vazia ganha constraint condicional global;
+  migração faz preflight de duplicidades legadas e escritores tratam
+  `IntegrityError` como conflito de formulário.
+- **R03:** associação de retorno legado aceita somente FK explícita ou
+  formatos canônicos com exatamente um `PF...`; texto ambíguo não reverte
+  CMV nem autoriza crédito.
+- **R04:** receita financeira, produtos e frete passam a usar a mesma
+  população elegível; pagamento cancelado sem `estornado_em` fica em
+  `receita_em_conciliacao`, sem frete negativo inventado.
+- **R05:** canvas usa `data-logical-height` estável; DPR 2 não acumula altura
+  em resizes sucessivos.
+- **Validação local daquela rodada:** SQLite 632 passed/18 skipped/240
+  subtests; cobertura `analytics/services.py` 94,95%,
+  `sales/services.py` 84,91%, `fiscal/services.py` 88,20%; Node test R05
+  2/2; gate histórico 0001→HEAD aprovado. PostgreSQL 15/Redis e R01/R02
+  concorrentes ficaram pendentes de CI no SHA seguinte; aceite humano
+  pendente.
+
+## [Fase 2C — correção da auditoria A01–A09] — 2026-10-22
+
+- **A01/A02:** eventos de receita de produtos, estorno financeiro e retorno
+  físico separados; lucro de produto reconcilia painel/comparativo e CMV
+  histórico não é apagado por chargeback.
+- **A03/A04:** devolução após chargeback aceita aprovação histórica + estorno
+  confirmado sem segundo estorno; estoque só compensa obrigação com baixa
+  comprovada e não compensada; ausência de prova gera aviso.
+- **A05/A07:** fila e formulário de NF-e de entrada para Emissor Fiscal;
+  referência à saída autorizada validada; CFOP confirmado não é reescrito por
+  edição comum, saneamento exige motivo/evidência; mapeamento inverso
+  restrito à tabela fiscal validada.
+- **A06:** CSV fiscal exporta evento/data corretos e sanitiza fórmulas em
+  campos textuais; CSV de produto também sanitizado.
+- **A08:** gráficos deixam CDN/script inline e usam `static/js/relatorios.js`;
+  validados em navegador sob CSP padrão.
+- **A09:** workflow de push inclui `fase-2c-analytics-fiscal`.
+- **Validação local daquela correção:** SQLite 628 passed/16 skipped/240
+  subtests; cobertura `analytics/services.py` 94,79%,
+  `sales/services.py` 84,82%, `fiscal/services.py` 90,20%; gate histórico
+  0001→HEAD aprovado; Ruff, check, check --deploy, Bandit 0 medium/high e
+  pip-audit 0.
+  PostgreSQL 15 + Redis e CI remoto permanecem pendentes de execução
+  autorizada; aceite do cliente também pendente.
+
+## [Fase 2C — Analytics Core + Fiscal Manual] — 2026-10-22
+
+- **ANA-01/ADR-016:** receita reconhecida por `Pagamento.aprovado_em`, não por
+  `Pedido.status`; `Pagamento.estornado_em` registra o evento negativo. Pedido
+  pago em separação conta; concluído sem pagamento não conta; estorno abate na
+  data do evento.
+- **ADR-008:** `ItemPedido.custo_unitario` é snapshot imutável do custo no
+  checkout; `Pedido.cmv`, `Pedido.lucro_bruto` e `ItemPedido.lucro_bruto`
+  passam a refletir custo histórico. Migração preenche legados com o custo
+  corrente e registra a limitação.
+- **ADR-010:** métricas de `/gestao/minhas-metricas/` recortadas por
+  `usuario_criador`; painel global restrito a Administrador/Gestor; despesas
+  ganham `usuario_responsavel`; recompra filtra clientes do vendedor.
+- **Painéis:** relatório de vendas por produto/dia/unidade com CMV, lucro e
+  CSV; comparativo FS/Iaçu com receita, CMV, lucro, pedidos e ticket médio.
+- **ADR-007:** cancelamento padrão em até 24h e devolução após entrega, com
+  justificativa, ator, auditoria, estorno e compensação de estoque por
+  `MovimentoEstoque` do tipo `entrada_devolucao`.
+- **Fiscal:** NF-e de entrada/devolução com CFOP inverso e chave referenciada
+  de 44 dígitos; `NotaFiscal.pedido` passa a `ForeignKey` para permitir saída +
+  entrada; cancelamento de NF-e autorizada auditado.
+- **Interestadual:** `Unidade.uf`; `Pedido.uf_entrega`, `interestadual` e
+  `aliquota_icms` calculados no save; BA→MG a 12%; relatório fiscal destaca
+  operações interestaduais e exporta CSV.
+- **Emissor Fiscal:** grupo com permissões de NF-e e leitura de pedido, sem
+  edição de pedido/cliente/produto/estoque; data migration atribui ao usuário
+  `Caio`, se existente.
+- **Revisão final:** corrigidos o gate histórico de migração (`validar_migracao_legado`),
+  a coerência receita/CMV em devoluções, o CFOP da saída emitida/manual, a
+  validação de NF-e de entrada, o redirect do Emissor, o bloqueio do
+  cancelamento pago pelo endpoint genérico, a nova rota de cancelamento, o
+  backfill de UF/interestadual, a atribuição de despesa e a ordem de locks
+  pedido→pagamento.
+- **Validação local:** SQLite 598 passed/16 skipped/240 subtests; cobertura
+  `analytics/services.py` 98,70% e `sales/services.py` 85,22%; Ruff, check,
+  `makemigrations --check`, Bandit (0 medium/high) e pip-audit (0) limpos.
+  Gate histórico `0001 → HEAD` validado em SQLite descartável com
+  `validar_migracao_legado --criar/--verificar`. A suíte PostgreSQL/Redis de
+  CI não foi executada neste ambiente local; os testes marcados como
+  PostgreSQL continuam pulados fora da CI.
+- **Documentação:** specs em `docs/specs/fase-2c/`; ADRs 007, 008, 010 e 016;
+  relatório em `docs/audit/fase-2c-conclusao.md`.
+
 ## [Fase 2B — remediação da auditoria independente] — 2026-10-20, encerrada em 2026-10-22
 
 - **B01:** removido o fallback que reduzia `quantidade_bloqueada` sem identidade;

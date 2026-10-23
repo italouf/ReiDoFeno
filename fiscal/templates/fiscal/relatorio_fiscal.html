@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Relatório fiscal — Rei do Feno{% endblock %}
+{% block content %}
+{% include "components/cabecalho_pagina.html" with titulo="Relatório fiscal" descricao="Vendas internas e interestaduais por período." %}
+
+<form method="get" class="filtro-barra">
+  <div class="campo">
+    <label for="inicio">Início</label>
+    <input type="date" id="inicio" name="inicio" value="{{ inicio|date:'Y-m-d' }}">
+  </div>
+  <div class="campo">
+    <label for="fim">Fim</label>
+    <input type="date" id="fim" name="fim" value="{{ fim|date:'Y-m-d' }}">
+  </div>
+  <button type="submit" class="btn">Filtrar</button>
+  <a class="btn btn--secundario" href="?formato=csv&amp;inicio={{ inicio|date:'Y-m-d' }}&amp;fim={{ fim|date:'Y-m-d' }}">Exportar CSV</a>
+</form>
+
+<section class="cartao">
+  <dl class="painel-numeros">
+    <div class="numero-bloco">
+      <dt>Vendas internas</dt>
+      <dd>R$ {{ relatorio.vendas_intrastaduais|floatformat:2 }}</dd>
+    </div>
+    <div class="numero-bloco">
+      <dt>Vendas interestaduais</dt>
+      <dd>R$ {{ relatorio.vendas_interestaduais|floatformat:2 }}</dd>
+    </div>
+    <div class="numero-bloco">
+      <dt>Alíquota interestadual</dt>
+      <dd>{{ relatorio.aliquota_interestadual|floatformat:2 }}</dd>
+    </div>
+  </dl>
+</section>
+
+<section class="cartao">
+  <h2>Notas e vendas do período</h2>
+  {% if relatorio.linhas %}
+  <div class="tabela-envolve">
+    <table class="tabela">
+      <thead>
+        <tr>
+          <th scope="col">Pedido</th>
+          <th scope="col">Unidade</th>
+          <th scope="col">UF entrega</th>
+          <th scope="col">Operação</th>
+          <th scope="col" class="num">Alíquota</th>
+          <th scope="col" class="num">Valor</th>
+          <th scope="col">Evento</th>
+          <th scope="col"><span class="visually-hidden">Ações</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for linha in relatorio.linhas %}
+        <tr{% if linha.interestadual %} class="linha-destaque"{% endif %}>
+          <td>{{ linha.pedido }}</td>
+          <td>{{ linha.unidade }}</td>
+          <td>{{ linha.uf_entrega|default:"—" }}</td>
+          <td>{% if linha.interestadual %}<strong>Interestadual</strong>{% else %}Interna{% endif %}</td>
+          <td class="num">{{ linha.aliquota_icms|floatformat:4 }}</td>
+          <td class="num">R$ {{ linha.valor|floatformat:2 }}</td>
+          <td>{{ linha.evento }}{% if linha.evento_em %} · {{ linha.evento_em|date:"d/m/Y H:i" }}{% endif %}</td>
+          <td><a class="btn btn--secundario btn--pequeno" href="{% url 'fiscal:nota_manual' linha.pedido_id %}">Nota manual</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  {% include "components/estado_vazio.html" with icone="i-documento" titulo="Sem vendas no período." descricao="Ajuste o filtro para visualizar o relatório fiscal." %}
+  {% endif %}
+</section>
+{% endblock %}

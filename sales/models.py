@@ -9,6 +9,7 @@ from accounts.models import Usuario
 from catalog.models import Produto
 from core.models import Unidade
 from customers.models import Cliente
+from stock.exceptions import ImutabilidadeViolation
 
 
 class Pedido(models.Model):
@@ -61,6 +62,10 @@ class Pedido(models.Model):
         Status.CANCELADO: set(),
         Status.FALHOU: {Status.CANCELADO},
     }
+
+    class TipoCancelamento(models.TextChoices):
+        PADRAO = "padrao", "Cancelamento Padrão (24h)"
+        DEVOLUCAO = "devolucao", "Devolução (NF-e de entrada)"
 
     class Modalidade(models.TextChoices):
         ENTREGA = "entrega", "Entrega"
@@ -126,6 +131,18 @@ class Pedido(models.Model):
     bairro = models.CharField("bairro", max_length=60, blank=True)
     cidade = models.CharField("cidade", max_length=60, blank=True)
     uf = models.CharField("UF", max_length=2, blank=True)
+    uf_entrega = models.CharField(
+        "UF de entrega", max_length=2, blank=True
+    )
+    interestadual = models.BooleanField(
+        "interestadual", default=False, db_index=True
+    )
+    aliquota_icms = models.DecimalField(
+        "alíquota de ICMS",
+        max_digits=5,
+        decimal_places=4,
+        default=Decimal("0.0000"),
+    )
     cep = models.CharField("CEP", max_length=9, blank=True)
     contato_email = models.EmailField("e-mail de contato", blank=True)
     contato_telefone = models.CharField("telefone de contato", max_length=20, blank=True)
@@ -152,6 +169,27 @@ class Pedido(models.Model):
         default=StatusFinanceiro.PENDENTE,
         db_index=True,
         help_text="Condição financeira do pedido; independente do andamento.",
+    )
+    tipo_cancelamento = models.CharField(  # noqa: DJ001 - nulo = não cancelado
+        "tipo de cancelamento",
+        max_length=20,
+        choices=TipoCancelamento.choices,
+        null=True,
+        blank=True,
+    )
+    justificativa_cancelamento = models.TextField(
+        "justificativa do cancelamento", blank=True
+    )
+    cancelado_em = models.DateTimeField(
+        "cancelado em", null=True, blank=True
+    )
+    cancelado_por = models.ForeignKey(
+        Usuario,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="pedidos_cancelados",
+        verbose_name="cancelado por",
     )
     criado_em = models.DateTimeField("criado em", auto_now_add=True)
     atualizado_em = models.DateTimeField("atualizado em", auto_now=True)
@@ -203,6 +241,23 @@ class Pedido(models.Model):
     # ------------------------------------------------------------------ #
     def save(self, *args, **kwargs):
         criando = self.pk is None
+        if not self.uf_entrega and self.uf:
+            self.uf_entrega = self.uf
+            if kwargs.get("update_fields") is not None:
+                kwargs["update_fields"] = list(
+                    set(kwargs["update_fields"]) | {"uf_entrega"}
+                )
+        if self.unidade_id:
+            from .interestadual import calcular_interestadual
+
+            self.interestadual, self.aliquota_icms = calcular_interestadual(
+                self
+            )
+            if kwargs.get("update_fields") is not None:
+                kwargs["update_fields"] = list(
+                    set(kwargs["update_fields"])
+                    | {"interestadual", "aliquota_icms"}
+                )
         super().save(*args, **kwargs)
         if criando and not self.numero:
             self.numero = f"PF{self.pk:06d}"
@@ -233,6 +288,18 @@ class Pedido(models.Model):
             erros["total"] = "Total deve ser igual a subtotal + frete."
         if erros:
             raise ValidationError(erros)
+
+    @property
+    def nota_fiscal(self):
+        """Nota de saída do pedido (compatibilidade com o vínculo antigo)."""
+        if self.pk is None:
+            return None
+        for nota in sorted(
+            self.notas_fiscais.all(), key=lambda item: item.pk, reverse=True
+        ):
+            if nota.tipo == "saida":
+                return nota
+        return None
 
     def tem_prova_financeira(self) -> bool:
         """Prova explícita (provedor validado ou reconciliação autorizada)."""
@@ -340,6 +407,40 @@ class Pedido(models.Model):
             update_fields=["subtotal", "frete", "total", "atualizado_em"]
         )
 
+    @property
+    def cmv(self) -> Decimal:
+        """Custo de mercadoria vendida, pelo snapshot de cada item."""
+        return sum(
+            (
+                item.custo_unitario * item.quantidade
+                for item in self.itens.all()
+            ),
+            Decimal("0.00"),
+        )
+
+    @property
+    def lucro_bruto(self) -> Decimal:
+        """Margem de mercadoria; frete não é receita de produto."""
+        return self.subtotal - self.cmv
+
+
+class ItemPedidoQuerySet(models.QuerySet):
+    """Protege o snapshot de custo contra mutações em massa."""
+
+    def update(self, **kwargs):
+        if "custo_unitario" in kwargs:
+            raise ImutabilidadeViolation(
+                "custo_unitario é imutável; registre uma correção auditada."
+            )
+        return super().update(**kwargs)
+
+    def bulk_update(self, objs, fields, *args, **kwargs):
+        if "custo_unitario" in fields:
+            raise ImutabilidadeViolation(
+                "custo_unitario é imutável; registre uma correção auditada."
+            )
+        return super().bulk_update(objs, fields, *args, **kwargs)
+
 
 class ItemPedido(models.Model):
     pedido = models.ForeignKey(
@@ -358,6 +459,14 @@ class ItemPedido(models.Model):
         "preço unitário", max_digits=12, decimal_places=2,
         help_text="Preço online capturado no momento do checkout.",
     )
+    custo_unitario = models.DecimalField(
+        "custo unitário (snapshot)",
+        max_digits=12,
+        decimal_places=2,
+        help_text="Custo do produto no momento da venda (imutável).",
+    )
+
+    objects = ItemPedidoQuerySet.as_manager()
 
     class Meta:
         verbose_name = "item do pedido"
@@ -383,15 +492,45 @@ class ItemPedido(models.Model):
                 ),
                 name="item_preco_dentro_do_limite",
             ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    custo_unitario__gte=Decimal("0.00")
+                ),
+                name="item_custo_nao_negativo",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    custo_unitario__lt=Decimal("10000000000.00")
+                ),
+                name="item_custo_dentro_do_limite",
+            ),
         ]
 
     def __str__(self):
         return f"{self.quantidade}× {self.produto_nome}"
 
+    def save(self, *args, **kwargs):
+        if self.pk is not None:
+            original = (
+                type(self)
+                .objects.filter(pk=self.pk)
+                .values_list("custo_unitario", flat=True)
+                .first()
+            )
+            if (
+                original is not None
+                and self.custo_unitario is not None
+                and Decimal(original) != Decimal(self.custo_unitario)
+            ):
+                raise ImutabilidadeViolation(
+                    "custo_unitario é imutável; registre uma correção auditada."
+                )
+        super().save(*args, **kwargs)
+
     def clean(self):
         super().clean()
         erros = {}
-        for campo in ("quantidade", "preco_unitario"):
+        for campo in ("quantidade", "preco_unitario", "custo_unitario"):
             valor = getattr(self, campo)
             if valor is None:
                 continue
@@ -405,14 +544,18 @@ class ItemPedido(models.Model):
                 continue
             if campo == "quantidade" and numero <= 0:
                 erros[campo] = "Quantidade deve ser maior que zero."
-            if campo == "preco_unitario" and numero < 0:
-                erros[campo] = "Preço unitário não pode ser negativo."
+            if campo in ("preco_unitario", "custo_unitario") and numero < 0:
+                erros[campo] = "Valor não pode ser negativo."
         if erros:
             raise ValidationError(erros)
 
     @property
     def subtotal(self) -> Decimal:
         return self.preco_unitario * self.quantidade
+
+    @property
+    def lucro_bruto(self) -> Decimal:
+        return (self.preco_unitario - self.custo_unitario) * self.quantidade
 
 
 class Pagamento(models.Model):
@@ -449,6 +592,12 @@ class Pagamento(models.Model):
     )
     valor = models.DecimalField("valor", max_digits=12, decimal_places=2)
     aprovado_em = models.DateTimeField("aprovado em", null=True, blank=True)
+    estornado_em = models.DateTimeField(
+        "estornado em",
+        null=True,
+        blank=True,
+        help_text="Data do estorno/chargeback; base negativa da receita.",
+    )
 
     class Meta:
         verbose_name = "pagamento"

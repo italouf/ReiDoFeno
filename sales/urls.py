@@ -64,4 +64,9 @@ urlpatterns = [
         views.PedidoAtualizarStatusView.as_view(),
         name="pedido_atualizar_status",
     ),
+    path(
+        "gestao/pedidos/<int:pk>/cancelar/",
+        views.PedidoCancelamentoView.as_view(),
+        name="pedido_cancelamento",
+    ),
 ]

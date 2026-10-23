@@ -27,13 +27,18 @@ class MatrizAcessoPainelTests(TestCase):
         self.assertEqual(resposta.status_code, 302)
         self.assertIn("/accounts/login/", resposta["Location"])
 
-    def test_perfis_internos_acessam_painel(self):
-        for perfil in ("administrador", "gestor", "vendedor"):
+    def test_admin_e_gestor_acessam_painel_global(self):
+        for perfil in ("administrador", "gestor"):
             with self.subTest(perfil=perfil):
                 self.client.force_login(self.usuarios[perfil])
                 resposta = self.client.get(reverse("core:painel"))
                 self.assertEqual(resposta.status_code, 200)
                 self.client.logout()
+
+    def test_vendedor_nao_acessa_painel_global(self):
+        self.client.force_login(self.usuarios["vendedor"])
+        resposta = self.client.get(reverse("core:painel"))
+        self.assertEqual(resposta.status_code, 403)
 
     def test_cliente_nao_acessa_painel_interno(self):
         self.client.force_login(self.usuarios["cliente"])

@@ -48,7 +48,7 @@
     <span class="barra-superior__acao" style="margin-left:auto;">
       {% if user.is_authenticated %}
         <a class="link-topo" href="{% url 'privacy:minha_privacidade' %}">Minha privacidade</a>
-        {% if user.is_superuser or user.perfil != 'cliente' %}<a class="link-topo" href="{% url 'core:painel' %}">Painel interno</a>{% endif %}
+        {% if pode_painel_global or pode_fiscal or pode_metricas %}<a class="link-topo" href="{{ url_inicio }}">{% if pode_painel_global %}Painel interno{% elif pode_fiscal %}Relatório fiscal{% else %}Minhas métricas{% endif %}</a>{% endif %}
         <form method="post" action="{% url 'accounts:logout' %}" data-enviar style="display:inline">
           {% csrf_token %}
           <button type="submit" class="btn btn--secundario btn--pequeno">Sair</button>

@@ -9,6 +9,7 @@ from .exceptions import ImutabilidadeViolation
 TIPOS_DELTA_POSITIVO = (
     "entrada",
     "entrada_inicial",
+    "entrada_devolucao",
     "transferencia_entrada",
     "ajuste_positivo",
 )
@@ -145,6 +146,10 @@ class MovimentoEstoque(models.Model):
     class Tipo(models.TextChoices):
         ENTRADA = "entrada", "Entrada"
         ENTRADA_INICIAL = "entrada_inicial", "Entrada inicial (migração)"
+        ENTRADA_DEVOLUCAO = (
+            "entrada_devolucao",
+            "Entrada por devolução",
+        )
         SAIDA = "saida", "Saída"
         AJUSTE = "ajuste", "Ajuste (legado)"
         AJUSTE_POSITIVO = "ajuste_positivo", "Ajuste positivo"
