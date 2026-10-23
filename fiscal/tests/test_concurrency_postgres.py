@@ -1,6 +1,7 @@
 """R01/R02: concorrência fiscal real em PostgreSQL."""
 import threading
 import unittest
+import uuid
 from datetime import timedelta
 from decimal import Decimal
 from unittest import mock
@@ -15,9 +16,14 @@ from django.utils import timezone
 
 from accounts.models import Usuario
 from analytics.models import Aviso
+from core.models import LogAuditoria
 from fiscal.client import ErroFiscal
 from fiscal.models import NotaFiscal
-from fiscal.services import enviar_para_emissao, pedido_elegivel
+from fiscal.services import (
+    _registrar_resultado_externo,
+    enviar_para_emissao,
+    pedido_elegivel,
+)
 from sales.factories import PagamentoFactory, PedidoFactory
 from sales.models import Pagamento, Pedido
 from sales.services import cancelar_pedido_padrao
@@ -376,3 +382,91 @@ class FiscalConcurrencyTests(TransactionTestCase):
         self.assertEqual(
             nota.resultado_externo["eventos"][-1]["tipo"], "erro"
         )
+
+    def test_l02_retry_c_apos_avisos_b_e_a_postgres(self):
+        pedido = self._pedido()
+        nota = self._nota_em_erro(pedido)
+        falha_b = ErroFiscal("falha de B")
+        falha_a = ErroFiscal("falha de A")
+
+        class ClienteB:
+            def criar_nfe(self, pedido_b):
+                raise falha_b
+
+        class ClienteA:
+            def criar_nfe(self, pedido_a):
+                NotaFiscal.objects.filter(pk=nota.pk).update(
+                    processando_desde=timezone.now() - timedelta(minutes=3)
+                )
+                enviar_para_emissao(
+                    Pedido.objects.get(pk=pedido.pk), client=ClienteB()
+                )
+                raise falha_a
+
+        enviar_para_emissao(pedido, client=ClienteA())
+        nota.refresh_from_db()
+        self.assertEqual(nota.status, NotaFiscal.Status.ERRO)
+        self.assertEqual(
+            Aviso.objects.filter(
+                tipo=Aviso.Tipo.FISCAL_ERRO,
+                objeto_tipo="fiscal.NotaFiscal",
+                objeto_id=str(nota.pk),
+            ).count(),
+            2,
+        )
+
+        class ClienteC:
+            def criar_nfe(self, pedido_c):
+                raise ErroFiscal("falha de C")
+
+        enviar_para_emissao(
+            Pedido.objects.get(pk=pedido.pk), client=ClienteC()
+        )
+        nota.refresh_from_db()
+        self.assertEqual(nota.status, NotaFiscal.Status.ERRO)
+        self.assertIsNone(nota.tentativa_atual)
+        self.assertIsNone(nota.processando_desde)
+
+    def test_l03_replay_concorrente_do_mesmo_evento_postgres(self):
+        pedido = self._pedido()
+        nota = self._nota_em_erro(pedido)
+        token = uuid.uuid4()
+        barreira = threading.Barrier(2)
+        erros = []
+
+        def replay():
+            close_old_connections()
+            try:
+                barreira.wait(timeout=10)
+                with transaction.atomic():
+                    _registrar_resultado_externo(
+                        NotaFiscal.objects.get(pk=nota.pk),
+                        token=token,
+                        tipo="erro",
+                        resultado={"erro": "replay concorrente"},
+                        motivo="replay concorrente",
+                    )
+            except Exception as erro:  # pragma: no cover - diagnóstico
+                erros.append(erro)
+            finally:
+                close_old_connections()
+
+        threads = [threading.Thread(target=replay) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        self._juntar(threads)
+
+        self.assertFalse(erros, erros)
+        chave = f"fiscal.resultado_externo:{nota.pk}:{token}:erro"
+        self.assertEqual(
+            Aviso.objects.filter(evento_chave=chave).count(), 1
+        )
+        self.assertEqual(
+            LogAuditoria.objects.filter(
+                acao="fiscal.resultado_externo_obsoleto",
+                objeto_id=str(nota.pk),
+            ).count(),
+            1,
+        )
+        nota.refresh_from_db()
+        self.assertEqual(len(nota.resultado_externo["eventos"]), 1)

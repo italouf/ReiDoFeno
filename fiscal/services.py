@@ -242,60 +242,89 @@ def _aviso_nota_cancelada(nota) -> None:
 def _registrar_resultado_externo(
     nota, *, token, tipo, resultado, motivo
 ) -> bool:
-    """Persiste resposta externa obsoleta/conflitante de forma idempotente."""
-    dados = dict(nota.resultado_externo or {})
-    eventos = list(dados.get("eventos", []))
-    token_str = str(token)
-    if any(
-        evento.get("tentativa") == token_str
-        and evento.get("tipo") == tipo
-        for evento in eventos
-    ):
-        return False
-    eventos.append(
-        {
-            "tentativa": token_str,
-            "tipo": tipo,
-            "resultado": {
-                chave: str(valor)
-                for chave, valor in (resultado or {}).items()
-            },
-            "motivo": motivo[:300],
-            "em": timezone.now().isoformat(),
-        }
-    )
-    dados["eventos"] = eventos[-20:]
-    nota.resultado_externo = dados
-    nota.save(update_fields=["resultado_externo", "atualizado_em"])
-    numero_externo = str((resultado or {}).get("numero") or "").strip()
-    referencia = f" NF-e {numero_externo}" if numero_externo else ""
-    Aviso.objects.create(
-        tipo=Aviso.Tipo.FISCAL_ERRO,
-        mensagem=(
-            f"Resposta externa {tipo}{referencia} da tentativa "
-            f"{token_str[:8]} para {nota.pedido.numero}; "
-            "conciliação fiscal necessária."
-        )[:255],
-        objeto_tipo=f"{nota._meta.app_label}.{nota.__class__.__name__}",
-        objeto_id=str(nota.pk),
-        severidade=Aviso.Severidade.ERRO,
-    )
-    from core.auditoria import registrar_auditoria
+    """Persiste um evento externo com identidade durável e idempotente."""
+    with transaction.atomic():
+        nota = NotaFiscal.objects.select_for_update().get(pk=nota.pk)
+        token_str = str(token)
+        chave = f"fiscal.resultado_externo:{nota.pk}:{token_str}:{tipo}"
+        if Aviso.objects.filter(evento_chave=chave).exists():
+            return False
 
-    registrar_auditoria(
-        acao="fiscal.resultado_externo_obsoleto",
-        instancia=nota,
-        depois={
-            "tentativa": token_str,
-            "tipo": tipo,
-            "motivo": motivo[:300],
-            "resultado": {
-                chave: str(valor)
-                for chave, valor in (resultado or {}).items()
+        dados = dict(nota.resultado_externo or {})
+        eventos = list(dados.get("eventos", []))
+        evento_legado = next(
+            (
+                evento
+                for evento in eventos
+                if evento.get("tentativa") == token_str
+                and evento.get("tipo") == tipo
+            ),
+            None,
+        )
+        if evento_legado is not None:
+            # A projeção de 20 eventos pode já conter um evento produzido
+            # antes da identidade persistente. Não recria efeitos.
+            return False
+
+        from core.models import LogAuditoria
+
+        if LogAuditoria.objects.filter(
+            acao="fiscal.resultado_externo_obsoleto",
+            objeto_tipo="fiscal.NotaFiscal",
+            objeto_id=str(nota.pk),
+            depois__tentativa=token_str,
+            depois__tipo=tipo,
+        ).exists():
+            # Compatibilidade com eventos antigos que só restaram na
+            # auditoria após a rotação da projeção JSON.
+            return False
+
+        eventos.append(
+            {
+                "tentativa": token_str,
+                "tipo": tipo,
+                "resultado": {
+                    chave_resultado: str(valor)
+                    for chave_resultado, valor in (resultado or {}).items()
+                },
+                "motivo": motivo[:300],
+                "em": timezone.now().isoformat(),
+            }
+        )
+        dados["eventos"] = eventos[-20:]
+        nota.resultado_externo = dados
+        nota.save(update_fields=["resultado_externo", "atualizado_em"])
+
+        numero_externo = str((resultado or {}).get("numero") or "").strip()
+        referencia = f" NF-e {numero_externo}" if numero_externo else ""
+        Aviso.objects.create(
+            tipo=Aviso.Tipo.FISCAL_ERRO,
+            mensagem=(
+                f"Resposta externa {tipo}{referencia} da tentativa "
+                f"{token_str[:8]} para {nota.pedido.numero}; "
+                "conciliação fiscal necessária."
+            )[:255],
+            objeto_tipo=f"{nota._meta.app_label}.{nota.__class__.__name__}",
+            objeto_id=str(nota.pk),
+            evento_chave=chave,
+            severidade=Aviso.Severidade.ERRO,
+        )
+        from core.auditoria import registrar_auditoria
+
+        registrar_auditoria(
+            acao="fiscal.resultado_externo_obsoleto",
+            instancia=nota,
+            depois={
+                "tentativa": token_str,
+                "tipo": tipo,
+                "motivo": motivo[:300],
+                "resultado": {
+                    chave_resultado: str(valor)
+                    for chave_resultado, valor in (resultado or {}).items()
+                },
             },
-        },
-    )
-    return True
+        )
+        return True
 
 
 @transaction.atomic

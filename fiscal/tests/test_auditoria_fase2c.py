@@ -979,3 +979,264 @@ class L01AutoridadeTentativaTests(BaseFiscalAuditoriaTests):
             ).count(),
             2,
         )
+
+class L02L03AvisosEventosTests(BaseFiscalAuditoriaTests):
+    def _preparar_nota_em_erro(self):
+        pedido = self._pedido(status=Pedido.Status.PAGO)
+        nota = NotaFiscal.objects.create(
+            pedido=pedido,
+            tipo=NotaFiscal.Tipo.SAIDA,
+            status=NotaFiscal.Status.ERRO,
+            cfop="5.102",
+        )
+        return pedido, nota
+
+    def test_erro_de_c_apos_avisos_de_b_e_a_nao_quebra_retry(self):
+        pedido, nota = self._preparar_nota_em_erro()
+        falha_b = ErroFiscal("falha de B")
+        falha_a = ErroFiscal("falha de A")
+
+        class ClienteB:
+            def criar_nfe(self, pedido_b):
+                raise falha_b
+
+        class ClienteA:
+            def criar_nfe(self, pedido_a):
+                NotaFiscal.objects.filter(pk=nota.pk).update(
+                    processando_desde=(
+                        timezone.now()
+                        - LEASE_EMISSAO
+                        - timedelta(seconds=1)
+                    )
+                )
+                enviar_para_emissao(
+                    Pedido.objects.get(pk=pedido.pk), client=ClienteB()
+                )
+                raise falha_a
+
+        enviar_para_emissao(pedido, client=ClienteA())
+
+        nota.refresh_from_db()
+        self.assertEqual(nota.status, NotaFiscal.Status.ERRO)
+        self.assertIsNone(nota.tentativa_atual)
+        self.assertIsNone(nota.processando_desde)
+        avisos_evento = Aviso.objects.filter(
+            tipo=Aviso.Tipo.FISCAL_ERRO,
+            objeto_tipo="fiscal.NotaFiscal",
+            objeto_id=str(nota.pk),
+            mensagem__startswith="Resposta externa ",
+        )
+        self.assertEqual(avisos_evento.count(), 1)
+
+        class ClienteC:
+            def criar_nfe(self, pedido_c):
+                raise ErroFiscal("falha de C")
+
+        enviar_para_emissao(
+            Pedido.objects.get(pk=pedido.pk), client=ClienteC()
+        )
+
+        nota.refresh_from_db()
+        self.assertEqual(nota.status, NotaFiscal.Status.ERRO)
+        self.assertIsNone(nota.tentativa_atual)
+        self.assertIsNone(nota.processando_desde)
+        self.assertEqual(
+            Aviso.objects.filter(
+                tipo=Aviso.Tipo.FISCAL_ERRO,
+                objeto_tipo="fiscal.NotaFiscal",
+                objeto_id=str(nota.pk),
+            ).count(),
+            2,
+        )
+
+    def test_aviso_agregado_ignora_avisos_de_evento_existentes(self):
+        nota = self._preparar_nota_em_erro()[1]
+        for indice in range(2):
+            Aviso.objects.create(
+                tipo=Aviso.Tipo.FISCAL_ERRO,
+                mensagem=f"Resposta externa legada {indice}",
+                objeto_tipo="fiscal.NotaFiscal",
+                objeto_id=str(nota.pk),
+                evento_chave=f"legado:{indice}",
+                severidade=Aviso.Severidade.ERRO,
+            )
+
+        aviso = Aviso.registrar(
+            tipo=Aviso.Tipo.FISCAL_ERRO,
+            mensagem="Falha comum após eventos",
+            objeto=nota,
+            severidade=Aviso.Severidade.ERRO,
+        )
+
+        self.assertEqual(aviso.evento_chave, "")
+        self.assertEqual(
+            Aviso.objects.filter(
+                tipo=Aviso.Tipo.FISCAL_ERRO,
+                objeto_id=str(nota.pk),
+            ).count(),
+            3,
+        )
+
+    def test_aviso_agregado_ignora_evento_legado_sem_chave_migrada(self):
+        nota = self._preparar_nota_em_erro()[1]
+        for indice in range(2):
+            Aviso.objects.create(
+                tipo=Aviso.Tipo.FISCAL_ERRO,
+                mensagem=f"Resposta externa legada sem chave {indice}",
+                objeto_tipo="fiscal.NotaFiscal",
+                objeto_id=str(nota.pk),
+                evento_chave="",
+                severidade=Aviso.Severidade.ERRO,
+            )
+
+        aviso = Aviso.registrar(
+            tipo=Aviso.Tipo.FISCAL_ERRO,
+            mensagem="Falha comum após eventos sem chave",
+            objeto=nota,
+            severidade=Aviso.Severidade.ERRO,
+        )
+
+        self.assertEqual(aviso.evento_chave, "")
+        self.assertNotIn("Resposta externa", aviso.mensagem)
+
+    def test_evento_legado_apenas_em_auditoria_nao_duplica(self):
+        from fiscal.services import _registrar_resultado_externo
+
+        nota = self._preparar_nota_em_erro()[1]
+        token = uuid.uuid4()
+        LogAuditoria.objects.create(
+            acao="fiscal.resultado_externo_obsoleto",
+            objeto_tipo="fiscal.NotaFiscal",
+            objeto_id=str(nota.pk),
+            depois={
+                "tentativa": str(token),
+                "tipo": "erro",
+                "motivo": "evento antigo",
+                "resultado": {"erro": "falha antiga"},
+            },
+        )
+
+        with transaction.atomic():
+            criado = _registrar_resultado_externo(
+                nota,
+                token=token,
+                tipo="erro",
+                resultado={"erro": "replay"},
+                motivo="replay legado",
+            )
+
+        self.assertFalse(criado)
+        self.assertEqual(nota.resultado_externo, {})
+        self.assertEqual(
+            LogAuditoria.objects.filter(
+                acao="fiscal.resultado_externo_obsoleto",
+                objeto_id=str(nota.pk),
+            ).count(),
+            1,
+        )
+        self.assertFalse(
+            Aviso.objects.filter(
+                objeto_id=str(nota.pk),
+                evento_chave__startswith="fiscal.resultado_externo:",
+            ).exists()
+        )
+
+    def test_conflito_de_chave_com_avisos_previos_nao_quebra(self):
+        from fiscal.services import _registrar_resultado_externo
+
+        pedido, nota = self._preparar_nota_em_erro()
+        outro_pedido = self._pedido(status=Pedido.Status.PAGO)
+        NotaFiscal.objects.create(
+            pedido=outro_pedido,
+            tipo=NotaFiscal.Tipo.SAIDA,
+            status=NotaFiscal.Status.AUTORIZADA,
+            cfop="5.102",
+            chave_acesso="29260866666666666666666666666666666666666666",
+        )
+        with transaction.atomic():
+            _registrar_resultado_externo(
+                nota,
+                token=uuid.uuid4(),
+                tipo="sucesso",
+                resultado={"numero": "ANTERIOR"},
+                motivo="evento anterior",
+            )
+
+        class ClienteComChaveDuplicada:
+            def criar_nfe(self, pedido):
+                return {
+                    "numero": "API-DUP",
+                    "chave": "29260866666666666666666666666666666666666666",
+                    "link": "https://exemplo.com/api-dup",
+                }
+
+        enviar_para_emissao(
+            Pedido.objects.get(pk=pedido.pk),
+            client=ClienteComChaveDuplicada(),
+        )
+
+        nota.refresh_from_db()
+        self.assertEqual(nota.status, NotaFiscal.Status.ERRO)
+        self.assertIsNone(nota.tentativa_atual)
+        self.assertIsNone(nota.processando_desde)
+        self.assertTrue(
+            any(
+                evento["tipo"] == "conflito_chave"
+                for evento in nota.resultado_externo["eventos"]
+            )
+        )
+
+    def test_evento_repetido_apos_rotacao_de_20_nao_duplica(self):
+        from fiscal.services import _registrar_resultado_externo
+
+        nota = self._preparar_nota_em_erro()[1]
+        token_repetido = uuid.uuid4()
+
+        with transaction.atomic():
+            _registrar_resultado_externo(
+                nota,
+                token=token_repetido,
+                tipo="erro",
+                resultado={"erro": "evento E"},
+                motivo="primeiro E",
+            )
+
+        Aviso.objects.filter(
+            evento_chave__startswith="fiscal.resultado_externo:"
+        ).update(lido=True)
+        nota.refresh_from_db()
+        with transaction.atomic():
+            for indice in range(20):
+                _registrar_resultado_externo(
+                    nota,
+                    token=uuid.uuid4(),
+                    tipo="erro",
+                    resultado={"erro": f"evento {indice}"},
+                    motivo=f"evento {indice}",
+                )
+            _registrar_resultado_externo(
+                nota,
+                token=token_repetido,
+                tipo="erro",
+                resultado={"erro": "evento E repetido"},
+                motivo="repeticao de E",
+            )
+
+        nota.refresh_from_db()
+        self.assertEqual(len(nota.resultado_externo["eventos"]), 20)
+        self.assertEqual(
+            LogAuditoria.objects.filter(
+                acao="fiscal.resultado_externo_obsoleto",
+                objeto_id=str(nota.pk),
+            ).count(),
+            21,
+        )
+        self.assertEqual(
+            Aviso.objects.filter(
+                tipo=Aviso.Tipo.FISCAL_ERRO,
+                objeto_tipo="fiscal.NotaFiscal",
+                objeto_id=str(nota.pk),
+                mensagem__startswith="Resposta externa ",
+            ).count(),
+            21,
+        )
