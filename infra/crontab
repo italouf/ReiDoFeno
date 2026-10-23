@@ -1,0 +1,11 @@
+# Crontab da aplicação (executada pelo supercronic, sem root).
+# Fuso: TZ=America/Bahia definido na imagem/compose.
+
+# Pedidos aguardando pagamento vencem a cada 15 minutos.
+*/15 * * * * python manage.py expirar_pedidos
+
+# Processa a fila fiscal a cada 30 minutos.
+*/30 * * * * python manage.py processar_fiscal
+
+# Avisos comerciais diários às 08:00.
+0 8 * * * python manage.py gerar_avisos_comerciais
