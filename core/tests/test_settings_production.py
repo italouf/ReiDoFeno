@@ -135,3 +135,36 @@ class ProducaoPostgresTests(SimpleTestCase):
         self.assertIn(
             "MERCADOPAGO_LIVE_MODE", resultado.stderr + resultado.stdout
         )
+
+    def test_producao_rejeita_database_sem_tls(self):
+        resultado = self._executar(
+            database_url="postgres://usuario:senha@localhost:5432/reidofeno",
+            extra_env={"DATABASE_SSL_REQUIRE": "False"},
+        )
+
+        self.assertNotEqual(resultado.returncode, 0)
+        self.assertIn(
+            "DATABASE_SSL_REQUIRE", resultado.stderr + resultado.stdout
+        )
+
+    def test_staging_permite_postgres_interno_sem_tls_e_fake(self):
+        resultado = self._executar(
+            database_url="postgres://usuario:senha@db:5432/reidofeno",
+            extra_env={
+                "DJANGO_ENVIRONMENT": "staging",
+                "DATABASE_SSL_REQUIRE": "False",
+                "MERCADO_PAGO_FAKE": "True",
+                "BLING_FAKE": "True",
+                "MERCADOPAGO_COLLECTOR_ID": "",
+                "MERCADOPAGO_LIVE_MODE": "False",
+            },
+        )
+
+        self.assertEqual(resultado.returncode, 0, resultado.stderr)
+        linha = next(
+            linha
+            for linha in resultado.stdout.splitlines()
+            if linha.startswith("RESULT:")
+        )
+        dados = json.loads(linha.removeprefix("RESULT:"))
+        self.assertIsNone(dados["sslmode"])

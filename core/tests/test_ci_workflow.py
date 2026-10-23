@@ -15,3 +15,12 @@ class WorkflowCIBranchTests(SimpleTestCase):
         self.assertIn("redis", texto.lower())
         self.assertIn("workflow_dispatch", texto)
         self.assertIn("node --test static/js/relatorios.test.mjs", texto)
+
+    def test_fase_3_valida_docker_e_postgres(self):
+        texto = WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("fase-3-docker-staging", texto)
+        self.assertIn("config.settings.test", texto)
+        self.assertIn("docker build --target runtime", texto)
+        self.assertIn("docker compose", texto)
+        self.assertIn("makemigrations --check --dry-run", texto)
+        self.assertIn("caddy validate", texto)

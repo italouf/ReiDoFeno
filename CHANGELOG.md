@@ -1,5 +1,33 @@
 # Changelog
 
+## [Fase 3 — Docker, Compose, Caddy e CI] — 2026-10-23
+
+- **Docker:** `infra/Dockerfile` multi-stage (`builder`, `dev`, `runtime`),
+  usuário `app` (uid 1000), `collectstatic` no build com
+  `config.settings.build`, Gunicorn com PROXY protocol, healthcheck em
+  `/healthz/` e `supercronic` para jobs não-root.
+- **Compose:** `infra/docker-compose.yml` com `web`, `db`, `redis`, `caddy` e
+  `cron` (perfil opcional); redes `front`/`back`, PostgreSQL/Redis sem portas
+  publicadas, volumes persistentes e healthchecks em todos os serviços de
+  longa duração. Override de desenvolvimento usa `runserver`, stage `dev` e
+  hot-reload.
+- **Caddy:** TLS automático (Let's Encrypt), domínios parametrizados por
+  ambiente, CA interna para `localhost`, headers de segurança, mídia direta
+  de `/srv/media` e PROXY protocol v1 para preservar `REMOTE_ADDR` (SEC-03).
+- **Staging:** `DJANGO_ENVIRONMENT=staging` permite PostgreSQL interno sem TLS
+  e simuladores; produção continua estrita (`DATABASE_SSL_REQUIRE=True`, sem
+  fake, coletor/live mode obrigatórios). Produção ganhou
+  `SECURE_REDIRECT_EXEMPT` para `/healthz/`.
+- **CI:** `config.settings.test` com PostgreSQL/Redis reais,
+  `makemigrations --check`, Codecov e job `docker` (build, non-root,
+  tamanho < 500 MB, `caddy validate` e `docker compose config`).
+- **Validação local:** 685 testes passed, 24 skipped, 240 subtests; 40 testes
+  de contrato/settings; Caddy 2.11.7 `Valid configuration`; `collectstatic`
+  com storage de produção (147 arquivos, 427 pós-processados); Ruff, Bandit,
+  `check`, `makemigrations --check` e `check --deploy` limpos. Docker/Compose,
+  PostgreSQL/Redis integrados e tamanho da imagem ficam para o CI, pois não há
+  Docker na máquina local.
+
 ## [Fase 2C — correção L02/L03 de avisos e eventos] — 2026-10-23
 
 - **L02:** `Aviso.evento_chave` separa aviso agregado (`""`) de aviso por

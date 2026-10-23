@@ -7,6 +7,7 @@ on:
       - fase-2a-seguranca-critica
       - fase-2b-integridade-estoque
       - fase-2c-analytics-fiscal
+      - fase-3-docker-staging
   pull_request:
   workflow_dispatch:
 
@@ -58,6 +59,8 @@ jobs:
     env:
       DATABASE_URL: postgres://reidofeno:reidofeno@localhost:5432/reidofeno
       REDIS_URL: redis://localhost:6379/1
+      DJANGO_SETTINGS_MODULE: config.settings.test
+      DJANGO_SECRET_KEY: ci-only-3f9c2d7a1b8e4f6c0a5d9e2b7c1f4a8d6e3b9c0f2a7d5e1b8c4f6a9d3e0b7c2
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -72,10 +75,19 @@ jobs:
         run: |
           mkdir -p reports
           pytest --junitxml=reports/junit.xml --cov --cov-fail-under=80 --cov-report=xml:reports/coverage.xml --cov-report=term-missing
+      - name: Migrações pendentes
+        run: python manage.py makemigrations --check --dry-run
+      - name: Upload de cobertura (Codecov)
+        uses: codecov/codecov-action@v4
+        if: always()
+        with:
+          files: ./reports/coverage.xml
+          flags: unittests
+          fail_ci_if_error: false
       - name: Check de produção (PostgreSQL + Redis)
         env:
           DJANGO_SETTINGS_MODULE: config.settings.production
-          DJANGO_SECRET_KEY: chave-de-ci-com-mais-de-50-caracteres-1234567890
+          DJANGO_SECRET_KEY: ci-only-3f9c2d7a1b8e4f6c0a5d9e2b7c1f4a8d6e3b9c0f2a7d5e1b8c4f6a9d3e0b7c2
           DJANGO_ALLOWED_HOSTS: example.com
           MERCADOPAGO_COLLECTOR_ID: collector-ci
           MERCADOPAGO_LIVE_MODE: "True"
@@ -108,6 +120,89 @@ jobs:
         with:
           name: relatorios-testes
           path: reports/
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build da imagem runtime
+        env:
+          DOCKER_BUILDKIT: "1"
+        run: docker build --target runtime -t reidofeno:ci -f infra/Dockerfile .
+      - name: Build da imagem dev (pytest/runserver)
+        env:
+          DOCKER_BUILDKIT: "1"
+        run: docker build --target dev -t reidofeno:dev-ci -f infra/Dockerfile .
+      - name: Dependências do stage dev
+        run: |
+          docker run --rm reidofeno:dev-ci python -c \
+            "import django, pytest, factory, coverage; print('DEV_DEPS_OK')"
+      - name: Container roda como non-root
+        run: |
+          uid=$(docker run --rm -e RUN_MIGRATIONS=false reidofeno:ci id -u)
+          echo "uid=$uid"
+          test "$uid" = "1000"
+      - name: Django check dentro da imagem
+        run: |
+          docker run --rm \
+            -e RUN_MIGRATIONS=false \
+            -e DJANGO_SETTINGS_MODULE=config.settings.build \
+            reidofeno:ci python manage.py check
+      - name: Tamanho da imagem (< 500 MB)
+        run: |
+          bytes=$(docker image inspect reidofeno:ci --format '{{.Size}}')
+          echo "Imagem final: $((bytes / 1024 / 1024)) MB"
+          test "$bytes" -lt 500000000
+      - name: Validar Caddyfile
+        run: |
+          docker run --rm \
+            -v "$PWD/infra/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            -v "$PWD/infra/caddy/transport.caddy:/etc/caddy/transport.caddy:ro" \
+            caddy:2-alpine caddy validate \
+            --config /etc/caddy/Caddyfile --adapter caddyfile
+      - name: Validar Compose (base + override)
+        run: |
+          cp .env.docker.example .env.docker
+          cp infra/.env.example infra/.env
+          docker compose \
+            -f infra/docker-compose.yml \
+            -f infra/docker-compose.override.yml \
+            config --quiet
+      - name: Smoke test do compose de desenvolvimento (pytest)
+        env:
+          IMAGE_TAG: dev-ci
+        run: |
+          docker compose \
+            -f infra/docker-compose.yml \
+            -f infra/docker-compose.override.yml \
+            up -d db redis
+          docker compose \
+            -f infra/docker-compose.yml \
+            -f infra/docker-compose.override.yml \
+            run --rm web pytest -p no:cacheprovider core/tests/test_infra_contract.py -q
+          docker compose \
+            -f infra/docker-compose.yml \
+            -f infra/docker-compose.override.yml \
+            down -v
+      - name: Smoke test completo (Compose + Caddy + HTTPS)
+        env:
+          IMAGE_TAG: ci
+        run: |
+          docker compose -f infra/docker-compose.yml up -d --no-build
+          for tentativa in $(seq 1 40); do
+            if curl --noproxy '*' -kfsS --resolve localhost:443:127.0.0.1 \
+                https://localhost/healthz/; then
+              echo "HTTPS OK na tentativa ${tentativa}"
+              docker compose -f infra/docker-compose.yml ps
+              docker compose -f infra/docker-compose.yml down -v
+              exit 0
+            fi
+            sleep 3
+          done
+          docker compose -f infra/docker-compose.yml ps
+          docker compose -f infra/docker-compose.yml logs --no-color
+          docker compose -f infra/docker-compose.yml down -v
+          exit 1
 
   security:
     runs-on: ubuntu-latest

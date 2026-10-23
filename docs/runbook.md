@@ -4,11 +4,13 @@
 > [`docs/audit/fase-2b-conclusao.md`](audit/fase-2b-conclusao.md).
 >
 > **Nota de fase:** o alvo da Fase 2A é PostgreSQL **local na VPS**
-> (ADR-001). As seções de Render abaixo permanecem como blueprint legado
-> até a migração de infraestrutura da Fase 3; em qualquer host, o contrato é
+> (ADR-001). A partir da Fase 3, o caminho recomendado é a stack
+> `infra/docker-compose.yml` com Caddy; as seções de Render abaixo permanecem
+> como blueprint legado. Em qualquer host, o contrato é
 > `DATABASE_URL` PostgreSQL com TLS e `REDIS_URL` com incremento atômico.
 > O proxy reverso deve preservar o IP do cliente em `REMOTE_ADDR`; não
 > confie em `X-Forwarded-For` de origem não controlada (SEC-03/rate limit).
+> No compose, isso é feito com PROXY protocol entre Caddy e Gunicorn.
 
 ## 1. Visão geral
 
@@ -20,7 +22,30 @@
 
 ## 2. Deploy
 
-### VPS (alvo da Fase 2A)
+### Docker Compose + Caddy (Fase 3, recomendado)
+
+1. Provisionar a VPS com Docker Engine + Compose v2 e liberar 80/443.
+2. Copiar `.env.docker.example` para `.env.docker` e preencher os segredos.
+   Copiar `infra/.env.example` para `infra/.env` e ajustar `APP_DOMAIN`,
+   `STAGING_DOMAIN`, `ACME_EMAIL`, `HSTS_MAX_AGE=31536000` e `DB_PASSWORD`.
+3. Apontar o DNS de `APP_DOMAIN` e `STAGING_DOMAIN` para a VPS **antes** de
+   subir o Caddy (a emissão Let's Encrypt depende disso).
+4. Subir a stack com migrations automáticas e cron:
+   `docker compose -f infra/docker-compose.yml --profile cron up -d --build`.
+5. Conferir `docker compose -f infra/docker-compose.yml ps` (todos
+   `healthy`), `docker compose -f infra/docker-compose.yml logs caddy` e
+   `curl -I https://SEU-DOMINIO/healthz/`.
+6. Executar
+   `docker compose -f infra/docker-compose.yml exec web python manage.py seed_groups`
+   e criar o superusuário. Em seguida, seguir o inventário/backfill da seção 3.
+7. Preservar os volumes `pgdata`, `caddy_data` e `caddy_config` em backup. A
+   recriação de `caddy_data` força nova emissão de certificados.
+
+O Caddy preserva `REMOTE_ADDR` via PROXY protocol; não publique a porta 8000
+do serviço `web` em produção. O acesso HTTP é redirecionado para HTTPS e o
+CSP/HSTS ficam no proxy, com defesa em profundidade no Django.
+
+### VPS (procedimento manual legado)
 
 1. Provisionar PostgreSQL 15 com TLS e Redis 7 com persistência adequada.
 2. Definir `DATABASE_URL`, `REDIS_URL`, `DJANGO_SECRET_KEY`, domínios,

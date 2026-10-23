@@ -40,6 +40,41 @@ bandit -r . -ll
 pip-audit -r requirements.txt
 ```
 
+## Docker (Fase 3)
+
+A stack de desenvolvimento reproduz staging/produção: Django + Gunicorn,
+PostgreSQL 15, Redis 7, Caddy (HTTPS) e jobs agendados.
+
+```bash
+cp .env.docker.example .env.docker     # segredos locais (gitignored)
+cp infra/.env.example infra/.env       # domínios/senha do compose
+
+# desenvolvimento (runserver + hot-reload + porta 8000)
+docker compose -f infra/docker-compose.yml \
+               -f infra/docker-compose.override.yml up -d
+
+# testes dentro do container de desenvolvimento
+docker compose -f infra/docker-compose.yml \
+               -f infra/docker-compose.override.yml run --rm web pytest
+
+# stack de staging/produção (imagem runtime + migrations + cron)
+docker compose -f infra/docker-compose.yml --profile cron up -d --build
+```
+
+- `https://localhost/` usa a CA interna do Caddy; aceite o certificado ou use
+  `curl -k`. A porta `8000` fica exposta apenas no override de desenvolvimento.
+- PostgreSQL e Redis não publicam portas: só existem na rede `back`
+  (`internal: true`).
+- Em staging, `DJANGO_ENVIRONMENT=staging` permite simuladores e PostgreSQL
+  interno sem TLS. Em produção use `DJANGO_ENVIRONMENT=production`,
+  `DATABASE_SSL_REQUIRE=True` e segredos reais; o default do código é estrito.
+- O Caddy envia PROXY protocol ao Gunicorn, preservando `REMOTE_ADDR`
+  (SEC-03). Nunca publique a porta do `web` em produção.
+- Jobs: `expirar_pedidos` (15 min), `processar_fiscal` (30 min) e
+  `gerar_avisos_comerciais` (08:00), via perfil `cron`.
+
+Detalhes em `docs/specs/fase-3/`.
+
 ## Variáveis de ambiente
 
 | Variável | Obrigatória em produção | Uso |
@@ -73,6 +108,10 @@ pip-audit -r requirements.txt
 
 ## Produção
 
+- O deploy recomendado usa `infra/docker-compose.yml`: Caddy (TLS
+  automático) → Gunicorn → PostgreSQL/Redis. O Caddy envia PROXY protocol v1
+  ao Gunicorn, que roda com `--proxy-protocol=v1`; assim o IP real do cliente
+  chega em `REMOTE_ADDR` (SEC-03). A porta do `web` não deve ser publicada.
 - `config/settings/production.py` exige `DATABASE_URL` PostgreSQL e força
   `sslmode=require`; não há fallback para SQLite (ADR-001).
 - O rate limiting usa Redis com incremento atômico em produção. `REDIS_URL`
@@ -109,6 +148,11 @@ pip-audit -r requirements.txt
 
 ## Documentação
 
+- `docs/specs/fase-3/dockerfile.md`
+- `docs/specs/fase-3/docker-compose.md`
+- `docs/specs/fase-3/caddy.md`
+- `docs/specs/fase-3/ci-postgres.md`
+- `docs/specs/fase-3/validacao.md`
 - `docs/specs/fase-2b-spec.md`
 - `docs/specs/fase-2b-remediation.md`
 - `docs/audit/fase-2b-conclusao.md`
