@@ -2,6 +2,7 @@
 
 from datetime import date, datetime, time
 from decimal import Decimal
+from unittest import mock
 
 from django.contrib.auth.models import Group
 from django.core.management import call_command
@@ -11,7 +12,11 @@ from django.urls import reverse
 from django.utils import timezone
 
 from accounts.models import Usuario
+from analytics.models import Aviso
+from core.models import LogAuditoria
+from customers.factories import ClienteFactory
 from fiscal.models import NotaFiscal
+from fiscal.services import enviar_para_emissao, pedido_elegivel
 from sales.factories import (
     ItemPedidoFactory,
     PagamentoFactory,
@@ -47,6 +52,7 @@ class BaseFiscalAuditoriaTests(TestCase):
             status=status,
             status_financeiro=financeiro or Pedido.StatusFinanceiro.PAGO,
             financeiro_conciliado=True,
+            cliente=ClienteFactory(documento="52998224725"),
             subtotal=Decimal("100.00"),
             total=Decimal("100.00"),
         )
@@ -228,6 +234,91 @@ class A02ChaveUnicaTests(BaseFiscalAuditoriaTests):
                     status=NotaFiscal.Status.AUTORIZADA,
                     chave_acesso=CHAVE_SAIDA,
                 )
+
+
+class N03IntegracaoFiscalTests(BaseFiscalAuditoriaTests):
+    def test_autorizacao_tardia_apos_cancelamento_gera_pendencia(self):
+        pedido = self._pedido(status=Pedido.Status.PAGO)
+        nota = NotaFiscal.objects.create(
+            pedido=pedido,
+            tipo=NotaFiscal.Tipo.SAIDA,
+            status=NotaFiscal.Status.ERRO,
+            cfop="5.102",
+        )
+        self.client.force_login(self.gestor)
+        gestor = self.gestor
+        self.assertTrue(pedido_elegivel(pedido), pedido.cliente.documento)
+
+        class ClienteQueCancela:
+            def criar_nfe(self, pedido_arg):
+                cancelar_pedido_padrao(
+                    pedido=Pedido.objects.get(pk=pedido.pk),
+                    justificativa="Cancelamento durante integração",
+                    usuario=gestor,
+                )
+                return {
+                    "numero": "TARDIA",
+                    "chave": CHAVE_ENTRADA,
+                    "link": "https://exemplo.com/tardia",
+                }
+
+        resultado = enviar_para_emissao(
+            pedido, client=ClienteQueCancela()
+        )
+
+        self.assertEqual(resultado.pk, nota.pk)
+        nota.refresh_from_db()
+        self.assertEqual(nota.status, NotaFiscal.Status.AUTORIZADA)
+        self.assertIn("conciliação", nota.ultimo_erro)
+        self.assertTrue(
+            Aviso.objects.filter(
+                tipo=Aviso.Tipo.FISCAL_ERRO,
+                objeto_id=str(nota.pk),
+            ).exists()
+        )
+        self.assertTrue(
+            LogAuditoria.objects.filter(
+                acao="fiscal.autorizacao_apos_cancelamento",
+                objeto_id=str(nota.pk),
+            ).exists()
+        )
+        self.assertEqual(
+            Pedido.objects.get(pk=pedido.pk).status, Pedido.Status.CANCELADO
+        )
+
+    def test_integracao_nao_reemite_nota_cancelada(self):
+        pedido = self._pedido(status=Pedido.Status.PAGO)
+        nota = NotaFiscal.objects.create(
+            pedido=pedido,
+            tipo=NotaFiscal.Tipo.SAIDA,
+            status=NotaFiscal.Status.CANCELADA,
+            cfop="5.102",
+            chave_acesso=CHAVE_SAIDA,
+        )
+        cliente = mock.Mock()
+
+        resultado = enviar_para_emissao(pedido, client=cliente)
+
+        self.assertEqual(resultado.pk, nota.pk)
+        cliente.criar_nfe.assert_not_called()
+        nota.refresh_from_db()
+        self.assertEqual(nota.status, NotaFiscal.Status.CANCELADA)
+
+    def test_retry_nao_chama_provedor_quando_lease_ativo(self):
+        pedido = self._pedido(status=Pedido.Status.PAGO)
+        nota = NotaFiscal.objects.create(
+            pedido=pedido,
+            tipo=NotaFiscal.Tipo.SAIDA,
+            status=NotaFiscal.Status.PENDENTE,
+            cfop="5.102",
+            processando_desde=timezone.now(),
+        )
+        cliente = mock.Mock()
+
+        resultado = enviar_para_emissao(pedido, client=cliente)
+
+        self.assertEqual(resultado.pk, nota.pk)
+        cliente.criar_nfe.assert_not_called()
 
 
 class A06CsvFiscalTests(BaseFiscalAuditoriaTests):

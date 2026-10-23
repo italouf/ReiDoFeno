@@ -33,8 +33,10 @@ from sales.services import (
     aplicar_resultado_pagamento,
     cancelar_pedido_padrao,
     estornar_pagamento,
+    marcar_pagamento_aprovado,
     registrar_devolucao,
 )
+from sales.tests.helpers import fluxo_checkout
 from stock.factories import EstoqueFactory
 from stock.models import Estoque, MovimentoEstoque
 
@@ -407,6 +409,35 @@ class A02LegadoTests(BaseAuditoriaTests):
 
         self.assertIsNone(_obrigacao_por_movimento(movimento))
 
+    def test_cmv_fisico_permanece_quando_receita_entra_em_conciliacao(self):
+        pedido = fluxo_checkout(self.client, quantidade=2)
+        PagamentoFactory(
+            pedido=pedido,
+            valor=pedido.total,
+            status=Pagamento.Status.PENDENTE,
+        )
+        marcar_pagamento_aprovado(pedido)
+        hoje = timezone.localdate()
+        self.assertEqual(
+            metricas_do_periodo(hoje, hoje)["cmv_total"],
+            Decimal("160.00"),
+        )
+
+        Pagamento.objects.filter(pedido=pedido).update(
+            status=Pagamento.Status.CANCELADO,
+            estornado_em=None,
+        )
+        depois = metricas_do_periodo(hoje, hoje)
+
+        self.assertEqual(depois["receita"], Decimal("0.00"))
+        self.assertEqual(depois["receita_produtos"], Decimal("0.00"))
+        self.assertEqual(depois["receita_frete"], Decimal("0.00"))
+        self.assertEqual(depois["cmv_total"], Decimal("160.00"))
+        self.assertEqual(depois["lucro_bruto"], Decimal("-160.00"))
+        self.assertEqual(
+            depois["receita_em_conciliacao"], pedido.total
+        )
+
     def test_pagamento_cancelado_sem_data_nao_gera_frete_negativo(self):
         pedido = self._pedido()
         Pagamento.objects.filter(pedido=pedido).update(
@@ -420,7 +451,8 @@ class A02LegadoTests(BaseAuditoriaTests):
         self.assertEqual(metricas["receita"], Decimal("0.00"))
         self.assertEqual(metricas["receita_produtos"], Decimal("0.00"))
         self.assertEqual(metricas["receita_frete"], Decimal("0.00"))
-        self.assertEqual(metricas["cmv_total"], Decimal("0.00"))
+        self.assertEqual(metricas["cmv_total"], Decimal("60.00"))
+        self.assertEqual(metricas["lucro_bruto"], Decimal("-60.00"))
         self.assertEqual(
             metricas["receita_em_conciliacao"], Decimal("100.00")
         )

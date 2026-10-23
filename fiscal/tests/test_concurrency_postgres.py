@@ -31,13 +31,12 @@ class FiscalConcurrencyTests(TransactionTestCase):
         if connection.vendor != "postgresql":
             raise unittest.SkipTest("Concorrência fiscal exige PostgreSQL.")
 
-    @classmethod
-    def setUpTestData(cls):
+    def setUp(self):
         call_command("seed_groups", verbosity=0)
-        cls.gestor = Usuario.objects.create_user(
+        self.gestor = Usuario.objects.create_user(
             username="gestor_fiscal_conc", password="senha-forte-123"
         )
-        cls.gestor.groups.add(Group.objects.get(name="Administrador"))
+        self.gestor.groups.add(Group.objects.get(name="Administrador"))
 
     def _pedido(self):
         pedido = PedidoFactory(
@@ -59,6 +58,13 @@ class FiscalConcurrencyTests(TransactionTestCase):
     def _rodar(threads):
         for thread in threads:
             thread.start()
+        for thread in threads:
+            thread.join(timeout=20)
+            if thread.is_alive():
+                raise AssertionError("thread não terminou")
+
+    @staticmethod
+    def _juntar(threads):
         for thread in threads:
             thread.join(timeout=20)
             if thread.is_alive():
@@ -119,9 +125,9 @@ class FiscalConcurrencyTests(TransactionTestCase):
 
         def registrar():
             close_old_connections()
-            client = Client()
-            client.force_login(self.gestor)
             try:
+                client = Client()
+                client.force_login(self.gestor)
                 with mock.patch(
                     "fiscal.services.pedido_elegivel",
                     side_effect=elegivel_com_pausa,
@@ -157,11 +163,16 @@ class FiscalConcurrencyTests(TransactionTestCase):
 
         thread_registro = threading.Thread(target=registrar)
         thread_registro.start()
-        self.assertTrue(entrou.wait(timeout=10))
+        try:
+            chegou = entrou.wait(timeout=10)
+        finally:
+            if not entrou.is_set():
+                liberar.set()
+        self.assertTrue(chegou, f"thread de registro não chegou: {erros}")
         thread_cancelamento = threading.Thread(target=cancelar)
         thread_cancelamento.start()
         liberar.set()
-        self._rodar([thread_registro, thread_cancelamento])
+        self._juntar([thread_registro, thread_cancelamento])
 
         self.assertFalse(erros, erros)
         self.assertEqual(resposta[0].status_code, 302)

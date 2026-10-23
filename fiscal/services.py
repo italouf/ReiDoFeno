@@ -1,6 +1,6 @@
 """Serviço fiscal: elegibilidade, envio ao ERP e reprocessamento."""
 import logging
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError
@@ -200,90 +200,222 @@ def _aviso_documento_invalido(pedido) -> None:
     )
 
 
+LEASE_EMISSAO = timedelta(minutes=2)
+
+
+def _aviso_nota_cancelada(nota) -> None:
+    Aviso.registrar(
+        tipo=Aviso.Tipo.FISCAL_ERRO,
+        mensagem=(
+            f"NF-e cancelada do pedido {nota.pedido.numero}; "
+            "retry ordinário bloqueado."
+        ),
+        objeto=nota,
+        severidade=Aviso.Severidade.ERRO,
+    )
+
+
 @transaction.atomic
-def enviar_para_emissao(pedido, client=None) -> NotaFiscal | None:
-    """Tenta emitir a NF-e do pedido pago; erro gera aviso e permite retry."""
+def _preparar_emissao(pedido, client):
+    """Fase curta: revalida sob lock, cria/claima a nota e libera o lock."""
+    pedido = type(pedido).objects.select_for_update().get(pk=pedido.pk)
     if (
         pedido.status_financeiro != "pago"
         or not pedido.financeiro_conciliado
         or pedido.status == "cancelado"
+        or not pedido_elegivel(pedido)
     ):
-        return None
+        if pedido.status != "cancelado" and not pedido_elegivel(pedido):
+            _aviso_documento_invalido(pedido)
+        return pedido, None, False
 
-    if not pedido_elegivel(pedido):
-        _aviso_documento_invalido(pedido)
-        return None
-
-    nota, criada = NotaFiscal.objects.get_or_create(
+    nota, _criada = NotaFiscal.objects.select_for_update().get_or_create(
         pedido=pedido, tipo=NotaFiscal.Tipo.SAIDA
     )
-    if nota.status == NotaFiscal.Status.AUTORIZADA and not criada:
-        return nota  # já emitida: nunca duplica
+    if nota.status == NotaFiscal.Status.CANCELADA:
+        _aviso_nota_cancelada(nota)
+        return pedido, nota, False
+    if nota.status == NotaFiscal.Status.AUTORIZADA:
+        return pedido, nota, False
+
+    agora = timezone.now()
+    if (
+        nota.processando_desde is not None
+        and agora - nota.processando_desde < LEASE_EMISSAO
+    ):
+        logger.info(
+            "Emissão já em andamento para o pedido %s; retry ignorado.",
+            pedido.numero,
+        )
+        return pedido, nota, False
 
     if not nota.cfop:
         nota.cfop = "6.102" if pedido.interestadual else "5.102"
-    client = client or obter_client()
     nota.tentativas += 1
+    nota.processando_desde = agora
+    nota.status = NotaFiscal.Status.PENDENTE
+    nota.ultimo_erro = ""
+    nota.save(
+        update_fields=[
+            "tentativas",
+            "processando_desde",
+            "status",
+            "ultimo_erro",
+            "cfop",
+            "atualizado_em",
+        ]
+    )
+    return pedido, nota, True
+
+
+def enviar_para_emissao(pedido, client=None) -> NotaFiscal | None:
+    """Emite em duas fases para não manter lock durante a chamada externa.
+
+    O claim de ``processando_desde`` impede retries concorrentes. A resposta
+    externa é sempre aplicada com releitura do pedido/nota; uma autorização
+    recebida após cancelamento é preservada com pendência explícita, nunca
+    convertida em sucesso operacional silencioso.
+    """
+    client = client or obter_client()
+    pedido, nota, reivindicada = _preparar_emissao(pedido, client)
+    if not reivindicada:
+        return nota
+
     try:
         resultado = client.criar_nfe(pedido)
     except ErroFiscal as erro:
-        nota.status = NotaFiscal.Status.ERRO
-        nota.ultimo_erro = str(erro)[:500]
-        nota.save()
-        from core.auditoria import registrar_auditoria
+        with transaction.atomic():
+            nota = NotaFiscal.objects.select_for_update().get(pk=nota.pk)
+            nota.status = NotaFiscal.Status.ERRO
+            nota.ultimo_erro = str(erro)[:500]
+            nota.processando_desde = None
+            nota.save(
+                update_fields=[
+                    "status",
+                    "ultimo_erro",
+                    "processando_desde",
+                    "atualizado_em",
+                ]
+            )
+            from core.auditoria import registrar_auditoria
 
-        registrar_auditoria(
-            acao="fiscal.nota_erro",
-            instancia=nota,
-            depois={
-                "status": nota.status,
-                "tentativas": nota.tentativas,
-                "erro": nota.ultimo_erro,
-            },
-        )
-        Aviso.registrar(
-            tipo=Aviso.Tipo.FISCAL_ERRO,
-            mensagem=f"Falha ao emitir NF-e do pedido {pedido.numero}: {erro}",
-            objeto=nota,
-            severidade=Aviso.Severidade.ERRO,
-        )
+            registrar_auditoria(
+                acao="fiscal.nota_erro",
+                instancia=nota,
+                depois={
+                    "status": nota.status,
+                    "tentativas": nota.tentativas,
+                    "erro": nota.ultimo_erro,
+                },
+            )
+            Aviso.registrar(
+                tipo=Aviso.Tipo.FISCAL_ERRO,
+                mensagem=(
+                    f"Falha ao emitir NF-e do pedido {pedido.numero}: {erro}"
+                ),
+                objeto=nota,
+                severidade=Aviso.Severidade.ERRO,
+            )
         logger.warning("Falha fiscal no pedido %s: %s", pedido.numero, erro)
         return nota
 
-    nota.status = NotaFiscal.Status.AUTORIZADA
-    nota.numero = resultado.get("numero", "")
-    nota.chave_acesso = resultado.get("chave", "")
-    nota.link_documento = resultado.get("link", "")
-    nota.ultimo_erro = ""
-    try:
-        with transaction.atomic():
-            nota.save()
-    except IntegrityError:
-        nota.status = NotaFiscal.Status.ERRO
-        nota.ultimo_erro = "Chave de acesso já registrada em outra nota."
-        nota.save(update_fields=["status", "ultimo_erro", "atualizado_em"])
-        Aviso.registrar(
-            tipo=Aviso.Tipo.FISCAL_ERRO,
-            mensagem=(
-                f"Chave duplicada ao emitir NF-e do pedido {pedido.numero}."
-            ),
-            objeto=nota,
-            severidade=Aviso.Severidade.ERRO,
+    with transaction.atomic():
+        pedido_atual = type(pedido).objects.select_for_update().get(
+            pk=pedido.pk
+        )
+        nota = NotaFiscal.objects.select_for_update().get(pk=nota.pk)
+        nota.numero = resultado.get("numero", "")
+        nota.chave_acesso = resultado.get("chave", "")
+        nota.link_documento = resultado.get("link", "")
+        nota.processando_desde = None
+        nota.ultimo_erro = ""
+        estava_cancelada = nota.status == NotaFiscal.Status.CANCELADA
+        nota.status = NotaFiscal.Status.AUTORIZADA
+
+        if estava_cancelada:
+            nota.status = NotaFiscal.Status.CANCELADA
+            nota.ultimo_erro = (
+                "Autorização externa recebida após cancelamento; "
+                "conciliação fiscal necessária."
+            )
+        elif (
+            pedido_atual.status == "cancelado"
+            or pedido_atual.status_financeiro != "pago"
+        ):
+            nota.ultimo_erro = (
+                "NF-e autorizada após cancelamento/estorno; "
+                "conciliação fiscal necessária."
+            )
+        try:
+            with transaction.atomic():
+                nota.save(
+                    update_fields=[
+                        "numero",
+                        "chave_acesso",
+                        "link_documento",
+                        "processando_desde",
+                        "ultimo_erro",
+                        "status",
+                        "atualizado_em",
+                    ]
+                )
+        except IntegrityError:
+            nota.status = NotaFiscal.Status.ERRO
+            nota.ultimo_erro = "Chave de acesso já registrada em outra nota."
+            nota.processando_desde = None
+            nota.save(
+                update_fields=[
+                    "status",
+                    "ultimo_erro",
+                    "processando_desde",
+                    "atualizado_em",
+                ]
+            )
+            Aviso.registrar(
+                tipo=Aviso.Tipo.FISCAL_ERRO,
+                mensagem=(
+                    f"Chave duplicada ao emitir NF-e do pedido {pedido.numero}."
+                ),
+                objeto=nota,
+                severidade=Aviso.Severidade.ERRO,
+            )
+            return nota
+
+        from core.auditoria import registrar_auditoria
+
+        if nota.ultimo_erro:
+            Aviso.registrar(
+                tipo=Aviso.Tipo.FISCAL_ERRO,
+                mensagem=(
+                    f"Pedido {pedido_atual.numero}: {nota.ultimo_erro}"
+                ),
+                objeto=nota,
+                severidade=Aviso.Severidade.ERRO,
+            )
+            registrar_auditoria(
+                acao="fiscal.autorizacao_apos_cancelamento",
+                instancia=nota,
+                depois={
+                    "status": nota.status,
+                    "numero": nota.numero,
+                    "chave": nota.chave_acesso,
+                    "pedido_status": pedido_atual.status,
+                    "pedido_financeiro": pedido_atual.status_financeiro,
+                },
+            )
+            return nota
+
+        registrar_auditoria(
+            acao="fiscal.nota_autorizada",
+            instancia=nota,
+            depois={
+                "status": nota.status,
+                "numero": nota.numero,
+                "chave": nota.chave_acesso,
+                "tentativas": nota.tentativas,
+            },
         )
         return nota
-    from core.auditoria import registrar_auditoria
-
-    registrar_auditoria(
-        acao="fiscal.nota_autorizada",
-        instancia=nota,
-        depois={
-            "status": nota.status,
-            "numero": nota.numero,
-            "chave": nota.chave_acesso,
-            "tentativas": nota.tentativas,
-        },
-    )
-    return nota
 
 
 def processar_fila_fiscal() -> int:
@@ -295,7 +427,10 @@ def processar_fila_fiscal() -> int:
     autorizada = NotaFiscal.objects.filter(
         pedido=OuterRef("pk"),
         tipo=NotaFiscal.Tipo.SAIDA,
-        status=NotaFiscal.Status.AUTORIZADA,
+        status__in=(
+            NotaFiscal.Status.AUTORIZADA,
+            NotaFiscal.Status.CANCELADA,
+        ),
     )
     pedidos = (
         Pedido.objects.filter(

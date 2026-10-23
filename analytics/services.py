@@ -74,17 +74,13 @@ def pagamentos_estornados(inicio: date, fim: date, vendedor=None):
     return query.select_related("pedido", "pedido__unidade")
 
 
-def _itens_vendidos(inicio: date, fim: date, vendedor=None):
+def _itens_aprovados(inicio: date, fim: date, vendedor=None):
+    """Itens de pagamentos que tiveram aprovação, para o CMV histórico."""
     começo, término = _janela(inicio, fim)
-    query = (
-        ItemPedido.objects.filter(
-            pedido__pagamento__aprovado_em__range=(começo, término),
-            pedido__pagamento__aprovado_em__isnull=False,
-            pedido__status_financeiro__in=STATUS_FINANCEIROS_COM_RECEITA,
-        ).exclude(
-            pedido__pagamento__status=Pagamento.Status.CANCELADO,
-            pedido__pagamento__estornado_em__isnull=True,
-        )
+    query = ItemPedido.objects.filter(
+        pedido__pagamento__aprovado_em__range=(começo, término),
+        pedido__pagamento__aprovado_em__isnull=False,
+        pedido__status_financeiro__in=STATUS_FINANCEIROS_COM_RECEITA,
     )
     query = _excluir_aprovacao_pos_cancelamento(
         query, "pedido__pagamento__aprovado_em"
@@ -93,6 +89,14 @@ def _itens_vendidos(inicio: date, fim: date, vendedor=None):
         query = query.filter(pedido__usuario_criador=vendedor)
     return query.select_related(
         "pedido__pagamento", "pedido__unidade", "produto"
+    )
+
+
+def _itens_financeiros(inicio: date, fim: date, vendedor=None):
+    """Itens cujo pagamento é elegível para receita reconhecida."""
+    return _itens_aprovados(inicio, fim, vendedor=vendedor).exclude(
+        pedido__pagamento__status=Pagamento.Status.CANCELADO,
+        pedido__pagamento__estornado_em__isnull=True,
     )
 
 
@@ -147,7 +151,7 @@ def _linhas_itens(inicio: date, fim: date, unidade=None, vendedor=None):
     """
     linhas = {}
 
-    vendidos = _itens_vendidos(inicio, fim, vendedor=vendedor)
+    vendidos = _itens_financeiros(inicio, fim, vendedor=vendedor)
     if unidade is not None:
         vendidos = vendidos.filter(pedido__unidade=unidade)
     for item in vendidos:
@@ -164,6 +168,24 @@ def _linhas_itens(inicio: date, fim: date, unidade=None, vendedor=None):
         )
         linha["quantidade"] += item.quantidade
         linha["receita"] += item.subtotal
+
+    # CMV é histórico: incerteza sobre estorno não apaga uma baixa/custo
+    # comprovado. A receita elegível continua separada acima.
+    itens_cmv = _itens_aprovados(inicio, fim, vendedor=vendedor)
+    if unidade is not None:
+        itens_cmv = itens_cmv.filter(pedido__unidade=unidade)
+    for item in itens_cmv:
+        dia = timezone.localtime(
+            item.pedido.pagamento.aprovado_em
+        ).date()
+        linha = _linha(
+            linhas,
+            produto_id=item.produto_id,
+            produto=item.produto_nome,
+            unidade_id=item.pedido.unidade_id,
+            unidade=item.pedido.unidade.nome,
+            dia=dia,
+        )
         linha["cmv"] += item.custo_unitario * item.quantidade
 
     estornos = pagamentos_estornados(inicio, fim, vendedor=vendedor)

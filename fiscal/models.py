@@ -47,6 +47,12 @@ class NotaFiscal(models.Model):
         "link do documento/XML-DANFE", max_length=300, blank=True
     )
     tentativas = models.PositiveIntegerField("tentativas", default=0)
+    processando_desde = models.DateTimeField(
+        "processando desde",
+        null=True,
+        blank=True,
+        help_text="Lease curto para impedir chamadas fiscais duplicadas.",
+    )
     ultimo_erro = models.TextField("último erro", blank=True)
     criado_em = models.DateTimeField("criado em", auto_now_add=True)
     atualizado_em = models.DateTimeField("atualizado em", auto_now=True)
