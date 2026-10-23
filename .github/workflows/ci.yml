@@ -125,6 +125,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Preparar env descartável
+        run: |
+          cp .env.docker.example .env.docker
+          cp infra/.env.example infra/.env
+      - name: Validar sintaxe do script de smoke
+        run: bash -n infra/scripts/smoke-stack.sh
       - name: Build da imagem runtime
         env:
           DOCKER_BUILDKIT: "1"
@@ -153,56 +159,85 @@ jobs:
           bytes=$(docker image inspect reidofeno:ci --format '{{.Size}}')
           echo "Imagem final: $((bytes / 1024 / 1024)) MB"
           test "$bytes" -lt 500000000
-      - name: Validar Caddyfile
+      - name: Validar Caddyfile (runtime e dev)
         run: |
+          test -f infra/Caddyfile
+          test -f infra/transport.caddy
+          test -f infra/transport-dev.caddy
           docker run --rm \
-            -v "$PWD/infra/Caddyfile:/etc/caddy/Caddyfile:ro" \
-            -v "$PWD/infra/caddy/transport.caddy:/etc/caddy/transport.caddy:ro" \
+            --mount "type=bind,source=$PWD/infra/Caddyfile,target=/etc/caddy/Caddyfile,readonly" \
+            --mount "type=bind,source=$PWD/infra/transport.caddy,target=/etc/caddy/transport.caddy,readonly" \
             caddy:2-alpine caddy validate \
             --config /etc/caddy/Caddyfile --adapter caddyfile
-      - name: Validar Compose (base + override)
+          docker run --rm \
+            --mount "type=bind,source=$PWD/infra/Caddyfile,target=/etc/caddy/Caddyfile,readonly" \
+            --mount "type=bind,source=$PWD/infra/transport-dev.caddy,target=/etc/caddy/transport.caddy,readonly" \
+            caddy:2-alpine caddy validate \
+            --config /etc/caddy/Caddyfile --adapter caddyfile
+      - name: Validar modelos Compose
         run: |
-          cp .env.docker.example .env.docker
-          cp infra/.env.example infra/.env
-          docker compose \
-            -f infra/docker-compose.yml \
+          docker compose -f infra/docker-compose.yml config --quiet
+          docker compose -f infra/docker-compose.yml \
+            -f infra/docker-compose.override.yml config --quiet
+          docker compose -f infra/docker-compose.yml \
+            --profile cron config --quiet
+          docker compose -f infra/docker-compose.yml \
             -f infra/docker-compose.override.yml \
-            config --quiet
-      - name: Smoke test do compose de desenvolvimento (pytest)
+            --profile cron config --quiet
+          docker compose -f infra/docker-compose.yml \
+            -f infra/docker-compose.smoke.yml \
+            --profile cron config --quiet
+      - name: Settings no container dev (ambiente staging)
         env:
           IMAGE_TAG: dev-ci
         run: |
-          docker compose \
-            -f infra/docker-compose.yml \
+          docker compose -f infra/docker-compose.yml \
+            -f infra/docker-compose.override.yml up -d db redis
+          docker compose -f infra/docker-compose.yml \
             -f infra/docker-compose.override.yml \
-            up -d db redis
-          docker compose \
-            -f infra/docker-compose.yml \
+            run --rm web pytest -p no:cacheprovider \
+            core/tests/test_settings_production.py -q
+      - name: Suíte completa no container dev (PostgreSQL/Redis)
+        env:
+          IMAGE_TAG: dev-ci
+        run: |
+          docker compose -f infra/docker-compose.yml \
             -f infra/docker-compose.override.yml \
-            run --rm web pytest -p no:cacheprovider core/tests/test_infra_contract.py -q
-          docker compose \
-            -f infra/docker-compose.yml \
+            run --rm \
+            -e DJANGO_SETTINGS_MODULE=config.settings.test \
+            -e REDIS_URL=redis://redis:6379/0 \
+            web pytest -p no:cacheprovider
+      - name: Derrubar stack dev
+        run: |
+          docker compose -f infra/docker-compose.yml \
             -f infra/docker-compose.override.yml \
-            down -v
-      - name: Smoke test completo (Compose + Caddy + HTTPS)
+            down -v --remove-orphans
+      - name: Smoke runtime (HTTPS, SEC-03, cron, persistência)
         env:
           IMAGE_TAG: ci
+        run: bash infra/scripts/smoke-stack.sh
+      - name: Diagnóstico dos smokes
+        if: failure()
         run: |
-          docker compose -f infra/docker-compose.yml up -d --no-build
-          for tentativa in $(seq 1 40); do
-            if curl --noproxy '*' -kfsS --resolve localhost:443:127.0.0.1 \
-                https://localhost/healthz/; then
-              echo "HTTPS OK na tentativa ${tentativa}"
-              docker compose -f infra/docker-compose.yml ps
-              docker compose -f infra/docker-compose.yml down -v
-              exit 0
-            fi
-            sleep 3
-          done
-          docker compose -f infra/docker-compose.yml ps
-          docker compose -f infra/docker-compose.yml logs --no-color
-          docker compose -f infra/docker-compose.yml down -v
-          exit 1
+          docker compose -f infra/docker-compose.yml \
+            -f infra/docker-compose.smoke.yml --profile cron ps || true
+          docker compose -f infra/docker-compose.yml \
+            -f infra/docker-compose.smoke.yml --profile cron \
+            logs --no-color --tail=200 || true
+          docker compose -f infra/docker-compose.yml \
+            -f infra/docker-compose.override.yml ps || true
+          docker compose -f infra/docker-compose.yml \
+            -f infra/docker-compose.override.yml \
+            logs --no-color --tail=200 || true
+      - name: Cleanup descartável
+        if: always()
+        run: |
+          docker compose -f infra/docker-compose.yml \
+            -f infra/docker-compose.smoke.yml --profile cron \
+            down -v --remove-orphans || true
+          docker compose -f infra/docker-compose.yml \
+            -f infra/docker-compose.override.yml --profile cron \
+            down -v --remove-orphans || true
 
   security:
     runs-on: ubuntu-latest
