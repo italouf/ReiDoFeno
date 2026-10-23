@@ -13,6 +13,10 @@ from .base import BASE_DIR
 
 DEBUG = False
 
+# Staging roda a mesma imagem/settings, mas permite integrações simuladas e
+# PostgreSQL interno sem TLS. O default continua sendo produção estrita.
+STAGING = os.environ.get("DJANGO_ENVIRONMENT", "production") == "staging"
+
 SECRET_KEY = os.environ["DJANGO_SECRET_KEY"]
 
 # ADR-001: produção usa exclusivamente PostgreSQL, sem fallback SQLite.
@@ -22,20 +26,30 @@ if not DATABASE_URL:
         "DATABASE_URL é obrigatório em produção (PostgreSQL)."
     )
 
+DATABASE_SSL_REQUIRE = (
+    os.environ.get("DATABASE_SSL_REQUIRE", "True").lower() == "true"
+)
+if not DATABASE_SSL_REQUIRE and not STAGING:
+    raise ImproperlyConfigured(
+        "DATABASE_SSL_REQUIRE=False só é permitido em staging "
+        "(DJANGO_ENVIRONMENT=staging)."
+    )
+
 DATABASES = {
     "default": dj_database_url.parse(
         DATABASE_URL,
         conn_max_age=600,
         conn_health_checks=True,
-        ssl_require=True,
+        ssl_require=DATABASE_SSL_REQUIRE,
     )
 }
 if "postgresql" not in DATABASES["default"]["ENGINE"]:
     raise ImproperlyConfigured(
         "Produção exige PostgreSQL; DATABASE_URL aponta para outro banco."
     )
-# Garante TLS mesmo se a URL trouxer sslmode=disable.
-DATABASES["default"].setdefault("OPTIONS", {})["sslmode"] = "require"
+if DATABASE_SSL_REQUIRE:
+    # Garante TLS mesmo se a URL trouxer sslmode=disable.
+    DATABASES["default"].setdefault("OPTIONS", {})["sslmode"] = "require"
 
 CSRF_TRUSTED_ORIGINS = [
     origin.strip()
@@ -47,9 +61,15 @@ SECURE_SSL_REDIRECT = (
     os.environ.get("DJANGO_SECURE_SSL_REDIRECT", "True").lower() == "true"
 )
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
-SECURE_HSTS_SECONDS = 60 * 60 * 24 * 30
+USE_X_FORWARDED_HOST = True
+USE_X_FORWARDED_PORT = True
+# O healthcheck do container fala HTTP direto; o proxy redireciona o resto.
+SECURE_REDIRECT_EXEMPT = [r"^healthz/$"]
+SECURE_HSTS_SECONDS = int(
+    os.environ.get("DJANGO_HSTS_SECONDS", str(60 * 60 * 24 * 365))
+)
 SECURE_HSTS_INCLUDE_SUBDOMAINS = True
-SECURE_HSTS_PRELOAD = True
+SECURE_HSTS_PRELOAD = SECURE_HSTS_SECONDS > 0
 SECURE_REFERRER_POLICY = "same-origin"
 
 SESSION_COOKIE_SECURE = True
@@ -100,12 +120,12 @@ MERCADO_PAGO_FAKE = (
 )
 BLING_FAKE = os.environ.get("BLING_FAKE", "False").lower() == "true"
 
-if MERCADO_PAGO_FAKE:
+if MERCADO_PAGO_FAKE and not STAGING:
     raise ImproperlyConfigured(
         "MERCADO_PAGO_FAKE=True não é permitido em produção; "
         "o simulador aprova pagamentos sem provedor."
     )
-if BLING_FAKE:
+if BLING_FAKE and not STAGING:
     raise ImproperlyConfigured(
         "BLING_FAKE=True não é permitido em produção."
     )
@@ -113,7 +133,7 @@ if BLING_FAKE:
 MERCADO_PAGO_COLLECTOR_ID = os.environ.get(
     "MERCADOPAGO_COLLECTOR_ID", ""
 ).strip()
-if not MERCADO_PAGO_COLLECTOR_ID:
+if not MERCADO_PAGO_COLLECTOR_ID and not STAGING:
     raise ImproperlyConfigured(
         "MERCADOPAGO_COLLECTOR_ID é obrigatório em produção para "
         "validar o recebedor do pagamento."
@@ -121,7 +141,7 @@ if not MERCADO_PAGO_COLLECTOR_ID:
 MERCADO_PAGO_LIVE_MODE = (
     os.environ.get("MERCADOPAGO_LIVE_MODE", "True").lower() == "true"
 )
-if not MERCADO_PAGO_LIVE_MODE:
+if not MERCADO_PAGO_LIVE_MODE and not STAGING:
     raise ImproperlyConfigured(
         "MERCADOPAGO_LIVE_MODE deve ser True em produção."
     )

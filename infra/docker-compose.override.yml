@@ -1,0 +1,37 @@
+# Override de desenvolvimento: runserver + hot-reload + porta direta.
+services:
+  web:
+    build:
+      target: dev
+    image: reidofeno:${IMAGE_TAG:-dev}
+    command: ["python", "manage.py", "runserver", "0.0.0.0:8000"]
+    entrypoint: ["/bin/sh", "/app/infra/scripts/entrypoint.sh"]
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.development
+      SITE_URL: http://localhost:8000
+      DJANGO_HSTS_SECONDS: "0"
+      RUN_MIGRATIONS: "true"
+    volumes:
+      - ..:/app
+      - media:/app/media
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/healthz/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  cron:
+    build:
+      target: dev
+    image: reidofeno:${IMAGE_TAG:-dev}
+    command: ["/bin/sh", "/app/infra/scripts/cron-entrypoint.sh"]
+    entrypoint: ["/bin/sh", "/app/infra/scripts/entrypoint.sh"]
+
+  caddy:
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./transport-dev.caddy:/etc/caddy/transport.caddy:ro
+      - media:/srv/media:ro

@@ -1,5 +1,6 @@
 # Ambiente
 .env
+.env.docker
 *.env
 .venv/
 
@@ -35,3 +36,9 @@ reports/
 Thumbs.db
 
 # Impeccable
+
+# Rei do feno docs
+/rfenodocs/
+
+# Superpowers scratch
+/.superpowers/

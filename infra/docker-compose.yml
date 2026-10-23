@@ -1,0 +1,248 @@
+name: reidofeno
+
+# Logs rotacionados no próprio Docker (sem arquivos de log no host).
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  # ───────────────────────────────────────────────────────────
+  # Init one-shot: prepara ownership dos volumes do Caddy
+  # ───────────────────────────────────────────────────────────
+  caddy-init:
+    image: alpine:3.20
+    restart: "no"
+    network_mode: none
+    command:
+      - sh
+      - -c
+      - mkdir -p /data/caddy /config/caddy /srv/media && chown -R 1000:1000 /data /config /srv/media
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+      - media:/srv/media
+    logging: *default-logging
+
+  # ───────────────────────────────────────────────────────────
+  # Reverse proxy + TLS automático (Let's Encrypt)
+  # ───────────────────────────────────────────────────────────
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    user: "1000:1000"
+    read_only: true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+    sysctls:
+      net.ipv4.ip_unprivileged_port_start: 0
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:-localhost}
+      STAGING_DOMAIN: ${STAGING_DOMAIN:-staging.localhost}
+      ACME_EMAIL: ${ACME_EMAIL:-admin@reidofeno.com.br}
+      HSTS_MAX_AGE: ${HSTS_MAX_AGE:-0}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./transport.caddy:/etc/caddy/transport.caddy:ro
+      - media:/srv/media:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    tmpfs:
+      - /tmp
+    networks:
+      - front
+    depends_on:
+      caddy-init:
+        condition: service_completed_successfully
+      web:
+        condition: service_healthy
+    mem_limit: 128m
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging: *default-logging
+
+  # ───────────────────────────────────────────────────────────
+  # Aplicação Django (Gunicorn)
+  # ───────────────────────────────────────────────────────────
+  web:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile
+      target: runtime
+    image: reidofeno:${IMAGE_TAG:-local}
+    restart: unless-stopped
+    stop_grace_period: 35s
+    env_file:
+      - path: ../.env.docker
+        required: false
+    environment:
+      DJANGO_SETTINGS_MODULE: ${DJANGO_SETTINGS_MODULE:-config.settings.production}
+      DATABASE_URL: postgres://reidofeno:${DB_PASSWORD:-reidofeno}@db:5432/reidofeno
+      REDIS_URL: redis://redis:6379/0
+      RUN_MIGRATIONS: "true"
+      TZ: ${TZ:-America/Bahia}
+    volumes:
+      - media:/app/media
+    networks:
+      - front
+      - back
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    mem_limit: 1200m
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - -fsS
+        - --haproxy-protocol
+        - -H
+        - "Host: localhost"
+        - http://127.0.0.1:8000/healthz/
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging: *default-logging
+
+  # ───────────────────────────────────────────────────────────
+  # Jobs agendados (supercronic, não-root)
+  # Perfil opcional: docker compose --profile cron up -d
+  # ───────────────────────────────────────────────────────────
+  cron:
+    profiles: ["cron"]
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile
+      target: runtime
+    image: reidofeno:${IMAGE_TAG:-local}
+    restart: unless-stopped
+    stop_grace_period: 30s
+    env_file:
+      - path: ../.env.docker
+        required: false
+    environment:
+      DJANGO_SETTINGS_MODULE: ${DJANGO_SETTINGS_MODULE:-config.settings.production}
+      DATABASE_URL: postgres://reidofeno:${DB_PASSWORD:-reidofeno}@db:5432/reidofeno
+      REDIS_URL: redis://redis:6379/0
+      RUN_MIGRATIONS: "false"
+      TZ: ${TZ:-America/Bahia}
+    command: ["/app/infra/scripts/cron-entrypoint.sh"]
+    networks:
+      - front
+      - back
+    depends_on:
+      web:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD", "supercronic", "-test", "/etc/reidofeno/crontab"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    logging: *default-logging
+
+  # ───────────────────────────────────────────────────────────
+  # PostgreSQL (sem porta publicada)
+  # ───────────────────────────────────────────────────────────
+  db:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    stop_grace_period: 30s
+    environment:
+      POSTGRES_DB: reidofeno
+      POSTGRES_USER: reidofeno
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-reidofeno}
+      TZ: ${TZ:-America/Bahia}
+    command:
+      - postgres
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - effective_cache_size=512MB
+      - -c
+      - work_mem=4MB
+      - -c
+      - maintenance_work_mem=64MB
+      - -c
+      - max_connections=40
+    shm_size: 256mb
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - back
+    mem_limit: 900m
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U reidofeno -d reidofeno"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    logging: *default-logging
+
+  # ───────────────────────────────────────────────────────────
+  # Redis (cache atômico; sem porta publicada)
+  # ───────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    stop_grace_period: 10s
+    user: redis
+    command:
+      - redis-server
+      - --maxmemory
+      - 128mb
+      - --maxmemory-policy
+      - allkeys-lru
+      - --appendonly
+      - "yes"
+    volumes:
+      - redisdata:/data
+    networks:
+      - back
+    mem_limit: 200m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    logging: *default-logging
+
+volumes:
+  pgdata:
+  redisdata:
+  caddy_data:
+  caddy_config:
+  media:
+
+networks:
+  front: {}
+  back:
+    internal: true
