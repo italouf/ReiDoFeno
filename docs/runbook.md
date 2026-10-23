@@ -64,17 +64,29 @@ CSP/HSTS ficam no proxy, com defesa em profundidade no Django.
 
 ### Smoke descartável de homologação
 
-Com a imagem runtime construída (`IMAGE_TAG=local docker compose -f
-infra/docker-compose.yml build web`) e os exemplos de env copiados:
+O smoke usa um projeto próprio (`reidofeno_smoke`), volumes
+`reidofeno_smoke_*`, arquivos `.env.smoke`/`.env.docker.smoke` e portas
+8080/8443. Ele recusa o projeto de desenvolvimento e não remove seus volumes.
 
 ```bash
+cp .env.docker.smoke.example .env.docker.smoke
+cp infra/.env.smoke.example infra/.env.smoke
+IMAGE_TAG=local docker compose --project-name reidofeno \
+    -f infra/docker-compose.yml build web
 IMAGE_TAG=local bash infra/scripts/smoke-stack.sh
 ```
 
-O script sobe Caddy/web/db/redis/cron, exige healthchecks, valida HTTPS,
-página, estático, IP real/`XFF` forjado, executa as rotinas do cron com dados
-sintéticos e recria os containers sem `-v` para provar persistência. Ele limpa
-somente os volumes do projeto `reidofeno` ao terminar com sucesso.
+O script sobe Caddy/web/db/redis/cron, exige healthchecks, valida HTTPS em
+`https://localhost:8443`, página, estático, IP real/`XFF` forjado, executa as
+rotinas do cron com dados sintéticos e recria os containers sem `-v` para
+provar persistência. Ele limpa somente o projeto `reidofeno_smoke`.
+
+Para provar isolamento contra recursos sentinela e exercitar a falha
+deliberada:
+
+```bash
+IMAGE_TAG=local bash infra/scripts/test-smoke-isolation.sh
+```
 
 ### VPS (procedimento manual legado)
 

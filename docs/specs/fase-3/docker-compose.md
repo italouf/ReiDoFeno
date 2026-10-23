@@ -131,15 +131,22 @@ docker compose -f infra/docker-compose.yml \
 ## Runtime local e limites
 
 ```bash
-# imagem e smoke descartável (Caddy, página, estático, IP, cron, persistência)
-IMAGE_TAG=local docker compose -f infra/docker-compose.yml build web
+# imagem e smoke descartável em projeto/volumes exclusivos
+IMAGE_TAG=local docker compose --project-name reidofeno \
+  -f infra/docker-compose.yml build web
+cp .env.docker.smoke.example .env.docker.smoke
+cp infra/.env.smoke.example infra/.env.smoke
 IMAGE_TAG=local bash infra/scripts/smoke-stack.sh
 ```
 
-O Caddy usa CA interna em `localhost`. O smoke sobe também o perfil `cron` e
-grava um arquivo em `/app/media`, recriando os containers sem `-v` para provar
-persistência. `infra/docker-compose.smoke.yml` habilita `SMOKE_DIAGNOSTICS`
-apenas no cenário descartável.
+O smoke usa `reidofeno_smoke`, volumes `reidofeno_smoke_*`, portas 8080/8443,
+`APP_ENV_FILE=.env.docker.smoke` e Caddy em `https://localhost:8443`. A
+validação pré-mutação recusa o projeto `reidofeno`, volume com prefixo de dev
+ou portas 80/443. O script sobe também o perfil `cron` e grava um arquivo em
+`/app/media`, recriando os containers sem `-v` para provar persistência.
+`infra/docker-compose.smoke.yml` habilita `SMOKE_DIAGNOSTICS` apenas no cenário
+descartável. `infra/scripts/test-smoke-isolation.sh` usa sentinela e falha
+deliberada para provar que o projeto habitual não é tocado.
 
 Limites: este compose é uma instância única de homologação. `APP_DOMAIN` e
 `STAGING_DOMAIN` são aliases do mesmo `web`/banco; o PostgreSQL interno não tem

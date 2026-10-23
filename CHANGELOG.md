@@ -1,5 +1,26 @@
 # Changelog
 
+## [Fase 3 — isolamento do smoke e persistência determinística] — 2026-10-23
+
+- **F3-04:** o smoke agora usa o projeto descartável `reidofeno_smoke`, com
+  `--project-name` explícito, volumes `reidofeno_smoke_*`, envs exclusivos
+  (`infra/.env.smoke` + `.env.docker.smoke`), portas 8080/8443 e rede `_front`
+  descoberta por `docker inspect`. A validação pré-mutação recusa o projeto
+  `reidofeno`, portas 80/443 e volumes de desenvolvimento.
+- **F3-04:** `test-smoke-isolation.sh` cria sentinela descartável, executa o
+  smoke separado e confere que os recursos permanecem após sucesso e falha
+  deliberada; cleanup é limitado a `reidofeno_smoke` e ao sentinela do teste.
+- **F3-05:** `contar_produto` usa `manage.py shell --verbosity 0`; a regressão
+  com Django 5.2.17 prova stdout exato `1`, sem banner. Falha do comando,
+  produto ausente ou contagem divergente continuam reprovando.
+- **CI:** configuração smoke valida projeto/env separados; diagnóstico e
+  cleanup usam `reidofeno_smoke`; dev usa `reidofeno` explicitamente.
+- **Validação local:** 699 passed, 24 skipped, 240 subtests; 54 testes focados;
+  settings 16/16 com pai limpo e staging; Compose CLI v5.6.1 validou
+  base/dev/cron/smoke; Caddy runtime/dev válidos; recusa de projeto dev
+  comprovada. Docker Engine segue indisponível localmente; smoke integrado
+  permanece pendente no CI.
+
 ## [Fase 3 — correção de aceite F3-01/F3-02/F3-03] — 2026-10-23
 
 - **F3-01:** o job `docker` montava `infra/caddy/transport.caddy`, que não

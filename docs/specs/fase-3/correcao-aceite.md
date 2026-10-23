@@ -15,6 +15,9 @@ documenta os limites reais.
 | F3-01 | Workflow monta `infra/caddy/transport.caddy`, arquivo real em `infra/transport.caddy` | Gate de Caddy precisa resolver arquivos existentes e validar runtime e dev | Usar `--mount` com `source=$PWD/infra/...`, `test -f` antes e duas validações | Teste que extrai e resolve os caminhos do YAML; CI verde |
 | F3-02 | `os.environ.copy()` herda staging/fakes/TLS off do `.env.docker` | Cenários de produção devem partir de baseline estrito determinístico | `_executar` monta ambiente explícito, remove herança de contrato e aplica overrides | Classe passa com pai limpo e com pai staging; suíte no container dev |
 | F3-03 | Smoke só verifica `/healthz/` e imprime `ps`; não prova stack, IP, cron nem persistência | Aceite executável de saúde, página, estático, SEC-03, cron e volumes | Endpoint de diagnóstico gated por staging, script de smoke e CI com cron/peristência | Script real + logs/limpeza no CI; pendente de execução local sem Docker |
+| F3-04 | Smoke usava o mesmo projeto/volumes do dev (`reidofeno`) e semeava/removia recursos compartilhados | Projeto descartável próprio, sem fallback, com volumes/credenciais isolados e recusa antes da primeira mutação | `reidofeno_smoke`, `--project-name`, `.env.smoke`/`.env.docker.smoke`, portas 8080/8443, validação de config e teste de sentinela | Teste de isolamento e CI; execução Docker pendente |
+| F3-05 | `manage.py shell -c` imprime banner de importações; comparação exata com `1` falha | Saída de máquina determinística e exit code propagado | `shell --verbosity 0` nas consultas e regressão com Django 5.2.17 | Reprodução: sem flag imprime banner+1; com flag imprime somente `1` |
+
 
 ## F3-01 — caminho e gate Caddy
 
@@ -62,6 +65,36 @@ descartável. `infra/scripts/smoke-stack.sh`:
    confere dados + arquivo;
 7. limpa somente o projeto descartável.
 
+## F3-04 — isolamento do smoke
+
+O smoke usa um projeto Compose próprio (`reidofeno_smoke`), passado
+explicitamente por `--project-name` em todas as operações, e arquivos de
+ambiente exclusivos:
+
+- `infra/.env.smoke` (interpolação: porta 8080/8443, domínio local, senha
+  sintética, `APP_ENV_FILE=.env.docker.smoke`);
+- `.env.docker.smoke` (staging, simuladores, console, sem credenciais reais).
+
+A base não faz fallback para `reidofeno`: o script recusa projeto habitual,
+arquivo ausente ou modelo que não tenha os volumes prefixados
+`reidofeno_smoke_*` **antes** de subir/semear/remover. As portas do Caddy são
+parametrizadas (`CADDY_HTTP_PORT`/`CADDY_HTTPS_PORT`) e o smoke publica
+8080/8443, sem disputar 80/443 da stack de desenvolvimento. A rede `_front` é
+descoberta via `docker inspect`, sem hardcode de `reidofeno_front`.
+
+`infra/scripts/test-smoke-isolation.sh` cria um projeto/volume/container
+sentinela descartável, executa o smoke no projeto separado e confere que o
+sentinela permanece intacto após sucesso e após falha deliberada. O cleanup
+remove somente `reidofeno_smoke` e o sentinela criado pelo próprio teste.
+
+## F3-05 — persistência determinística
+
+`contar_produto` usa `manage.py shell --verbosity 0 -c`, que no Django 5.2.17
+imprime somente o valor (sem o banner de importações). Falha do comando,
+produto ausente ou contagem diferente de 1 reprovam a verificação; não há
+`tail -1`, filtro permissivo ou `|| true` na assertion. Uma regressão executa a
+forma real de invocação e exige stdout exato.
+
 ## Fora de escopo (documentado)
 
 - TLS do PostgreSQL interno do Compose; produção estrita continua exigindo TLS
@@ -85,7 +118,13 @@ descartável. `infra/scripts/smoke-stack.sh`:
 - F3-02 reproduzido (7 falhas/4 sucessos com pai staging) e corrigido; a classe
   passa 16/16 com pai limpo e 16/16 com pai staging.
 - F3-03 implementado no workflow e em `infra/scripts/smoke-stack.sh`.
-- Compose CLI v5.6.1 validou base/dev/cron/smoke sem daemon.
+- F3-04 implementado com projeto `reidofeno_smoke`, envs próprios, portas
+  alternativas e validação pré-mutação; teste de sentinela preparado para CI.
+- F3-05 reproduzido (banner + `1`) e corrigido com `--verbosity 0`; regressão
+  preparada.
+- Compose CLI v5.6.1 validou base/dev/cron/smoke sem daemon e o modelo smoke
+  isolado (`reidofeno_smoke`, volumes, portas 8080/8443).
+- Suíte local: 699 passed, 24 skipped, 240 subtests; 54 testes focados.
 - Docker Engine não está disponível nesta máquina: build, up, HTTPS, IP, cron e
   persistência **não foram executados localmente**. O aceite integrado fica
   pendente até o CI rodar no SHA corrigido.

@@ -49,15 +49,16 @@ inalterados.
 6. `caddy validate` nos transportes runtime **e** dev, via `--mount` com
    `source` existente.
 7. `docker compose config` nas combinações base, base+override, cron,
-   override+cron e base+smoke+cron.
+   override+cron e smoke+cron; a última usa `--project-name reidofeno_smoke`
+   e `--env-file infra/.env.smoke`.
 8. classe de settings no container dev com o ambiente staging do Compose.
 9. suíte completa no container dev com `config.settings.test`, PostgreSQL e
    Redis reais.
-10. `infra/scripts/smoke-stack.sh`: HTTPS, página, estático, `REMOTE_ADDR`
-    contra IP real dos containers, `X-Forwarded-For` forjado, cron, dados e
-    mídia após recriação.
-11. diagnóstico em `if: failure()` e cleanup `if: always()`, limitado ao
-    projeto `reidofeno`.
+10. `infra/scripts/test-smoke-isolation.sh`: executa o smoke no projeto
+    descartável, com sentinela, falha deliberada e recusa do projeto
+    `reidofeno`; cobre HTTPS, página, estático, IP, cron e persistência.
+11. diagnóstico em `if: failure()` e cleanup `if: always()`, com projeto
+    explícito para dev (`reidofeno`) e smoke (`reidofeno_smoke`).
 
 ### Jobs existentes
 

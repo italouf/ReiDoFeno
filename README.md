@@ -48,36 +48,53 @@ representa um staging público nem dois ambientes isolados: `APP_DOMAIN` e
 `STAGING_DOMAIN` apontam para o mesmo `web`, banco e integrações.
 
 ```bash
+# ambiente de desenvolvimento
 cp .env.docker.example .env.docker     # segredos locais (gitignored)
 cp infra/.env.example infra/.env       # domínios/senha do compose
 
 # desenvolvimento (runserver + hot-reload; porta 8000 em loopback)
-docker compose -f infra/docker-compose.yml \
+docker compose --project-name reidofeno \
+               -f infra/docker-compose.yml \
                -f infra/docker-compose.override.yml up -d
 
 # classe de settings no ambiente documentado do Compose
-docker compose -f infra/docker-compose.yml \
+docker compose --project-name reidofeno \
+               -f infra/docker-compose.yml \
                -f infra/docker-compose.override.yml \
                run --rm web pytest core/tests/test_settings_production.py
 
 # suíte completa com PostgreSQL/Redis reais e settings de teste
-docker compose -f infra/docker-compose.yml \
+docker compose --project-name reidofeno \
+               -f infra/docker-compose.yml \
                -f infra/docker-compose.override.yml \
                run --rm -e DJANGO_SETTINGS_MODULE=config.settings.test \
                -e REDIS_URL=redis://redis:6379/0 web pytest
 
-# smoke runtime descartável: HTTPS, página, estático, IP, cron e persistência
+# smoke isolado: projeto reidofeno_smoke, portas 8080/8443
+cp .env.docker.smoke.example .env.docker.smoke
+cp infra/.env.smoke.example infra/.env.smoke
+IMAGE_TAG=local docker compose --project-name reidofeno \
+               -f infra/docker-compose.yml build web
 IMAGE_TAG=local bash infra/scripts/smoke-stack.sh
 ```
 
-Para o smoke runtime, construa a imagem antes com
-`IMAGE_TAG=local docker compose -f infra/docker-compose.yml build web`.
-O script sobe o perfil `cron`, exige todos os healthchecks, executa as três
-rotinas com dados sintéticos e recria os containers preservando volumes.
+O smoke usa um projeto Compose próprio (`reidofeno_smoke`), volumes
+`reidofeno_smoke_*`, arquivos `.env.smoke`/`.env.docker.smoke` e portas
+8080/8443. Ele **recusa** o projeto `reidofeno` e nunca remove volumes do
+desenvolvimento. Para validar também o isolamento e a falha deliberada:
 
-- `https://localhost/` usa a CA interna do Caddy; aceite o certificado ou use
-  `curl -k`. A porta `8000` é publicada apenas no override e, por padrão, em
-  `127.0.0.1`; use `DOCKER_DEV_BIND=0.0.0.0` somente para acesso pela rede.
+```bash
+IMAGE_TAG=local bash infra/scripts/test-smoke-isolation.sh
+```
+
+O script sobe o perfil `cron`, exige todos os healthchecks, executa as três
+rotinas com dados sintéticos e recria os containers preservando os volumes do
+próprio smoke.
+
+- `https://localhost/` (dev) e `https://localhost:8443/` (smoke) usam a CA
+  interna do Caddy; aceite o certificado ou use `curl -k`. A porta `8000` do
+  dev é publicada apenas no override e, por padrão, em `127.0.0.1`; use
+  `DOCKER_DEV_BIND=0.0.0.0` somente para acesso pela rede.
 - PostgreSQL e Redis não publicam portas: só existem na rede `back`
   (`internal: true`).
 - `DJANGO_ENVIRONMENT=staging` permite simuladores e PostgreSQL interno sem
