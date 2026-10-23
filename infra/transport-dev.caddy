@@ -1,0 +1,2 @@
+# Desenvolvimento: o runserver não fala PROXY protocol; o reverse_proxy usa
+# o transporte HTTP padrão. Montado no lugar de transport.caddy pelo override.

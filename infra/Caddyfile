@@ -1,0 +1,64 @@
+# ─────────────────────────────────────────────────────────────
+# Global
+# ─────────────────────────────────────────────────────────────
+{
+	email {$ACME_EMAIL:admin@reidofeno.com.br}
+	admin 127.0.0.1:2019
+}
+
+# ─────────────────────────────────────────────────────────────
+# Snippets
+# ─────────────────────────────────────────────────────────────
+(security_headers) {
+	header {
+		Strict-Transport-Security "max-age={$HSTS_MAX_AGE:31536000}; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "same-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self'; media-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+		-Server
+	}
+}
+
+(app) {
+	encode zstd gzip
+
+	import security_headers
+
+	# Mídia sai direto do disco, sem passar pelo Gunicorn.
+	handle_path /media/* {
+		root * /srv/media
+		file_server
+	}
+
+	# Todo o resto vai para o Django.
+	handle {
+		reverse_proxy web:8000 {
+			header_up X-Real-IP {remote_host}
+
+			# Produção: PROXY protocol preserva REMOTE_ADDR (SEC-03).
+			# O override de dev monta um transporte HTTP padrão.
+			import transport.caddy
+		}
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}
+
+# ─────────────────────────────────────────────────────────────
+# Produção (APP_DOMAIN no ambiente do compose)
+# ─────────────────────────────────────────────────────────────
+{$APP_DOMAIN:localhost}, www.{$APP_DOMAIN:localhost} {
+	import app
+}
+
+# ─────────────────────────────────────────────────────────────
+# Staging (STAGING_DOMAIN no ambiente do compose)
+# ─────────────────────────────────────────────────────────────
+{$STAGING_DOMAIN:staging.localhost} {
+	import app
+}

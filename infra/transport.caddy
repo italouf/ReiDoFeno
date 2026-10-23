@@ -1,0 +1,5 @@
+# Transporte de produção: o Gunicorn roda com --proxy-protocol e preserva
+# REMOTE_ADDR. Este arquivo é montado em /etc/caddy/caddy/transport.caddy.
+transport http {
+	proxy_protocol v1
+}
