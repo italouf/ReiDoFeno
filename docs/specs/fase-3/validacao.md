@@ -1,35 +1,60 @@
 # Fase 3 — validação local
 
-Data: 2026-10-23. Máquina sem Docker/WSL; a validação de build/stack fica no
-job `docker` do CI.
+Data: 2026-10-23. Máquina sem Docker Engine/WSL; a validação de build, stack,
+HTTPS, cron e persistência fica no job `docker` do CI. O que foi executado
+localmente está separado do que permanece pendente.
 
 ## Executado e aprovado
 
 | Verificação | Resultado |
 |---|---|
-| `pytest -q` (SQLite/development) | **685 passed, 24 skipped, 240 subtests** |
-| `pytest core/tests/test_infra_contract.py core/tests/test_ci_workflow.py core/tests/test_settings_production.py` | **40 passed** |
+| `pytest -q` (SQLite/development) | **695 passed, 24 skipped, 240 subtests** |
+| Testes de contrato/settings/endpoint | **50 passed** |
+| Classe de produção com pai limpo | **16 passed** |
+| Classe de produção com pai staging do Compose | **16 passed** |
 | `ruff check .` | limpo |
-| `python manage.py check` | sem issues (2 silenciados em dev/build) |
-| `python manage.py makemigrations --check --dry-run` | sem mudanças |
+| `manage.py check` | sem issues |
+| `makemigrations --check --dry-run` | sem mudanças |
 | `check --deploy` (produção estrita) | sem issues |
-| `bandit -c pyproject.toml -r . -ll` | 0 findings |
+| `bandit` | 0 findings |
 | `node --test static/js/relatorios.test.mjs` | 2/2 |
-| `caddy validate` (Caddy 2.11.7, transporte de produção) | `Valid configuration` |
-| `caddy validate` (variante de dev, sem PROXY) | `Valid configuration` |
-| `caddy adapt` | `proxy_protocol: v1`, `handle_path /media`, headers presentes |
+| `caddy validate` (transporte runtime) | `Valid configuration` |
+| `caddy validate` (transporte dev) | `Valid configuration` |
 | `hadolint infra/Dockerfile` | limpo |
-| `sh -n` nos dois entrypoints | sintaxe válida |
-| `collectstatic` com `config.settings.build` | 147 arquivos, 427 pós-processados |
-| YAML de compose/override/CI | parse válido + invariantes verificadas |
-| Caddy prod/CI JSON | `proxy_protocol v1`, HSTS/CSP, `handle_path` de mídia |
+| `bash -n infra/scripts/smoke-stack.sh` | sintaxe válida |
+| `sh -n` entrypoints | sintaxe válida |
+| Docker Compose CLI v5.6.1 `config --quiet` (base) | ok |
+| Docker Compose CLI v5.6.1 (base + override) | ok |
+| Docker Compose CLI v5.6.1 (cron) | ok |
+| Docker Compose CLI v5.6.1 (override + cron) | ok |
+| Docker Compose CLI v5.6.1 (smoke + cron) | ok |
+| Caminhos `--mount` do Caddy no workflow | regressão resolve arquivos reais |
 
-## Não executado localmente (CI)
+## Pendente de execução (CI/Docker)
 
-- `docker build` e medição do tamanho final da imagem.
-- `docker compose up`, healthchecks e HTTPS em `https://localhost/healthz/`.
-- Suíte completa contra PostgreSQL 15 + Redis (inclui `@pytest.mark.postgres`).
-- Migração histórica `0001 → HEAD` em PostgreSQL.
+- `docker build` runtime/dev e tamanho final < 500 MB.
+- `docker compose up` com todos os healthchecks `healthy`.
+- HTTPS local, página representativa, estático com hash, IP real/`XFF`
+  forjado, cron e persistência: `infra/scripts/smoke-stack.sh`.
+- Suíte completa no container dev com PostgreSQL/Redis reais.
+- CI remoto verde no SHA corrigido. Nenhuma alegação de sucesso remoto é
+  feita enquanto isso não ocorrer.
 
-Esses itens estão automatizados no job `docker` e no job `tests` do workflow.
-Nenhuma alegação de sucesso local é feita para eles.
+## Reprodução local
+
+```bash
+pytest -q
+pytest core/tests/test_infra_contract.py core/tests/test_ci_workflow.py \
+       core/tests/test_healthz.py core/tests/test_settings_production.py -q
+ruff check .
+```
+
+Ambiente pai staging (reproduz o comando documentado do Compose):
+
+```bash
+export DJANGO_SETTINGS_MODULE=config.settings.development
+export DJANGO_ENVIRONMENT=staging DATABASE_SSL_REQUIRE=False
+export MERCADO_PAGO_FAKE=True BLING_FAKE=True
+export MERCADOPAGO_COLLECTOR_ID= MERCADOPAGO_LIVE_MODE=False
+pytest core/tests/test_settings_production.py -q
+```

@@ -2,9 +2,10 @@
 
 ## Objetivo
 
-Subir a mesma stack em desenvolvimento, staging e produção — Django,
-PostgreSQL 15, Redis 7, Caddy e jobs agendados — com redes separadas,
-volumes persistentes e healthchecks em todos os serviços.
+Subir a mesma stack de homologação local — Django, PostgreSQL 15, Redis 7,
+Caddy e jobs agendados — com redes separadas, volumes persistentes e
+healthchecks. O compose é a base para staging/produção futuros, mas os
+ambientes públicos não foram provisionados nem isolados nesta entrega.
 
 ## Topologia
 
@@ -115,28 +116,50 @@ docker compose -f infra/docker-compose.yml \
 ```
 
 O override usa o stage `dev` (com `requirements-dev.txt`), monta o repositório
-em `/app` para hot-reload e publica `8000:8000`.
+em `/app` para hot-reload e publica `127.0.0.1:8000` por padrão
+(`DOCKER_DEV_BIND=0.0.0.0` apenas quando necessário).
 
-## Staging/produção
+Suíte no container dev com PostgreSQL/Redis reais:
 
 ```bash
-# infra/.env com APP_DOMAIN/STAGING_DOMAIN reais e HSTS_MAX_AGE=31536000
-# .env.docker com DJANGO_ENVIRONMENT=production e segredos reais
-docker compose -f infra/docker-compose.yml --profile cron up -d
+docker compose -f infra/docker-compose.yml \
+               -f infra/docker-compose.override.yml \
+               run --rm -e DJANGO_SETTINGS_MODULE=config.settings.test \
+               -e REDIS_URL=redis://redis:6379/0 web pytest
 ```
+
+## Runtime local e limites
+
+```bash
+# imagem e smoke descartável (Caddy, página, estático, IP, cron, persistência)
+IMAGE_TAG=local docker compose -f infra/docker-compose.yml build web
+IMAGE_TAG=local bash infra/scripts/smoke-stack.sh
+```
+
+O Caddy usa CA interna em `localhost`. O smoke sobe também o perfil `cron` e
+grava um arquivo em `/app/media`, recriando os containers sem `-v` para provar
+persistência. `infra/docker-compose.smoke.yml` habilita `SMOKE_DIAGNOSTICS`
+apenas no cenário descartável.
+
+Limites: este compose é uma instância única de homologação. `APP_DOMAIN` e
+`STAGING_DOMAIN` são aliases do mesmo `web`/banco; o PostgreSQL interno não tem
+TLS; não há CD/DNS/HTTPS público nesta entrega.
 
 ## Critérios de aceite
 
-- [ ] `docker compose config` válido (base + override).
+- [ ] `docker compose config` válido nas combinações base/dev/cron/smoke.
 - [ ] `docker compose up -d` sobe web, db, redis e caddy sem erro.
-- [ ] `docker compose ps` mostra todos os serviços de longa duração `healthy`.
-- [ ] `docker compose run --rm web pytest` executa a suíte no stage `dev`.
+- [ ] Todos os serviços de longa duração ficam `healthy` (assertion real).
+- [ ] `docker compose run --rm web pytest` e a suíte com test settings passam.
 - [ ] `db` e `redis` não publicam portas.
-- [ ] Volume `media` persiste entre restarts e é legível pelo Caddy.
-- [ ] `curl -k https://localhost/healthz/` retorna `{"status": "ok"}`.
+- [ ] HTTPS local, página e estático passam pelo Caddy.
+- [ ] `REMOTE_ADDR` corresponde ao IP real do cliente e ignora XFF forjado.
+- [ ] Cron executa as três rotinas; dados e mídia persistem após recriação.
+- [ ] Cleanup remove somente volumes do projeto `reidofeno`.
 
 ## Validação local desta execução
 
-Docker não está instalado na máquina; a validação estrutural foi feita com
-PyYAML e testes de contrato, e o job `docker` do CI executa
-`docker compose config` e `docker build` de forma autoritativa.
+Docker Engine não está instalado nesta máquina. O modelo Compose foi validado
+com a CLI standalone Docker Compose **v5.6.1** (sem daemon) em base, dev,
+cron e smoke; os testes de contrato cobrem os caminhos. Build/up/HTTPS/cron e
+persistência ficam como **pendentes de execução no CI**, não como sucesso.

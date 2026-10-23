@@ -1,5 +1,9 @@
 # Fase 3 — TAREFA 3: Caddy com TLS automático
 
+> **Escopo:** o TLS público, DNS e Let's Encrypt não foram provisionados nem
+> executados nesta entrega. A validação local usa a CA interna do Caddy em
+> `localhost`; o aceite integrado depende do CI/no ambiente descartável.
+
 ## Objetivo
 
 Colocar o Django atrás de um reverse proxy com HTTPS automático
@@ -77,6 +81,15 @@ O Caddy roda como uid 1000, com `cap_drop: ALL`, `cap_add:
 NET_BIND_SERVICE`, `read_only`, `no-new-privileges` e `tmpfs` em `/tmp`. O
 `caddy-init` é o único processo root, one-shot, para ajustar a ownership dos
 volumes `caddy_data`/`caddy_config`.
+
+### SEC-03 no smoke
+
+Para provar que o IP real atravessa o proxy, `/healthz/ip/` retorna somente
+`REMOTE_ADDR` quando `SMOKE_DIAGNOSTICS=True` **e** `DJANGO_ENVIRONMENT=staging`.
+Fora desse cenário a rota responde 404; produção estrita nunca habilita o
+diagnóstico. O smoke compara o IP visto por `web` e `cron` com o IP real dos
+containers e envia `X-Forwarded-For: 203.0.113.99` para confirmar que o header
+forjado é ignorado.
 
 ## Critérios de aceite
 

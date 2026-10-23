@@ -1,5 +1,32 @@
 # Changelog
 
+## [Fase 3 — correção de aceite F3-01/F3-02/F3-03] — 2026-10-23
+
+- **F3-01:** o job `docker` montava `infra/caddy/transport.caddy`, que não
+  existe; o arquivo real é `infra/transport.caddy`. O gate agora usa
+  `--mount` com `source` explícito, valida runtime e dev, e um teste resolve
+  os caminhos extraídos do YAML do workflow.
+- **F3-02:** os testes de produção deixam de copiar o ambiente inteiro. Um
+  baseline estrito é montado por allowlist (produção, TLS, fakes desligados) e
+  só então recebe overrides. A classe passa tanto com pai limpo quanto com o
+  ambiente staging do Compose (16/16 em ambos).
+- **F3-03:** endpoint `/healthz/ip/` gated por `SMOKE_DIAGNOSTICS` +
+  `DJANGO_ENVIRONMENT=staging`; `infra/docker-compose.smoke.yml`;
+  `infra/scripts/smoke-stack.sh` verifica healthchecks, HTTPS, página,
+  estático, IP real contra `X-Forwarded-For` forjado, cron com dados
+  sintéticos e persistência de banco/mídia após recriação sem `-v`.
+- **CI:** valida `docker compose config` em base/dev/cron/smoke; constrói
+  runtime e dev; roda a suíte completa no container dev com
+  `config.settings.test`/PostgreSQL/Redis; diagnóstico `if: failure()` e
+  cleanup `if: always()` limitado ao projeto `reidofeno`.
+- **Escopo documentado:** sem CD, sem staging público, sem TLS no PostgreSQL
+  interno, domínios como aliases da mesma instância, HSTS local em 0 e porta
+  dev em loopback por padrão. CI remoto no SHA corrigido permanece pendente.
+- **Validação local:** 695 passed, 24 skipped, 240 subtests; 50 testes
+  focados; classe de settings 16/16 com pai limpo e staging; Ruff, Bandit,
+  `check`, `makemigrations`, `check --deploy`, Caddy e Compose CLI v5.6.1
+  limpos. Docker Engine não está disponível nesta máquina.
+
 ## [Fase 3 — Docker, Compose, Caddy e CI] — 2026-10-23
 
 - **Docker:** `infra/Dockerfile` multi-stage (`builder`, `dev`, `runtime`),

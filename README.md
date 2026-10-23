@@ -40,40 +40,73 @@ bandit -r . -ll
 pip-audit -r requirements.txt
 ```
 
-## Docker (Fase 3)
+## Docker (Fase 3 — homologação local)
 
-A stack de desenvolvimento reproduz staging/produção: Django + Gunicorn,
-PostgreSQL 15, Redis 7, Caddy (HTTPS) e jobs agendados.
+A stack de homologação local usa a mesma imagem runtime para Django/Gunicorn,
+com PostgreSQL 15, Redis 7, Caddy (HTTPS local) e jobs agendados. Ela **não**
+representa um staging público nem dois ambientes isolados: `APP_DOMAIN` e
+`STAGING_DOMAIN` apontam para o mesmo `web`, banco e integrações.
 
 ```bash
 cp .env.docker.example .env.docker     # segredos locais (gitignored)
 cp infra/.env.example infra/.env       # domínios/senha do compose
 
-# desenvolvimento (runserver + hot-reload + porta 8000)
+# desenvolvimento (runserver + hot-reload; porta 8000 em loopback)
 docker compose -f infra/docker-compose.yml \
                -f infra/docker-compose.override.yml up -d
 
-# testes dentro do container de desenvolvimento
+# classe de settings no ambiente documentado do Compose
 docker compose -f infra/docker-compose.yml \
-               -f infra/docker-compose.override.yml run --rm web pytest
+               -f infra/docker-compose.override.yml \
+               run --rm web pytest core/tests/test_settings_production.py
 
-# stack de staging/produção (imagem runtime + migrations + cron)
-docker compose -f infra/docker-compose.yml --profile cron up -d --build
+# suíte completa com PostgreSQL/Redis reais e settings de teste
+docker compose -f infra/docker-compose.yml \
+               -f infra/docker-compose.override.yml \
+               run --rm -e DJANGO_SETTINGS_MODULE=config.settings.test \
+               -e REDIS_URL=redis://redis:6379/0 web pytest
+
+# smoke runtime descartável: HTTPS, página, estático, IP, cron e persistência
+IMAGE_TAG=local bash infra/scripts/smoke-stack.sh
 ```
 
+Para o smoke runtime, construa a imagem antes com
+`IMAGE_TAG=local docker compose -f infra/docker-compose.yml build web`.
+O script sobe o perfil `cron`, exige todos os healthchecks, executa as três
+rotinas com dados sintéticos e recria os containers preservando volumes.
+
 - `https://localhost/` usa a CA interna do Caddy; aceite o certificado ou use
-  `curl -k`. A porta `8000` fica exposta apenas no override de desenvolvimento.
+  `curl -k`. A porta `8000` é publicada apenas no override e, por padrão, em
+  `127.0.0.1`; use `DOCKER_DEV_BIND=0.0.0.0` somente para acesso pela rede.
 - PostgreSQL e Redis não publicam portas: só existem na rede `back`
   (`internal: true`).
-- Em staging, `DJANGO_ENVIRONMENT=staging` permite simuladores e PostgreSQL
-  interno sem TLS. Em produção use `DJANGO_ENVIRONMENT=production`,
-  `DATABASE_SSL_REQUIRE=True` e segredos reais; o default do código é estrito.
-- O Caddy envia PROXY protocol ao Gunicorn, preservando `REMOTE_ADDR`
-  (SEC-03). Nunca publique a porta do `web` em produção.
+- `DJANGO_ENVIRONMENT=staging` permite simuladores e PostgreSQL interno sem
+  TLS. Isso é adequado à homologação local; **não** torna a stack pronta para
+  produção.
+- O Caddy envia PROXY protocol v1 ao Gunicorn, preservando `REMOTE_ADDR`
+  (SEC-03). O endpoint `/healthz/ip/` só existe com `SMOKE_DIAGNOSTICS=True`
+  em staging e é usado exclusivamente pelo smoke.
 - Jobs: `expirar_pedidos` (15 min), `processar_fiscal` (30 min) e
   `gerar_avisos_comerciais` (08:00), via perfil `cron`.
 
-Detalhes em `docs/specs/fase-3/`.
+### Limites desta entrega
+
+- **Sem CD:** o workflow não faz deploy. Push em `main` executa CI, não sobe
+  staging. O PostgreSQL/Redis do job `tests` são service containers efêmeros
+  do runner, não a VPS nem um banco gerenciado.
+- **Sem staging público:** DNS, VPS e Let's Encrypt público não foram
+  provisionados nem validados.
+- **PostgreSQL interno sem TLS:** o Compose não configura certificados no
+  banco. Produção estrita continua exigindo TLS; trocar apenas
+  `DJANGO_ENVIRONMENT`/`DATABASE_SSL_REQUIRE` não prepara esse banco.
+- **Dois domínios, uma instância:** os blocos do Caddy são aliases do mesmo
+  backend, não isolamento de dados/credenciais.
+- **HSTS:** o Compose local usa `HSTS_MAX_AGE=0`; a política pública
+  (`31536000`) deve ser habilitada somente no ambiente público real.
+- **Reprodutibilidade:** dependências Python são fixadas; tags de imagens base
+  ainda são mutáveis. Pin por digest fica para uma entrega posterior.
+
+Detalhes em `docs/specs/fase-3/` (inclui `correcao-aceite.md`).
 
 ## Variáveis de ambiente
 
@@ -106,12 +139,17 @@ Detalhes em `docs/specs/fase-3/`.
 | `RATELIMIT_WEBHOOK` | não | Limite do webhook (padrão `60/m`) |
 | `REDIS_URL` | sim (produção) | Cache compartilhado com incremento atômico |
 
-## Produção
+## Produção (não provisionada nesta entrega)
 
-- O deploy recomendado usa `infra/docker-compose.yml`: Caddy (TLS
+- O caminho de deploy planejado usa `infra/docker-compose.yml`: Caddy (TLS
   automático) → Gunicorn → PostgreSQL/Redis. O Caddy envia PROXY protocol v1
   ao Gunicorn, que roda com `--proxy-protocol=v1`; assim o IP real do cliente
   chega em `REMOTE_ADDR` (SEC-03). A porta do `web` não deve ser publicada.
+- O PostgreSQL interno do Compose **não tem TLS configurado**. Para produção,
+  provisione Postgres com TLS e use `DJANGO_ENVIRONMENT=production` e
+  `DATABASE_SSL_REQUIRE=True`; apenas trocar variáveis não supre o certificado.
+- Não há CD no workflow. Publicação em VPS, DNS e Let's Encrypt público exigem
+  uma entrega/ambiente separado e não foram executados aqui.
 - `config/settings/production.py` exige `DATABASE_URL` PostgreSQL e força
   `sslmode=require`; não há fallback para SQLite (ADR-001).
 - O rate limiting usa Redis com incremento atômico em produção. `REDIS_URL`
@@ -153,6 +191,7 @@ Detalhes em `docs/specs/fase-3/`.
 - `docs/specs/fase-3/caddy.md`
 - `docs/specs/fase-3/ci-postgres.md`
 - `docs/specs/fase-3/validacao.md`
+- `docs/specs/fase-3/correcao-aceite.md`
 - `docs/specs/fase-2b-spec.md`
 - `docs/specs/fase-2b-remediation.md`
 - `docs/audit/fase-2b-conclusao.md`

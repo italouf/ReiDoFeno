@@ -42,11 +42,22 @@ inalterados.
 ### Job `docker`
 
 1. `docker build --target runtime -f infra/Dockerfile .`
-2. `docker run ... id -u` deve retornar `1000`.
-3. `python manage.py check` com `config.settings.build`.
-4. tamanho da imagem < 500 MB.
-5. `caddy validate` no Caddyfile.
-6. `docker compose config` com base + override.
+2. `docker build --target dev` e importação de pytest/factory/coverage.
+3. `docker run ... id -u` deve retornar `1000`.
+4. `python manage.py check` com `config.settings.build`.
+5. tamanho da imagem < 500 MB.
+6. `caddy validate` nos transportes runtime **e** dev, via `--mount` com
+   `source` existente.
+7. `docker compose config` nas combinações base, base+override, cron,
+   override+cron e base+smoke+cron.
+8. classe de settings no container dev com o ambiente staging do Compose.
+9. suíte completa no container dev com `config.settings.test`, PostgreSQL e
+   Redis reais.
+10. `infra/scripts/smoke-stack.sh`: HTTPS, página, estático, `REMOTE_ADDR`
+    contra IP real dos containers, `X-Forwarded-For` forjado, cron, dados e
+    mídia após recriação.
+11. diagnóstico em `if: failure()` e cleanup `if: always()`, limitado ao
+    projeto `reidofeno`.
 
 ### Jobs existentes
 
@@ -60,17 +71,21 @@ inalterados.
 - [ ] Redis real é usado no rate limiting dos testes.
 - [ ] `makemigrations --check` não detecta mudanças.
 - [ ] Cobertura XML é gerada e enviada.
-- [ ] Build da imagem e `caddy validate` passam no job `docker`.
-- [ ] `docker compose config` aceita base + override sem `.env.docker` real.
+- [ ] Build runtime/dev e `caddy validate` (runtime e dev) passam.
+- [ ] `docker compose config` aceita as combinações documentadas.
+- [ ] Smokes executam de ponta a ponta; presença no YAML não é evidência.
 
 ## Validação local
 
-Sem Docker e sem PostgreSQL nesta máquina, a validação executável foi:
+Sem Docker Engine nesta máquina, a validação executável foi:
 
 ```text
 python -m pytest core/tests/test_infra_contract.py core/tests/test_ci_workflow.py
 python -c "import yaml; yaml.safe_load(open('.github/workflows/ci.yml'))"
 DJANGO_SETTINGS_MODULE=config.settings.test python -c "django.setup(); ..."
+docker-compose -f infra/docker-compose.yml [combinações] config --quiet
 ```
 
-A execução integrada (PostgreSQL/Redis/Docker) acontece no GitHub Actions.
+A execução integrada (PostgreSQL/Redis/Docker/HTTPS) acontece no GitHub
+Actions. Enquanto o SHA corrigido não for enviado e o CI não ficar verde, o
+aceite integrado permanece **pendente**.

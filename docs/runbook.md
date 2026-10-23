@@ -22,7 +22,11 @@
 
 ## 2. Deploy
 
-### Docker Compose + Caddy (Fase 3, recomendado)
+### Docker Compose + Caddy (homologação local; publicação futura)
+
+> **Escopo desta entrega:** a stack e os smokes foram preparados para execução
+> local/CI. Os passos 1–7 descrevem a publicação futura em VPS e **não foram
+> executados** nesta fase. Não há CD, DNS ou HTTPS público validado.
 
 1. Provisionar a VPS com Docker Engine + Compose v2 e liberar 80/443.
 2. Copiar `.env.docker.example` para `.env.docker` e preencher os segredos.
@@ -41,9 +45,36 @@
 7. Preservar os volumes `pgdata`, `caddy_data` e `caddy_config` em backup. A
    recriação de `caddy_data` força nova emissão de certificados.
 
+**Limites que precisam ser resolvidos antes de produção:**
+
+- O PostgreSQL interno do Compose não tem TLS configurado. A produção estrita
+  exige TLS; provisione certificados/Postgres adequado e mantenha
+  `DATABASE_SSL_REQUIRE=True`.
+- `APP_DOMAIN` e `STAGING_DOMAIN` no mesmo Caddy apontam para o mesmo `web`,
+  banco e integrações. São aliases, não ambientes isolados.
+- Não existe etapa de deploy no workflow. Push em `main` executa CI, não CD.
+- O PostgreSQL/Redis do CI são service containers efêmeros do runner; não
+  usam a VPS nem dados reais.
+- O HSTS local usa `HSTS_MAX_AGE=0`; a política pública deve ser habilitada
+  apenas no ambiente público real.
+
 O Caddy preserva `REMOTE_ADDR` via PROXY protocol; não publique a porta 8000
 do serviço `web` em produção. O acesso HTTP é redirecionado para HTTPS e o
 CSP/HSTS ficam no proxy, com defesa em profundidade no Django.
+
+### Smoke descartável de homologação
+
+Com a imagem runtime construída (`IMAGE_TAG=local docker compose -f
+infra/docker-compose.yml build web`) e os exemplos de env copiados:
+
+```bash
+IMAGE_TAG=local bash infra/scripts/smoke-stack.sh
+```
+
+O script sobe Caddy/web/db/redis/cron, exige healthchecks, valida HTTPS,
+página, estático, IP real/`XFF` forjado, executa as rotinas do cron com dados
+sintéticos e recria os containers sem `-v` para provar persistência. Ele limpa
+somente os volumes do projeto `reidofeno` ao terminar com sucesso.
 
 ### VPS (procedimento manual legado)
 
