@@ -23,3 +23,10 @@ claim; resultados antigos/conflitantes ficam em `resultado_externo` com
 `Aviso` e auditoria. A matriz e a política completas estão em
 `docs/audit/fase-2c-reauditoria-l01.md` e
 `docs/specs/fase-2c/l01-autoridade-tentativa.md`.
+
+## L02/L03 — avisos e identidade durável
+
+O follow-up corrige a convivência entre aviso agregado e avisos por evento e
+move a memória de deduplicação para uma identidade persistente, sem alterar
+L01/N01–N03. Ver `docs/audit/fase-2c-reauditoria-l02-l03.md` e
+`docs/specs/fase-2c/l02-l03-avisos-eventos.md`.

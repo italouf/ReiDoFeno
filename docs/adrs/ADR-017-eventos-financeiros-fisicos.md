@@ -85,6 +85,18 @@ Cada fato tem uma competência e um efeito próprios:
 - O contrato completo está em
   `docs/specs/fase-2c/l01-autoridade-tentativa.md`.
 
+## Fechamento L02/L03
+
+- Avisos agregados e avisos por evento têm identidades distintas:
+  `Aviso.evento_chave` vazio identifica o agregado; uma chave estável
+  identifica o evento fiscal.
+- `Aviso.registrar()` não lança `MultipleObjectsReturned` quando existem
+  vários avisos por evento, e avisos antigos são preservados.
+- A identidade de deduplicação de eventos sobrevive à rotação da projeção de
+  20 eventos; a projeção JSON continua limitada, mas a identidade é durável.
+- Eventos legados ainda no JSON ou apenas na auditoria são reconhecidos sem
+  reescrever `LogAuditoria`.
+
 ## Consequências
 
 - Mesmo período e mesmo escopo reconciliam painel, vendedor, produto,

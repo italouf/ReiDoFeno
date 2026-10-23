@@ -1,19 +1,21 @@
 # Validação da correção da auditoria — Fase 2C
 
-Data: 2026-10-22
+Data: 2026-10-23
 Branch: `fase-2c-analytics-fiscal`
 Ambiente local: Windows, Python 3.14.3, Django 5.2.17, SQLite.
 PostgreSQL 15/Redis: **não disponíveis neste ambiente**; CI remoto pendente.
+A CI `39889483085` passou em `409b9f5`, mas não cobre L02/L03.
 
 ## Suíte e cobertura
 
 | Verificação | Resultado |
 |---|---|
-| Suíte SQLite | **649 passed, 22 skipped, 240 subtests** |
-| Cobertura total dos módulos medidos | **86,38%** |
+| Suíte SQLite | **655 passed, 24 skipped, 240 subtests** |
+| Cobertura total dos módulos medidos | **86,39%** |
 | `analytics/services.py` | **95,24%** |
+| `analytics/models.py` | **97,67%** |
 | `sales/services.py` | **84,91%** |
-| `fiscal/services.py` | **93,94%** |
+| `fiscal/services.py` | **93,50%** |
 | `fiscal/views.py` | **89,84%** |
 | `ruff check .` | limpo |
 | `manage.py check` | sem issues |
@@ -21,9 +23,9 @@ PostgreSQL 15/Redis: **não disponíveis neste ambiente**; CI remoto pendente.
 | `manage.py check --deploy` com segredos sintéticos | sem issues |
 | Bandit `-ll` | 0 medium/high |
 | `pip-audit -r requirements.txt` | 0 vulnerabilidades conhecidas |
-| Gate histórico `0001 → HEAD` | aprovado em SQLite descartável, incluindo `fiscal/0006` |
+| Gate histórico `0001 → HEAD` | aprovado em SQLite descartável, incluindo `fiscal/0006` e `analytics/0004` |
 
-Os 22 skips são os testes marcados `postgres`/Redis já conhecidos e os testes
+Os 24 skips são os testes marcados `postgres`/Redis já conhecidos e os testes
 que exigem backend real. Não foram apresentados como aprovados.
 
 ## Fechamento N01–N03
@@ -55,6 +57,26 @@ que exigem backend real. Não foram apresentados como aprovados.
   quatro interleavings marcados em `FiscalConcurrencyTests`.
 - Contrato e matriz: `docs/specs/fase-2c/l01-autoridade-tentativa.md` e
   `docs/audit/fase-2c-reauditoria-l01.md`.
+
+## Correção L02/L03 — avisos e identidade de eventos
+
+- **L02:** `Aviso.evento_chave` separa aviso agregado (`""`) de aviso por
+  evento (chave única). `Aviso.registrar()` busca somente agregados e não
+  lança `MultipleObjectsReturned` quando há vários avisos da nota.
+- **L02:** migração `analytics/0004_aviso_evento_chave.py` preserva avisos
+  antigos, atribuindo `legado:<pk>` aos avisos por evento do SHA anterior, e
+  cria constraint condicional de unicidade.
+- **L03:** a chave estável
+  `fiscal.resultado_externo:<nota>:<tentativa>:<tipo>` é verificada antes de
+  criar evento; a projeção JSON continua limitada a 20, mas a memória de
+  deduplicação é durável.
+- **L03:** eventos legados ainda no JSON ou apenas em `LogAuditoria` são
+  reconhecidos para não duplicar efeitos; o histórico completo não é
+  reescrito nem apagado.
+- Testes: 6 cenários SQLite em `L02L03AvisosEventosTests`; 2 testes
+  PostgreSQL marcados (retry A/B/C e replay concorrente).
+- Contrato: `docs/specs/fase-2c/l02-l03-avisos-eventos.md`;
+  rastreabilidade: `docs/audit/fase-2c-reauditoria-l02-l03.md`.
 
 ## Reauditoria R01-R05
 

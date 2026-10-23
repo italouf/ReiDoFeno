@@ -1,5 +1,26 @@
 # Changelog
 
+## [Fase 2C — correção L02/L03 de avisos e eventos] — 2026-10-23
+
+- **L02:** `Aviso.evento_chave` separa aviso agregado (`""`) de aviso por
+  evento (chave durável). `Aviso.registrar()` busca somente agregados e não
+  lança `MultipleObjectsReturned` quando há vários avisos da mesma nota.
+- **L02 compatibilidade:** `analytics/0004_aviso_evento_chave.py` preserva
+  avisos antigos, converte eventos do SHA anterior para `legado:<pk>` e cria
+  constraint condicional de unicidade.
+- **L03:** a identidade `fiscal.resultado_externo:<nota>:<tentativa>:<tipo>`
+  é verificada antes de criar evento; a projeção JSON mantém 20 eventos, mas
+  a deduplicação sobrevive à rotação, releitura e nova transação.
+- **L03 legado/concorrência:** eventos apenas em auditoria são reconhecidos;
+  replays concorrentes usam lock da Nota e chave única. O histórico completo
+  permanece em `LogAuditoria`.
+- **Validação local:** SQLite **655 passed, 24 skipped, 240 subtests**;
+  cobertura total **86,39%**, `fiscal/services.py` **93,50%**,
+  `analytics/models.py` **97,67%**; Node R05 2/2; Ruff, `check`,
+  `makemigrations --check`, `check --deploy`, Bandit (0 medium/high) e
+  `pip-audit` (0) limpos; gate histórico `0001 → HEAD` aprovado em SQLite.
+  PostgreSQL 15 + Redis, CI no novo SHA e aceite humano permanecem pendentes.
+
 ## [Fase 2C — correção L01 da autoridade fiscal] — 2026-10-22
 
 - **L01-A/B/C/D:** cada tentativa fiscal recebe `tentativa_atual` (UUID) e a
