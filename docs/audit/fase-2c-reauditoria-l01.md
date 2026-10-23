@@ -56,7 +56,7 @@ após autorização de push; o aceite humano (Gate H) permanece pendente.
 A consolidação final desta rodada está registrada em
 `docs/audit/fase-2c-correcao-validacao.md`. Resumo:
 
-- SQLite local: **648 passed, 22 skipped, 240 subtests**; cobertura total
+- SQLite local: **649 passed, 22 skipped, 240 subtests**; cobertura total
   **86,38%** (`fiscal/services.py` 93,94%; `fiscal/views.py` 89,84%).
 - PostgreSQL: testes marcados em `fiscal/tests/test_concurrency_postgres.py`;
   não há PostgreSQL/Redis neste ambiente, portanto não foram apresentados

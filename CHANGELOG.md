@@ -17,7 +17,7 @@
   terminalidade; retry ordinário de cancelada continua bloqueado.
 - **Schema:** `fiscal/0006_tentativa_emissao.py` adiciona os campos de forma
   aditiva; o gate histórico `0001 → HEAD` inclui a nova migração.
-- **Validação local:** SQLite **648 passed, 22 skipped, 240 subtests**;
+- **Validação local:** SQLite **649 passed, 22 skipped, 240 subtests**;
   cobertura total **86,38%**, `fiscal/services.py` **93,94%**,
   `fiscal/views.py` **89,84%**; Node R05 2/2; Ruff, `check`,
   `makemigrations --check`, `check --deploy`, Bandit (0 medium/high) e

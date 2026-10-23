@@ -33,11 +33,11 @@ reproduziu quatro falhas de finalização fiscal:
 
 ### Testes
 
-- 12 cenários L01 em `fiscal/tests/test_auditoria_fase2c.py`.
+- 13 cenários L01 em `fiscal/tests/test_auditoria_fase2c.py`.
 - Quatro interleavings PostgreSQL em
   `fiscal/tests/test_concurrency_postgres.py`.
 - Controle de retry ativo e N01–N03/R01–R05 preservados.
-- Local: SQLite 648 passed, 22 skipped, 240 subtests; cobertura total 86,38%;
+- Local: SQLite 649 passed, 22 skipped, 240 subtests; cobertura total 86,38%;
   `fiscal/services.py` 93,94%; Node 2/2; Ruff, `check`, `check --deploy`,
   `makemigrations --check`, Bandit e `pip-audit` limpos.
 

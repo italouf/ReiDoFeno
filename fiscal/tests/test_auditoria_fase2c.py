@@ -773,6 +773,26 @@ class L01AutoridadeTentativaTests(BaseFiscalAuditoriaTests):
             ).exists()
         )
 
+    def test_sucesso_antigo_nao_desfaz_sucesso_de_b(self):
+        nota = self._preparar_cenario()
+        cliente = self._TentativaNovaComSucesso(
+            self, resultado_antigo="sucesso"
+        )
+
+        enviar_para_emissao(self.pedido, client=cliente)
+
+        nota.refresh_from_db()
+        self.assertEqual(nota.status, NotaFiscal.Status.AUTORIZADA)
+        self.assertEqual(nota.numero, "API-B")
+        self.assertEqual(nota.chave_acesso, self.CHAVE_API_B)
+        self.assertEqual(
+            nota.resultado_externo["eventos"][-1]["tipo"], "sucesso"
+        )
+        self.assertEqual(
+            nota.resultado_externo["eventos"][-1]["resultado"]["numero"],
+            "API-A",
+        )
+
     def test_sucesso_antigo_apos_cancelamento_fica_como_evidencia(self):
         nota = self._preparar_cenario()
         cliente = self._ManualDepoisDeExpirar(

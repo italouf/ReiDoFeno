@@ -9,7 +9,7 @@ PostgreSQL 15/Redis: **não disponíveis neste ambiente**; CI remoto pendente.
 
 | Verificação | Resultado |
 |---|---|
-| Suíte SQLite | **648 passed, 22 skipped, 240 subtests** |
+| Suíte SQLite | **649 passed, 22 skipped, 240 subtests** |
 | Cobertura total dos módulos medidos | **86,38%** |
 | `analytics/services.py` | **95,24%** |
 | `sales/services.py` | **84,91%** |
@@ -51,7 +51,7 @@ que exigem backend real. Não foram apresentados como aprovados.
   `fiscal.resultado_externo_obsoleto`; repetição do mesmo token/tipo é
   idempotente.
 - `fiscal/0006_tentativa_emissao.py` adiciona os campos de forma aditiva.
-- Testes SQLite: 12 cenários em `L01AutoridadeTentativaTests`; PostgreSQL:
+- Testes SQLite: 13 cenários em `L01AutoridadeTentativaTests`; PostgreSQL:
   quatro interleavings marcados em `FiscalConcurrencyTests`.
 - Contrato e matriz: `docs/specs/fase-2c/l01-autoridade-tentativa.md` e
   `docs/audit/fase-2c-reauditoria-l01.md`.
