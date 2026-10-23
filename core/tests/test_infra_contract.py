@@ -145,6 +145,50 @@ class ComposeTests(SimpleTestCase):
         self.assertIn("SMOKE_DIAGNOSTICS", smoke)
         self.assertNotIn("SENTRY_DSN", smoke)
 
+    def test_smoke_tem_projeto_e_ambiente_proprios(self):
+        smoke = yaml.safe_load(
+            (RAIZ / "infra" / "docker-compose.smoke.yml").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(smoke["name"], "reidofeno_smoke")
+        env_smoke = (
+            RAIZ / "infra" / ".env.smoke.example"
+        ).read_text(encoding="utf-8")
+        self.assertIn("APP_ENV_FILE=.env.docker.smoke", env_smoke)
+        self.assertIn("DB_PASSWORD=smoke-only", env_smoke)
+        self.assertIn("CADDY_HTTP_PORT=8080", env_smoke)
+        self.assertIn("CADDY_HTTPS_PORT=8443", env_smoke)
+        env_django = (
+            RAIZ / ".env.docker.smoke.example"
+        ).read_text(encoding="utf-8")
+        self.assertIn("DJANGO_ENVIRONMENT=staging", env_django)
+        self.assertIn("MERCADO_PAGO_FAKE=True", env_django)
+        self.assertIn("BLING_FAKE=True", env_django)
+
+    def test_base_permite_env_e_portas_do_smoke(self):
+        self.assertIn(
+            "../${APP_ENV_FILE:-.env.docker}", self.compose
+        )
+        self.assertIn(
+            "${CADDY_HTTP_PORT:-80}:80", self.compose
+        )
+        self.assertIn(
+            "${CADDY_HTTPS_PORT:-443}:443", self.compose
+        )
+
+    def test_scripts_de_smoke_nao_reutilizam_projeto_ou_rede_de_dev(self):
+        script = (
+            RAIZ / "infra" / "scripts" / "smoke-stack.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn("--project-name", script)
+        self.assertIn("reidofeno_smoke", script)
+        self.assertIn("--verbosity 0", script)
+        self.assertNotIn("reidofeno_front", script)
+        self.assertIn('case "$PROJETO_SMOKE" in', script)
+        self.assertIn("reidofeno|", script)
+        self.assertIn("nome_rede_front", script)
+
 
 class CaddyTests(SimpleTestCase):
     @classmethod

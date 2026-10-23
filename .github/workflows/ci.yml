@@ -129,8 +129,12 @@ jobs:
         run: |
           cp .env.docker.example .env.docker
           cp infra/.env.example infra/.env
-      - name: Validar sintaxe do script de smoke
-        run: bash -n infra/scripts/smoke-stack.sh
+          cp .env.docker.smoke.example .env.docker.smoke
+          cp infra/.env.smoke.example infra/.env.smoke
+      - name: Validar sintaxe dos scripts de smoke
+        run: |
+          bash -n infra/scripts/smoke-stack.sh
+          bash -n infra/scripts/test-smoke-isolation.sh
       - name: Build da imagem runtime
         env:
           DOCKER_BUILDKIT: "1"
@@ -176,24 +180,31 @@ jobs:
             --config /etc/caddy/Caddyfile --adapter caddyfile
       - name: Validar modelos Compose
         run: |
-          docker compose -f infra/docker-compose.yml config --quiet
-          docker compose -f infra/docker-compose.yml \
+          docker compose --project-name reidofeno \
+            -f infra/docker-compose.yml config --quiet
+          docker compose --project-name reidofeno \
+            -f infra/docker-compose.yml \
             -f infra/docker-compose.override.yml config --quiet
-          docker compose -f infra/docker-compose.yml \
-            --profile cron config --quiet
-          docker compose -f infra/docker-compose.yml \
+          docker compose --project-name reidofeno \
+            -f infra/docker-compose.yml --profile cron config --quiet
+          docker compose --project-name reidofeno \
+            -f infra/docker-compose.yml \
             -f infra/docker-compose.override.yml \
             --profile cron config --quiet
-          docker compose -f infra/docker-compose.yml \
+          docker compose --project-name reidofeno_smoke \
+            --env-file infra/.env.smoke \
+            -f infra/docker-compose.yml \
             -f infra/docker-compose.smoke.yml \
             --profile cron config --quiet
       - name: Settings no container dev (ambiente staging)
         env:
           IMAGE_TAG: dev-ci
         run: |
-          docker compose -f infra/docker-compose.yml \
+          docker compose --project-name reidofeno \
+            -f infra/docker-compose.yml \
             -f infra/docker-compose.override.yml up -d db redis
-          docker compose -f infra/docker-compose.yml \
+          docker compose --project-name reidofeno \
+            -f infra/docker-compose.yml \
             -f infra/docker-compose.override.yml \
             run --rm web pytest -p no:cacheprovider \
             core/tests/test_settings_production.py -q
@@ -201,7 +212,8 @@ jobs:
         env:
           IMAGE_TAG: dev-ci
         run: |
-          docker compose -f infra/docker-compose.yml \
+          docker compose --project-name reidofeno \
+            -f infra/docker-compose.yml \
             -f infra/docker-compose.override.yml \
             run --rm \
             -e DJANGO_SETTINGS_MODULE=config.settings.test \
@@ -209,33 +221,41 @@ jobs:
             web pytest -p no:cacheprovider
       - name: Derrubar stack dev
         run: |
-          docker compose -f infra/docker-compose.yml \
+          docker compose --project-name reidofeno \
+            -f infra/docker-compose.yml \
             -f infra/docker-compose.override.yml \
             down -v --remove-orphans
-      - name: Smoke runtime (HTTPS, SEC-03, cron, persistência)
+      - name: Smoke runtime + isolamento (HTTPS, SEC-03, cron, persistência)
         env:
           IMAGE_TAG: ci
-        run: bash infra/scripts/smoke-stack.sh
+        run: bash infra/scripts/test-smoke-isolation.sh
       - name: Diagnóstico dos smokes
         if: failure()
         run: |
-          docker compose -f infra/docker-compose.yml \
-            -f infra/docker-compose.smoke.yml --profile cron ps || true
-          docker compose -f infra/docker-compose.yml \
-            -f infra/docker-compose.smoke.yml --profile cron \
-            logs --no-color --tail=200 || true
-          docker compose -f infra/docker-compose.yml \
+          docker compose --project-name reidofeno_smoke \
+            --env-file infra/.env.smoke \
+            -f infra/docker-compose.yml -f infra/docker-compose.smoke.yml \
+            --profile cron ps || true
+          docker compose --project-name reidofeno_smoke \
+            --env-file infra/.env.smoke \
+            -f infra/docker-compose.yml -f infra/docker-compose.smoke.yml \
+            --profile cron logs --no-color --tail=200 || true
+          docker compose --project-name reidofeno \
+            -f infra/docker-compose.yml \
             -f infra/docker-compose.override.yml ps || true
-          docker compose -f infra/docker-compose.yml \
+          docker compose --project-name reidofeno \
+            -f infra/docker-compose.yml \
             -f infra/docker-compose.override.yml \
             logs --no-color --tail=200 || true
       - name: Cleanup descartável
         if: always()
         run: |
-          docker compose -f infra/docker-compose.yml \
-            -f infra/docker-compose.smoke.yml --profile cron \
-            down -v --remove-orphans || true
-          docker compose -f infra/docker-compose.yml \
+          docker compose --project-name reidofeno_smoke \
+            --env-file infra/.env.smoke \
+            -f infra/docker-compose.yml -f infra/docker-compose.smoke.yml \
+            --profile cron down -v --remove-orphans || true
+          docker compose --project-name reidofeno \
+            -f infra/docker-compose.yml \
             -f infra/docker-compose.override.yml --profile cron \
             down -v --remove-orphans || true
 

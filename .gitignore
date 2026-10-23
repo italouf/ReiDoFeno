@@ -1,6 +1,8 @@
 # Ambiente
 .env
 .env.docker
+.env.docker.smoke
+.env.smoke
 *.env
 .venv/
 

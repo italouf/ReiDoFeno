@@ -26,3 +26,5 @@ class WorkflowCIBranchTests(SimpleTestCase):
         self.assertIn("caddy validate", texto)
         self.assertIn("infra/scripts/smoke-stack.sh", texto)
         self.assertIn("infra/docker-compose.smoke.yml", texto)
+        self.assertIn("test-smoke-isolation.sh", texto)
+        self.assertIn("--project-name reidofeno_smoke", texto)
