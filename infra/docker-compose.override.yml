@@ -15,7 +15,7 @@ services:
       - ..:/app
       - media:/app/media
     ports:
-      - "8000:8000"
+      - "${DOCKER_DEV_BIND:-127.0.0.1}:8000:8000"
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8000/healthz/"]
       interval: 30s

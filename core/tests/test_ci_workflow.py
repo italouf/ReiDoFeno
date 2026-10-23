@@ -24,3 +24,5 @@ class WorkflowCIBranchTests(SimpleTestCase):
         self.assertIn("docker compose", texto)
         self.assertIn("makemigrations --check --dry-run", texto)
         self.assertIn("caddy validate", texto)
+        self.assertIn("infra/scripts/smoke-stack.sh", texto)
+        self.assertIn("infra/docker-compose.smoke.yml", texto)

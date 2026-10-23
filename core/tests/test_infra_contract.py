@@ -6,6 +6,7 @@ protegem invariantes que não podem regredir silenciosamente no repositório.
 import re
 from pathlib import Path
 
+import yaml
 from django.test import SimpleTestCase
 
 RAIZ = Path(__file__).resolve().parents[2]
@@ -127,12 +128,22 @@ class ComposeTests(SimpleTestCase):
         self.assertIn("target: dev", self.override)
         self.assertIn("config.settings.development", self.override)
         self.assertIn("..:/app", self.override)
-        self.assertIn('"8000:8000"', self.override)
+        self.assertIn(
+            "${DOCKER_DEV_BIND:-127.0.0.1}:8000:8000", self.override
+        )
+        self.assertNotIn('"0.0.0.0:8000:8000"', self.override)
 
     def test_segredos_vem_de_variaveis(self):
         self.assertIn("${DB_PASSWORD:-reidofeno}", self.compose)
         self.assertNotIn("senha_segura", self.compose)
         self.assertNotIn("DJANGO_SECRET_KEY: ", self.compose)
+
+    def test_smoke_override_limita_diagnostico_ao_web(self):
+        smoke = (
+            RAIZ / "infra" / "docker-compose.smoke.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn("SMOKE_DIAGNOSTICS", smoke)
+        self.assertNotIn("SENTRY_DSN", smoke)
 
 
 class CaddyTests(SimpleTestCase):
@@ -183,6 +194,28 @@ class CaddyTests(SimpleTestCase):
     def test_sem_tls_internal_global(self):
         # tls internal forçado impediria ACME em produção.
         self.assertNotIn("tls internal", self.caddy)
+
+
+class WorkflowCaddyTests(SimpleTestCase):
+    def test_mounts_do_caddy_resolvem_arquivos_reais(self):
+        workflow = yaml.safe_load(
+            (RAIZ / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        )
+        passos = workflow["jobs"]["docker"]["steps"]
+        passo = next(
+            passo
+            for passo in passos
+            if passo.get("name") == "Validar Caddyfile (runtime e dev)"
+        )
+        run = passo["run"]
+        self.assertIn("--mount", run)
+        self.assertNotIn("-v ", run)
+        fontes = re.findall(r"source=\$PWD/([^,\"]+)", run)
+        self.assertTrue(fontes)
+        for relativo in fontes:
+            self.assertTrue((RAIZ / relativo).is_file(), relativo)
+        self.assertIn("infra/transport.caddy", fontes)
+        self.assertIn("infra/transport-dev.caddy", fontes)
 
 
 class EnvExampleTests(SimpleTestCase):

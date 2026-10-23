@@ -240,6 +240,10 @@ LOGGING = {
 
 RECOMPRA_DIAS = int(os.environ.get("RECOMPRA_DIAS", "30"))
 
+# Diagnóstico exclusivo de smoke de staging (SEC-03). Nunca habilitar em
+# produção; o módulo de produção força False fora de staging.
+SMOKE_DIAGNOSTICS = False
+
 CONTENT_SECURITY_POLICY = os.environ.get(
     "CONTENT_SECURITY_POLICY",
     "default-src 'self'; style-src 'self' 'unsafe-inline';"

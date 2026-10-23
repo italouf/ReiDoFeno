@@ -16,6 +16,10 @@ DEBUG = False
 # Staging roda a mesma imagem/settings, mas permite integrações simuladas e
 # PostgreSQL interno sem TLS. O default continua sendo produção estrita.
 STAGING = os.environ.get("DJANGO_ENVIRONMENT", "production") == "staging"
+SMOKE_DIAGNOSTICS = (
+    STAGING
+    and os.environ.get("SMOKE_DIAGNOSTICS", "False").lower() == "true"
+)
 
 SECRET_KEY = os.environ["DJANGO_SECRET_KEY"]
 

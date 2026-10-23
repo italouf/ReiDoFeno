@@ -74,8 +74,12 @@ from core.models import Unidade
 from catalog.models import Categoria, Produto
 
 Unidade.objects.get_or_create(
-    nome="SMOKE-PERSIST",
+    nome="Feira de Santana",
     defaults={"cidade": "Feira de Santana", "uf": "BA"},
+)
+Unidade.objects.get_or_create(
+    nome="Iaçu",
+    defaults={"cidade": "Iaçu", "uf": "BA"},
 )
 categoria, _ = Categoria.objects.get_or_create(nome="SMOKE-CATEGORIA")
 Produto.objects.get_or_create(

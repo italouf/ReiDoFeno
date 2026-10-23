@@ -1,0 +1,6 @@
+# Override exclusivo do smoke descartável do CI.
+# Não usar em produção: expõe /healthz/ip/ com o REMOTE_ADDR.
+services:
+  web:
+    environment:
+      SMOKE_DIAGNOSTICS: "true"
