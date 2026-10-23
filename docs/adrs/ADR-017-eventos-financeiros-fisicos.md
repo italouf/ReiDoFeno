@@ -52,6 +52,20 @@ Cada fato tem uma competência e um efeito próprios:
 - A altura lógica do canvas é independente do backing store; DPR 2 não
   acumula escala em resizes.
 
+## Fechamento da reauditoria N01–N03
+
+- Receita financeira e receita de produtos podem ficar em conciliação,
+  separadas; o CMV histórico comprovado não é apagado por incerteza sobre o
+  estorno. CMV só reverte por retorno físico.
+- A integração fiscal usa duas fases: claim/lease curto, chamada externa
+  fora do lock, aplicação com releitura. Retry concorrente não duplica a
+  chamada externa.
+- Autorização externa tardia após cancelamento é preservada com `Aviso` e
+  auditoria; não reabre o pedido, não move estoque e não repete estorno.
+- Nota cancelada é terminal para o retry ordinário e para a fila.
+- O teste concorrente R01 usa `TransactionTestCase` com `setUp`, threads
+  iniciadas uma única vez e eventos liberados em falha.
+
 ## Consequências
 
 - Mesmo período e mesmo escopo reconciliam painel, vendedor, produto,

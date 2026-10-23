@@ -1,5 +1,24 @@
 # Changelog
 
+## [Fase 2C — fechamento N01–N03] — 2026-10-22
+
+- **N01:** teste concorrente R01 corrigido para `TransactionTestCase`, com
+  `setUp` por teste, login/erros dentro das threads, start único e liberação
+  de eventos/conexões em falha.
+- **N02:** receita financeira/produtos e CMV passam a ter populações
+  distintas; pagamento inconclusivo fica em `receita_em_conciliacao` sem
+  apagar CMV comprovado. A reversão de CMV continua dependendo de retorno
+  físico.
+- **N03:** integração fiscal em duas fases com claim/lease, sem lock durante
+  a chamada externa; autorização tardia após cancelamento preserva o fato
+  externo com aviso/auditoria, e nota cancelada não é reautorizada pela
+  integração nem pela fila.
+- **Validação local:** SQLite 636 passed/18 skipped/240 subtests; cobertura
+  `analytics/services.py` 95,24%, `sales/services.py` 84,91%,
+  `fiscal/services.py` 89,52%; Node test R05 2/2; gate histórico
+  0001→HEAD aprovado. PostgreSQL 15/Redis, N01/N03 concorrentes e aceite
+  humano permanecem pendentes.
+
 ## [Fase 2C — reauditoria R01–R05] — 2026-10-22
 
 - **R01:** registro manual de saída relê e trava o Pedido antes da primeira
@@ -16,11 +35,12 @@
   `receita_em_conciliacao`, sem frete negativo inventado.
 - **R05:** canvas usa `data-logical-height` estável; DPR 2 não acumula altura
   em resizes sucessivos.
-- **Validação local:** SQLite 632 passed/18 skipped/240 subtests; cobertura
-  `analytics/services.py` 94,95%, `sales/services.py` 84,91%,
-  `fiscal/services.py` 88,20%; Node test R05 2/2; gate histórico
-  0001→HEAD aprovado. PostgreSQL 15/Redis e R01/R02 concorrentes ficam
-  pendentes de CI no novo SHA; aceite humano pendente.
+- **Validação local daquela rodada:** SQLite 632 passed/18 skipped/240
+  subtests; cobertura `analytics/services.py` 94,95%,
+  `sales/services.py` 84,91%, `fiscal/services.py` 88,20%; Node test R05
+  2/2; gate histórico 0001→HEAD aprovado. PostgreSQL 15/Redis e R01/R02
+  concorrentes ficaram pendentes de CI no SHA seguinte; aceite humano
+  pendente.
 
 ## [Fase 2C — correção da auditoria A01–A09] — 2026-10-22
 

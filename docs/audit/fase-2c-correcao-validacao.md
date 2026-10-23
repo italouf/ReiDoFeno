@@ -9,11 +9,11 @@ PostgreSQL 15/Redis: **não disponíveis neste ambiente**; CI remoto pendente.
 
 | Verificação | Resultado |
 |---|---|
-| Suíte SQLite | **632 passed, 18 skipped, 240 subtests** |
-| Cobertura total dos módulos medidos | **86,57%** |
-| `analytics/services.py` | **94,95%** |
+| Suíte SQLite | **636 passed, 18 skipped, 240 subtests** |
+| Cobertura total dos módulos medidos | **86,90%** |
+| `analytics/services.py` | **95,24%** |
 | `sales/services.py` | **84,91%** |
-| `fiscal/services.py` | **88,20%** |
+| `fiscal/services.py` | **89,52%** |
 | `ruff check .` | limpo |
 | `manage.py check` | sem issues |
 | `manage.py makemigrations --check --dry-run` | no changes |
@@ -25,7 +25,18 @@ PostgreSQL 15/Redis: **não disponíveis neste ambiente**; CI remoto pendente.
 Os 16 skips são os testes marcados `postgres`/Redis já conhecidos e os testes
 que exigem backend real. Não foram apresentados como aprovados.
 
-## Reauditoria R01–R05
+## Fechamento N01–N03
+
+- N01: teste R01 passou a usar `setUp` de `TransactionTestCase`, threads
+  iniciadas uma única vez, login/erros no `try` e eventos liberados em falha.
+- N02: população financeira separada da população de CMV; teste com checkout
+  público, baixa física e pagamento inconclusivo preserva CMV 160, receita 0 e
+  frete 0, com valor em conciliação.
+- N03: integração fiscal em duas fases com claim/lease; autorização tardia
+  gera aviso/auditoria; nota cancelada não é reautorizada; retry concorrente
+  não chama o provedor.
+
+## Reauditoria R01-R05
 
 - R01: lock `Pedido → NotaFiscal`, releitura e revalidação; teste PG
   concorrente marcado, teste sequencial SQLite.
