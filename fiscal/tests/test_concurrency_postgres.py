@@ -1,6 +1,7 @@
 """R01/R02: concorrência fiscal real em PostgreSQL."""
 import threading
 import unittest
+from datetime import timedelta
 from decimal import Decimal
 from unittest import mock
 
@@ -13,8 +14,10 @@ from django.urls import reverse
 from django.utils import timezone
 
 from accounts.models import Usuario
+from analytics.models import Aviso
+from fiscal.client import ErroFiscal
 from fiscal.models import NotaFiscal
-from fiscal.services import pedido_elegivel
+from fiscal.services import enviar_para_emissao, pedido_elegivel
 from sales.factories import PagamentoFactory, PedidoFactory
 from sales.models import Pagamento, Pedido
 from sales.services import cancelar_pedido_padrao
@@ -183,4 +186,193 @@ class FiscalConcurrencyTests(TransactionTestCase):
         self.assertEqual(
             Pedido.objects.get(pk=pedido_id).status,
             Pedido.Status.CANCELADO,
+        )
+
+    CHAVE_MANUAL_L01 = "29260811111111111111111111111111111111111111"
+    CHAVE_API_L01 = "29260822222222222222222222222222222222222222"
+    CHAVE_API_B_L01 = "29260833333333333333333333333333333333333333"
+
+    def _nota_em_erro(self, pedido):
+        return NotaFiscal.objects.create(
+            pedido=pedido,
+            tipo=NotaFiscal.Tipo.SAIDA,
+            status=NotaFiscal.Status.ERRO,
+            cfop="5.102",
+        )
+
+    def _post_manual(self, pedido):
+        return self.client.post(
+            reverse("fiscal:nota_manual", args=[pedido.pk]),
+            {
+                "numero": "MANUAL",
+                "chave_acesso": self.CHAVE_MANUAL_L01,
+                "link_documento": "https://exemplo.com/manual.pdf",
+            },
+        )
+
+    def _iniciar_emissao_pausada(self, pedido, *, erro):
+        entrou = threading.Event()
+        liberar = threading.Event()
+        resultados = []
+        erros = []
+        chave_api = self.CHAVE_API_L01
+
+        class ClientePausado:
+            def criar_nfe(self, pedido_arg):
+                entrou.set()
+                if not liberar.wait(timeout=10):
+                    raise AssertionError("emissão pausada não foi liberada")
+                if erro:
+                    raise ErroFiscal("falha da tentativa antiga")
+                return {
+                    "numero": "API-A",
+                    "chave": chave_api,
+                    "link": "https://exemplo.com/api-a",
+                }
+
+        def executar():
+            close_old_connections()
+            try:
+                resultados.append(
+                    enviar_para_emissao(
+                        Pedido.objects.get(pk=pedido.pk),
+                        client=ClientePausado(),
+                    )
+                )
+            except Exception as exc:  # pragma: no cover - diagnóstico
+                erros.append(exc)
+            finally:
+                close_old_connections()
+
+        thread = threading.Thread(target=executar)
+        thread.start()
+        if not entrou.wait(timeout=10):
+            liberar.set()
+            thread.join(timeout=10)
+            self.fail(f"emissão não entrou no cliente simulado: {erros}")
+        return {
+            "thread": thread,
+            "liberar": liberar,
+            "resultados": resultados,
+            "erros": erros,
+        }
+
+    def test_l01_manual_bloqueado_durante_lease_ativo_postgres(self):
+        pedido = self._pedido()
+        nota = self._nota_em_erro(pedido)
+        self.client.force_login(self.gestor)
+        contexto = self._iniciar_emissao_pausada(pedido, erro=False)
+        try:
+            resposta = self._post_manual(pedido)
+            self.assertEqual(resposta.status_code, 200)
+            self.assertContains(resposta, "emissão automática em andamento")
+            nota.refresh_from_db()
+            self.assertEqual(nota.status, NotaFiscal.Status.PENDENTE)
+            self.assertIsNotNone(nota.tentativa_atual)
+        finally:
+            contexto["liberar"].set()
+            self._juntar([contexto["thread"]])
+
+        self.assertFalse(contexto["erros"], contexto["erros"])
+        nota.refresh_from_db()
+        self.assertEqual(nota.status, NotaFiscal.Status.AUTORIZADA)
+        self.assertEqual(nota.numero, "API-A")
+        self.assertEqual(nota.chave_acesso, self.CHAVE_API_L01)
+        self.assertEqual(nota.origem, NotaFiscal.Origem.API)
+
+    def test_l01_erro_antigo_nao_rebaixa_manual_postgres(self):
+        pedido = self._pedido()
+        nota = self._nota_em_erro(pedido)
+        self.client.force_login(self.gestor)
+        contexto = self._iniciar_emissao_pausada(pedido, erro=True)
+        try:
+            NotaFiscal.objects.filter(pk=nota.pk).update(
+                processando_desde=timezone.now() - timedelta(minutes=3)
+            )
+            resposta = self._post_manual(pedido)
+            self.assertEqual(resposta.status_code, 302)
+        finally:
+            contexto["liberar"].set()
+            self._juntar([contexto["thread"]])
+
+        self.assertFalse(contexto["erros"], contexto["erros"])
+        nota.refresh_from_db()
+        self.assertEqual(nota.status, NotaFiscal.Status.AUTORIZADA)
+        self.assertEqual(nota.numero, "MANUAL")
+        self.assertEqual(nota.chave_acesso, self.CHAVE_MANUAL_L01)
+        self.assertEqual(nota.origem, NotaFiscal.Origem.MANUAL)
+        self.assertEqual(
+            nota.resultado_externo["eventos"][-1]["tipo"], "erro"
+        )
+        self.assertTrue(
+            Aviso.objects.filter(
+                tipo=Aviso.Tipo.FISCAL_ERRO,
+                objeto_id=str(nota.pk),
+            ).exists()
+        )
+
+    def test_l01_sucesso_antigo_nao_substitui_manual_postgres(self):
+        pedido = self._pedido()
+        nota = self._nota_em_erro(pedido)
+        self.client.force_login(self.gestor)
+        contexto = self._iniciar_emissao_pausada(pedido, erro=False)
+        try:
+            NotaFiscal.objects.filter(pk=nota.pk).update(
+                processando_desde=timezone.now() - timedelta(minutes=3)
+            )
+            resposta = self._post_manual(pedido)
+            self.assertEqual(resposta.status_code, 302)
+        finally:
+            contexto["liberar"].set()
+            self._juntar([contexto["thread"]])
+
+        self.assertFalse(contexto["erros"], contexto["erros"])
+        nota.refresh_from_db()
+        self.assertEqual(nota.status, NotaFiscal.Status.AUTORIZADA)
+        self.assertEqual(nota.numero, "MANUAL")
+        self.assertEqual(nota.chave_acesso, self.CHAVE_MANUAL_L01)
+        self.assertEqual(nota.origem, NotaFiscal.Origem.MANUAL)
+        self.assertEqual(
+            nota.resultado_externo["eventos"][-1]["tipo"], "sucesso"
+        )
+        self.assertEqual(
+            nota.resultado_externo["eventos"][-1]["resultado"]["numero"],
+            "API-A",
+        )
+
+    def test_l01_erro_antigo_nao_desfaz_sucesso_de_b_postgres(self):
+        pedido = self._pedido()
+        nota = self._nota_em_erro(pedido)
+        contexto = self._iniciar_emissao_pausada(pedido, erro=True)
+        try:
+            NotaFiscal.objects.filter(pk=nota.pk).update(
+                processando_desde=timezone.now() - timedelta(minutes=3)
+            )
+            chave_b = self.CHAVE_API_B_L01
+
+            class ClienteB:
+                def criar_nfe(self, pedido_b):
+                    return {
+                        "numero": "API-B",
+                        "chave": chave_b,
+                        "link": "https://exemplo.com/api-b",
+                    }
+
+            enviar_para_emissao(
+                Pedido.objects.get(pk=pedido.pk), client=ClienteB()
+            )
+            nota.refresh_from_db()
+            self.assertEqual(nota.status, NotaFiscal.Status.AUTORIZADA)
+            self.assertEqual(nota.numero, "API-B")
+        finally:
+            contexto["liberar"].set()
+            self._juntar([contexto["thread"]])
+
+        self.assertFalse(contexto["erros"], contexto["erros"])
+        nota.refresh_from_db()
+        self.assertEqual(nota.status, NotaFiscal.Status.AUTORIZADA)
+        self.assertEqual(nota.numero, "API-B")
+        self.assertEqual(nota.chave_acesso, self.CHAVE_API_B_L01)
+        self.assertEqual(
+            nota.resultado_externo["eventos"][-1]["tipo"], "erro"
         )

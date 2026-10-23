@@ -1,5 +1,6 @@
 """Serviço fiscal: elegibilidade, envio ao ERP e reprocessamento."""
 import logging
+import uuid
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -66,13 +67,33 @@ def cancelar_nota_fiscal(nota, *, motivo: str, usuario=None, request=None):
         raise ValidationError("Justificativa do cancelamento é obrigatória.")
     nota = NotaFiscal.objects.select_for_update().get(pk=nota.pk)
     if nota.status == NotaFiscal.Status.CANCELADA:
+        if nota.tentativa_atual is not None or nota.processando_desde is not None:
+            nota.tentativa_atual = None
+            nota.processando_desde = None
+            nota.save(
+                update_fields=[
+                    "tentativa_atual",
+                    "processando_desde",
+                    "atualizado_em",
+                ]
+            )
         return nota
     if nota.status != NotaFiscal.Status.AUTORIZADA:
         raise ValidationError(
             "Somente NF-e autorizada pode ser cancelada."
         )
+    tentativa_cancelada = nota.tentativa_atual
     nota.status = NotaFiscal.Status.CANCELADA
-    nota.save(update_fields=["status", "atualizado_em"])
+    nota.tentativa_atual = None
+    nota.processando_desde = None
+    nota.save(
+        update_fields=[
+            "status",
+            "tentativa_atual",
+            "processando_desde",
+            "atualizado_em",
+        ]
+    )
     from core.auditoria import registrar_auditoria
 
     registrar_auditoria(
@@ -84,6 +105,9 @@ def cancelar_nota_fiscal(nota, *, motivo: str, usuario=None, request=None):
             "status": nota.status,
             "motivo": motivo.strip()[:500],
             "pedido": nota.pedido.numero,
+            "tentativa": (
+                str(tentativa_cancelada) if tentativa_cancelada else None
+            ),
         },
     )
     return nota
@@ -215,6 +239,61 @@ def _aviso_nota_cancelada(nota) -> None:
     )
 
 
+def _registrar_resultado_externo(
+    nota, *, token, tipo, resultado, motivo
+) -> bool:
+    """Persiste resposta externa obsoleta/conflitante de forma idempotente."""
+    dados = dict(nota.resultado_externo or {})
+    eventos = list(dados.get("eventos", []))
+    token_str = str(token)
+    if any(
+        evento.get("tentativa") == token_str
+        and evento.get("tipo") == tipo
+        for evento in eventos
+    ):
+        return False
+    eventos.append(
+        {
+            "tentativa": token_str,
+            "tipo": tipo,
+            "resultado": {
+                chave: str(valor)
+                for chave, valor in (resultado or {}).items()
+            },
+            "motivo": motivo[:300],
+            "em": timezone.now().isoformat(),
+        }
+    )
+    dados["eventos"] = eventos[-20:]
+    nota.resultado_externo = dados
+    nota.save(update_fields=["resultado_externo", "atualizado_em"])
+    Aviso.registrar(
+        tipo=Aviso.Tipo.FISCAL_ERRO,
+        mensagem=(
+            f"Resposta externa conflitante/obsoleta para "
+            f"{nota.pedido.numero}; conciliação fiscal necessária."
+        ),
+        objeto=nota,
+        severidade=Aviso.Severidade.ERRO,
+    )
+    from core.auditoria import registrar_auditoria
+
+    registrar_auditoria(
+        acao="fiscal.resultado_externo_obsoleto",
+        instancia=nota,
+        depois={
+            "tentativa": token_str,
+            "tipo": tipo,
+            "motivo": motivo[:300],
+            "resultado": {
+                chave: str(valor)
+                for chave, valor in (resultado or {}).items()
+            },
+        },
+    )
+    return True
+
+
 @transaction.atomic
 def _preparar_emissao(pedido, client):
     """Fase curta: revalida sob lock, cria/claima a nota e libera o lock."""
@@ -227,16 +306,16 @@ def _preparar_emissao(pedido, client):
     ):
         if pedido.status != "cancelado" and not pedido_elegivel(pedido):
             _aviso_documento_invalido(pedido)
-        return pedido, None, False
+        return pedido, None, False, None
 
     nota, _criada = NotaFiscal.objects.select_for_update().get_or_create(
         pedido=pedido, tipo=NotaFiscal.Tipo.SAIDA
     )
     if nota.status == NotaFiscal.Status.CANCELADA:
         _aviso_nota_cancelada(nota)
-        return pedido, nota, False
+        return pedido, nota, False, None
     if nota.status == NotaFiscal.Status.AUTORIZADA:
-        return pedido, nota, False
+        return pedido, nota, False, None
 
     agora = timezone.now()
     if (
@@ -247,37 +326,41 @@ def _preparar_emissao(pedido, client):
             "Emissão já em andamento para o pedido %s; retry ignorado.",
             pedido.numero,
         )
-        return pedido, nota, False
+        return pedido, nota, False, None
 
     if not nota.cfop:
         nota.cfop = "6.102" if pedido.interestadual else "5.102"
+    token = uuid.uuid4()
     nota.tentativas += 1
     nota.processando_desde = agora
+    nota.tentativa_atual = token
     nota.status = NotaFiscal.Status.PENDENTE
     nota.ultimo_erro = ""
     nota.save(
         update_fields=[
             "tentativas",
             "processando_desde",
+            "tentativa_atual",
             "status",
             "ultimo_erro",
             "cfop",
             "atualizado_em",
         ]
     )
-    return pedido, nota, True
+    return pedido, nota, True, token
 
 
 def enviar_para_emissao(pedido, client=None) -> NotaFiscal | None:
     """Emite em duas fases para não manter lock durante a chamada externa.
 
-    O claim de ``processando_desde`` impede retries concorrentes. A resposta
-    externa é sempre aplicada com releitura do pedido/nota; uma autorização
-    recebida após cancelamento é preservada com pendência explícita, nunca
-    convertida em sucesso operacional silencioso.
+    A tentativa recebe um token próprio antes da chamada externa. A conclusão,
+    seja sucesso ou erro, só altera o documento se esse token ainda for o dono
+    do claim. Resultados de tentativas antigas são preservados em
+    ``resultado_externo`` e geram pendência de conciliação, sem sobrescrever
+    documento confirmado, cancelado ou resultado de tentativa mais nova.
     """
     client = client or obter_client()
-    pedido, nota, reivindicada = _preparar_emissao(pedido, client)
+    pedido, nota, reivindicada, token = _preparar_emissao(pedido, client)
     if not reivindicada:
         return nota
 
@@ -286,13 +369,45 @@ def enviar_para_emissao(pedido, client=None) -> NotaFiscal | None:
     except ErroFiscal as erro:
         with transaction.atomic():
             nota = NotaFiscal.objects.select_for_update().get(pk=nota.pk)
+            if nota.tentativa_atual != token:
+                _registrar_resultado_externo(
+                    nota,
+                    token=token,
+                    tipo="erro",
+                    resultado={"erro": str(erro)[:500]},
+                    motivo="erro de tentativa que perdeu a autoridade",
+                )
+                return nota
+            if nota.status in (
+                NotaFiscal.Status.AUTORIZADA,
+                NotaFiscal.Status.CANCELADA,
+            ):
+                _registrar_resultado_externo(
+                    nota,
+                    token=token,
+                    tipo="erro",
+                    resultado={"erro": str(erro)[:500]},
+                    motivo="erro de tentativa sobre documento terminal",
+                )
+                nota.tentativa_atual = None
+                nota.processando_desde = None
+                nota.save(
+                    update_fields=[
+                        "tentativa_atual",
+                        "processando_desde",
+                        "atualizado_em",
+                    ]
+                )
+                return nota
             nota.status = NotaFiscal.Status.ERRO
             nota.ultimo_erro = str(erro)[:500]
+            nota.tentativa_atual = None
             nota.processando_desde = None
             nota.save(
                 update_fields=[
                     "status",
                     "ultimo_erro",
+                    "tentativa_atual",
                     "processando_desde",
                     "atualizado_em",
                 ]
@@ -324,21 +439,46 @@ def enviar_para_emissao(pedido, client=None) -> NotaFiscal | None:
             pk=pedido.pk
         )
         nota = NotaFiscal.objects.select_for_update().get(pk=nota.pk)
+        if nota.tentativa_atual != token:
+            _registrar_resultado_externo(
+                nota,
+                token=token,
+                tipo="sucesso",
+                resultado=resultado,
+                motivo="sucesso de tentativa que perdeu a autoridade",
+            )
+            return nota
+        if nota.status in (
+            NotaFiscal.Status.AUTORIZADA,
+            NotaFiscal.Status.CANCELADA,
+        ):
+            _registrar_resultado_externo(
+                nota,
+                token=token,
+                tipo="sucesso",
+                resultado=resultado,
+                motivo="sucesso de tentativa sobre documento terminal",
+            )
+            nota.tentativa_atual = None
+            nota.processando_desde = None
+            nota.save(
+                update_fields=[
+                    "tentativa_atual",
+                    "processando_desde",
+                    "atualizado_em",
+                ]
+            )
+            return nota
+
         nota.numero = resultado.get("numero", "")
         nota.chave_acesso = resultado.get("chave", "")
         nota.link_documento = resultado.get("link", "")
+        nota.tentativa_atual = None
         nota.processando_desde = None
         nota.ultimo_erro = ""
-        estava_cancelada = nota.status == NotaFiscal.Status.CANCELADA
         nota.status = NotaFiscal.Status.AUTORIZADA
 
-        if estava_cancelada:
-            nota.status = NotaFiscal.Status.CANCELADA
-            nota.ultimo_erro = (
-                "Autorização externa recebida após cancelamento; "
-                "conciliação fiscal necessária."
-            )
-        elif (
+        if (
             pedido_atual.status == "cancelado"
             or pedido_atual.status_financeiro != "pago"
         ):
@@ -353,6 +493,7 @@ def enviar_para_emissao(pedido, client=None) -> NotaFiscal | None:
                         "numero",
                         "chave_acesso",
                         "link_documento",
+                        "tentativa_atual",
                         "processando_desde",
                         "ultimo_erro",
                         "status",
@@ -360,13 +501,22 @@ def enviar_para_emissao(pedido, client=None) -> NotaFiscal | None:
                     ]
                 )
         except IntegrityError:
+            _registrar_resultado_externo(
+                nota,
+                token=token,
+                tipo="conflito_chave",
+                resultado=resultado,
+                motivo="chave externa já registrada em outra nota",
+            )
             nota.status = NotaFiscal.Status.ERRO
             nota.ultimo_erro = "Chave de acesso já registrada em outra nota."
+            nota.tentativa_atual = None
             nota.processando_desde = None
             nota.save(
                 update_fields=[
                     "status",
                     "ultimo_erro",
+                    "tentativa_atual",
                     "processando_desde",
                     "atualizado_em",
                 ]
@@ -401,6 +551,7 @@ def enviar_para_emissao(pedido, client=None) -> NotaFiscal | None:
                     "chave": nota.chave_acesso,
                     "pedido_status": pedido_atual.status,
                     "pedido_financeiro": pedido_atual.status_financeiro,
+                    "tentativa": str(token),
                 },
             )
             return nota
@@ -413,6 +564,7 @@ def enviar_para_emissao(pedido, client=None) -> NotaFiscal | None:
                 "numero": nota.numero,
                 "chave": nota.chave_acesso,
                 "tentativas": nota.tentativas,
+                "tentativa": str(token),
             },
         )
         return nota

@@ -53,6 +53,19 @@ class NotaFiscal(models.Model):
         blank=True,
         help_text="Lease curto para impedir chamadas fiscais duplicadas.",
     )
+    tentativa_atual = models.UUIDField(
+        "tentativa atual",
+        null=True,
+        blank=True,
+        editable=False,
+        help_text="Identidade da tentativa dona do lease de emissão.",
+    )
+    resultado_externo = models.JSONField(
+        "resultado externo",
+        default=dict,
+        blank=True,
+        help_text="Evidência durável de respostas externas tardias/conflitantes.",
+    )
     ultimo_erro = models.TextField("último erro", blank=True)
     criado_em = models.DateTimeField("criado em", auto_now_add=True)
     atualizado_em = models.DateTimeField("atualizado em", auto_now=True)

@@ -54,7 +54,7 @@ class RegistrarNotaManualView(
         return contexto
 
     def form_valid(self, form):
-        from .services import pedido_elegivel
+        from .services import LEASE_EMISSAO, pedido_elegivel
 
         numero = form.cleaned_data["numero"]
         chave = form.cleaned_data["chave_acesso"]
@@ -94,6 +94,17 @@ class RegistrarNotaManualView(
                 return self.form_invalid(form)
             if (
                 nota is not None
+                and nota.processando_desde is not None
+                and timezone.now() - nota.processando_desde < LEASE_EMISSAO
+            ):
+                form.add_error(
+                    None,
+                    "Há uma emissão automática em andamento para este pedido. "
+                    "Aguarde a conclusão antes de registrar a NF-e manualmente.",
+                )
+                return self.form_invalid(form)
+            if (
+                nota is not None
                 and nota.status == NotaFiscal.Status.AUTORIZADA
                 and (
                     nota.numero != numero
@@ -108,6 +119,8 @@ class RegistrarNotaManualView(
                 )
                 return self.form_invalid(form)
             antes = None
+            tentativa_expirada = None
+            processando_expirado = None
             if nota is None:
                 if not pedido_elegivel(pedido):
                     form.add_error(
@@ -123,11 +136,18 @@ class RegistrarNotaManualView(
                     "6.102" if pedido.interestadual else "5.102"
                 )
             else:
+                tentativa_expirada = nota.tentativa_atual
+                processando_expirado = nota.processando_desde
                 antes = {
                     "numero": nota.numero,
                     "chave": nota.chave_acesso,
                     "cfop": nota.cfop,
                     "status": nota.status,
+                    "tentativa": (
+                        str(nota.tentativa_atual)
+                        if nota.tentativa_atual
+                        else None
+                    ),
                 }
                 cfop = nota.cfop
                 if cfop_informado and cfop_informado != nota.cfop:
@@ -141,6 +161,11 @@ class RegistrarNotaManualView(
                     cfop = cfop_informado
                 elif nota.cfop and not cfop_informado:
                     cfop = nota.cfop
+            # Uma confirmação manual invalida qualquer claim expirado. A
+            # tentativa antiga, se ainda estiver em voo, não poderá mais
+            # sobrescrever este documento ao retornar.
+            nota.tentativa_atual = None
+            nota.processando_desde = None
             nota.status = NotaFiscal.Status.AUTORIZADA
             nota.origem = NotaFiscal.Origem.MANUAL
             nota.numero = numero
@@ -160,6 +185,27 @@ class RegistrarNotaManualView(
                     "Já existe uma nota registrada com esta chave.",
                 )
                 return self.form_invalid(form)
+
+            if tentativa_expirada:
+                registrar_auditoria(
+                    acao="fiscal.tentativa_manual_assumida",
+                    instancia=nota,
+                    request=self.request,
+                    antes={
+                        "tentativa": str(tentativa_expirada),
+                        "processando_desde": (
+                            processando_expirado.isoformat()
+                            if processando_expirado
+                            else None
+                        ),
+                    },
+                    depois={
+                        "tentativa": None,
+                        "origem": nota.origem,
+                        "numero": nota.numero,
+                        "motivo": "lease expirado assumido pelo registro manual",
+                    },
+                )
 
             acao = (
                 "fiscal.nota_cfop_retificado"

@@ -1,6 +1,7 @@
 """Reprodução dos achados A05-A07 da auditoria da Fase 2C."""
 
-from datetime import date, datetime, time
+import uuid
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from unittest import mock
 
@@ -15,8 +16,14 @@ from accounts.models import Usuario
 from analytics.models import Aviso
 from core.models import LogAuditoria
 from customers.factories import ClienteFactory
+from fiscal.client import ErroFiscal
 from fiscal.models import NotaFiscal
-from fiscal.services import enviar_para_emissao, pedido_elegivel
+from fiscal.services import (
+    LEASE_EMISSAO,
+    cancelar_nota_fiscal,
+    enviar_para_emissao,
+    pedido_elegivel,
+)
 from sales.factories import (
     ItemPedidoFactory,
     PagamentoFactory,
@@ -517,4 +524,398 @@ class A07CfopTests(BaseFiscalAuditoriaTests):
                 acao="fiscal.nota_cfop_retificado",
                 objeto_id=str(nota.pk),
             ).exists()
+        )
+
+class L01AutoridadeTentativaTests(BaseFiscalAuditoriaTests):
+    CHAVE_MANUAL = "29260811111111111111111111111111111111111111"
+    CHAVE_API_A = "29260822222222222222222222222222222222222222"
+    CHAVE_API_B = "29260833333333333333333333333333333333333333"
+
+    def _nota_em_erro(self, pedido):
+        return NotaFiscal.objects.create(
+            pedido=pedido,
+            tipo=NotaFiscal.Tipo.SAIDA,
+            status=NotaFiscal.Status.ERRO,
+            cfop="5.102",
+        )
+
+    def _post_manual(self):
+        return self.client.post(
+            reverse("fiscal:nota_manual", args=[self.pedido.pk]),
+            {
+                "numero": "MANUAL",
+                "chave_acesso": self.CHAVE_MANUAL,
+                "link_documento": "https://exemplo.com/manual.pdf",
+            },
+        )
+
+    def _preparar_cenario(self):
+        self.pedido = self._pedido(status=Pedido.Status.PAGO)
+        nota = self._nota_em_erro(self.pedido)
+        self.client.force_login(self.gestor)
+        return nota
+
+    class _ManualDuranteLease:
+        def __init__(self, teste):
+            self.teste = teste
+            self.resposta = None
+
+        def criar_nfe(self, pedido):
+            self.resposta = self.teste._post_manual()
+            return {
+                "numero": "API-A",
+                "chave": self.teste.CHAVE_API_A,
+                "link": "https://exemplo.com/api-a",
+            }
+
+    class _ManualDepoisDeExpirar:
+        def __init__(self, teste, *, cancelar=False, erro=False):
+            self.teste = teste
+            self.cancelar = cancelar
+            self.erro = erro
+            self.resposta = None
+
+        def criar_nfe(self, pedido):
+            nota = NotaFiscal.objects.get(
+                pedido=pedido, tipo=NotaFiscal.Tipo.SAIDA
+            )
+            NotaFiscal.objects.filter(pk=nota.pk).update(
+                processando_desde=(
+                    timezone.now()
+                    - LEASE_EMISSAO
+                    - timedelta(seconds=1)
+                )
+            )
+            self.resposta = self.teste._post_manual()
+            if self.cancelar:
+                nota.refresh_from_db()
+                cancelar_nota_fiscal(
+                    nota,
+                    motivo="Cancelamento durante tentativa antiga",
+                    usuario=self.teste.gestor,
+                )
+            if self.erro:
+                raise ErroFiscal("falha da tentativa antiga")
+            return {
+                "numero": "API-A",
+                "chave": self.teste.CHAVE_API_A,
+                "link": "https://exemplo.com/api-a",
+            }
+
+    class _TentativaNovaAtiva:
+        def __init__(self, teste, token):
+            self.teste = teste
+            self.token = token
+
+        def criar_nfe(self, pedido):
+            NotaFiscal.objects.filter(
+                pedido=pedido, tipo=NotaFiscal.Tipo.SAIDA
+            ).update(
+                tentativa_atual=self.token,
+                processando_desde=timezone.now(),
+                status=NotaFiscal.Status.PENDENTE,
+            )
+            raise ErroFiscal("falha da tentativa antiga")
+
+    class _TentativaNovaComSucesso:
+        def __init__(self, teste, *, resultado_antigo):
+            self.teste = teste
+            self.resultado_antigo = resultado_antigo
+
+        def criar_nfe(self, pedido):
+            NotaFiscal.objects.filter(
+                pedido=pedido, tipo=NotaFiscal.Tipo.SAIDA
+            ).update(
+                processando_desde=(
+                    timezone.now()
+                    - LEASE_EMISSAO
+                    - timedelta(seconds=1)
+                )
+            )
+
+            class ClienteB:
+                def criar_nfe(self, pedido_b):
+                    return {
+                        "numero": "API-B",
+                        "chave": L01AutoridadeTentativaTests.CHAVE_API_B,
+                        "link": "https://exemplo.com/api-b",
+                    }
+
+            self.teste._resultado_b = enviar_para_emissao(
+                pedido, client=ClienteB()
+            )
+            if self.resultado_antigo == "erro":
+                raise ErroFiscal("falha da tentativa antiga")
+            return {
+                "numero": "API-A",
+                "chave": self.teste.CHAVE_API_A,
+                "link": "https://exemplo.com/api-a",
+            }
+
+    def test_manual_durante_lease_ativo_e_bloqueado(self):
+        nota = self._preparar_cenario()
+        cliente = self._ManualDuranteLease(self)
+
+        resultado = enviar_para_emissao(self.pedido, client=cliente)
+
+        self.assertEqual(cliente.resposta.status_code, 200)
+        self.assertContains(cliente.resposta, "emissão automática em andamento")
+        nota.refresh_from_db()
+        self.assertEqual(resultado.pk, nota.pk)
+        self.assertEqual(nota.status, NotaFiscal.Status.AUTORIZADA)
+        self.assertEqual(nota.numero, "API-A")
+        self.assertEqual(nota.chave_acesso, self.CHAVE_API_A)
+        self.assertEqual(nota.origem, NotaFiscal.Origem.API)
+        self.assertIsNone(nota.tentativa_atual)
+        self.assertIsNone(nota.processando_desde)
+
+    def test_sucesso_antigo_nao_substitui_manual(self):
+        nota = self._preparar_cenario()
+        cliente = self._ManualDepoisDeExpirar(self)
+
+        resultado = enviar_para_emissao(self.pedido, client=cliente)
+
+        self.assertEqual(cliente.resposta.status_code, 302)
+        nota.refresh_from_db()
+        self.assertEqual(resultado.pk, nota.pk)
+        self.assertEqual(nota.status, NotaFiscal.Status.AUTORIZADA)
+        self.assertEqual(nota.numero, "MANUAL")
+        self.assertEqual(nota.chave_acesso, self.CHAVE_MANUAL)
+        self.assertEqual(nota.origem, NotaFiscal.Origem.MANUAL)
+        self.assertEqual(
+            nota.resultado_externo["eventos"][-1]["tipo"], "sucesso"
+        )
+        self.assertEqual(
+            nota.resultado_externo["eventos"][-1]["resultado"]["numero"],
+            "API-A",
+        )
+        self.assertTrue(
+            Aviso.objects.filter(
+                tipo=Aviso.Tipo.FISCAL_ERRO,
+                objeto_id=str(nota.pk),
+            ).exists()
+        )
+        self.assertTrue(
+            LogAuditoria.objects.filter(
+                acao="fiscal.resultado_externo_obsoleto",
+                objeto_id=str(nota.pk),
+            ).exists()
+        )
+        self.assertTrue(
+            LogAuditoria.objects.filter(
+                acao="fiscal.tentativa_manual_assumida",
+                objeto_id=str(nota.pk),
+            ).exists()
+        )
+
+    def test_erro_antigo_nao_rebaixa_manual_autorizada(self):
+        nota = self._preparar_cenario()
+        cliente = self._ManualDepoisDeExpirar(self, erro=True)
+
+        enviar_para_emissao(self.pedido, client=cliente)
+
+        nota.refresh_from_db()
+        self.assertEqual(nota.status, NotaFiscal.Status.AUTORIZADA)
+        self.assertEqual(nota.numero, "MANUAL")
+        self.assertEqual(nota.chave_acesso, self.CHAVE_MANUAL)
+        self.assertEqual(
+            nota.resultado_externo["eventos"][-1]["tipo"], "erro"
+        )
+
+    def test_erro_antigo_nao_desfaz_cancelamento(self):
+        nota = self._preparar_cenario()
+        cliente = self._ManualDepoisDeExpirar(
+            self, cancelar=True, erro=True
+        )
+
+        enviar_para_emissao(self.pedido, client=cliente)
+
+        nota.refresh_from_db()
+        self.assertEqual(nota.status, NotaFiscal.Status.CANCELADA)
+        self.assertEqual(nota.numero, "MANUAL")
+        self.assertEqual(nota.chave_acesso, self.CHAVE_MANUAL)
+        self.assertEqual(
+            nota.resultado_externo["eventos"][-1]["tipo"], "erro"
+        )
+
+    def test_resultado_antigo_nao_limpa_claim_novo_ativo(self):
+        nota = self._preparar_cenario()
+        token_novo = uuid.uuid4()
+        cliente = self._TentativaNovaAtiva(self, token_novo)
+
+        enviar_para_emissao(self.pedido, client=cliente)
+
+        nota.refresh_from_db()
+        self.assertEqual(nota.status, NotaFiscal.Status.PENDENTE)
+        self.assertEqual(nota.tentativa_atual, token_novo)
+        self.assertIsNotNone(nota.processando_desde)
+        self.assertEqual(
+            nota.resultado_externo["eventos"][-1]["tipo"], "erro"
+        )
+
+    def test_resultado_antigo_nao_desfaz_sucesso_de_b(self):
+        nota = self._preparar_cenario()
+        cliente = self._TentativaNovaComSucesso(
+            self, resultado_antigo="erro"
+        )
+
+        enviar_para_emissao(self.pedido, client=cliente)
+
+        nota.refresh_from_db()
+        self.assertEqual(nota.status, NotaFiscal.Status.AUTORIZADA)
+        self.assertEqual(nota.numero, "API-B")
+        self.assertEqual(nota.chave_acesso, self.CHAVE_API_B)
+        self.assertIsNone(nota.tentativa_atual)
+        self.assertTrue(
+            Aviso.objects.filter(
+                tipo=Aviso.Tipo.FISCAL_ERRO,
+                objeto_id=str(nota.pk),
+            ).exists()
+        )
+
+    def test_sucesso_antigo_apos_cancelamento_fica_como_evidencia(self):
+        nota = self._preparar_cenario()
+        cliente = self._ManualDepoisDeExpirar(
+            self, cancelar=True, erro=False
+        )
+
+        enviar_para_emissao(self.pedido, client=cliente)
+
+        nota.refresh_from_db()
+        self.assertEqual(nota.status, NotaFiscal.Status.CANCELADA)
+        self.assertEqual(nota.numero, "MANUAL")
+        self.assertEqual(nota.chave_acesso, self.CHAVE_MANUAL)
+        evento = nota.resultado_externo["eventos"][-1]
+        self.assertEqual(evento["tipo"], "sucesso")
+        self.assertEqual(evento["resultado"]["numero"], "API-A")
+        self.assertEqual(evento["resultado"]["chave"], self.CHAVE_API_A)
+        self.assertTrue(
+            LogAuditoria.objects.filter(
+                acao="fiscal.resultado_externo_obsoleto",
+                objeto_id=str(nota.pk),
+            ).exists()
+        )
+
+    def test_erro_com_token_atual_em_documento_terminal_nao_rebaixa(self):
+        nota = self._preparar_cenario()
+
+        class ClienteQueConfirmaDireto:
+            def criar_nfe(self, pedido):
+                NotaFiscal.objects.filter(pk=nota.pk).update(
+                    status=NotaFiscal.Status.AUTORIZADA,
+                    numero="MANUAL-DIRETO",
+                    chave_acesso="29260844444444444444444444444444444444444444",
+                )
+                raise ErroFiscal("falha após confirmação direta")
+
+        enviar_para_emissao(self.pedido, client=ClienteQueConfirmaDireto())
+
+        nota.refresh_from_db()
+        self.assertEqual(nota.status, NotaFiscal.Status.AUTORIZADA)
+        self.assertEqual(nota.numero, "MANUAL-DIRETO")
+        self.assertIsNone(nota.tentativa_atual)
+        self.assertEqual(
+            nota.resultado_externo["eventos"][-1]["tipo"], "erro"
+        )
+
+    def test_sucesso_com_token_atual_em_documento_terminal_nao_substitui(self):
+        nota = self._preparar_cenario()
+        chave_api = self.CHAVE_API_A
+
+        class ClienteQueCancelaDireto:
+            def criar_nfe(self, pedido):
+                NotaFiscal.objects.filter(pk=nota.pk).update(
+                    status=NotaFiscal.Status.CANCELADA,
+                    numero="CANCELADA-DIRETO",
+                    chave_acesso="29260855555555555555555555555555555555555555",
+                )
+                return {
+                    "numero": "API-A",
+                    "chave": chave_api,
+                    "link": "https://exemplo.com/api-a",
+                }
+
+        enviar_para_emissao(self.pedido, client=ClienteQueCancelaDireto())
+
+        nota.refresh_from_db()
+        self.assertEqual(nota.status, NotaFiscal.Status.CANCELADA)
+        self.assertEqual(nota.numero, "CANCELADA-DIRETO")
+        self.assertIsNone(nota.tentativa_atual)
+        self.assertEqual(
+            nota.resultado_externo["eventos"][-1]["tipo"], "sucesso"
+        )
+
+    def test_conflito_de_chave_preserva_resposta_externa(self):
+        nota = self._preparar_cenario()
+        outro_pedido = self._pedido(status=Pedido.Status.PAGO)
+        NotaFiscal.objects.create(
+            pedido=outro_pedido,
+            tipo=NotaFiscal.Tipo.SAIDA,
+            status=NotaFiscal.Status.AUTORIZADA,
+            cfop="5.102",
+            chave_acesso=self.CHAVE_API_A,
+        )
+        chave_api = self.CHAVE_API_A
+
+        class ClienteComChaveDuplicada:
+            def criar_nfe(self, pedido):
+                return {
+                    "numero": "API-A",
+                    "chave": chave_api,
+                    "link": "https://exemplo.com/api-a",
+                }
+
+        enviar_para_emissao(
+            self.pedido, client=ClienteComChaveDuplicada()
+        )
+
+        nota.refresh_from_db()
+        self.assertEqual(nota.status, NotaFiscal.Status.ERRO)
+        self.assertIsNone(nota.tentativa_atual)
+        evento = nota.resultado_externo["eventos"][-1]
+        self.assertEqual(evento["tipo"], "conflito_chave")
+        self.assertEqual(evento["resultado"]["numero"], "API-A")
+        self.assertEqual(evento["resultado"]["chave"], self.CHAVE_API_A)
+
+    def test_resultado_externo_repetido_nao_duplica_efeitos(self):
+        from fiscal.services import _registrar_resultado_externo
+
+        nota = self._preparar_cenario()
+        token = uuid.uuid4()
+        with transaction.atomic():
+            _registrar_resultado_externo(
+                nota,
+                token=token,
+                tipo="sucesso",
+                resultado={"numero": "API-A", "chave": self.CHAVE_API_A},
+                motivo="resultado repetido",
+            )
+            _registrar_resultado_externo(
+                nota,
+                token=token,
+                tipo="sucesso",
+                resultado={"numero": "API-A", "chave": self.CHAVE_API_A},
+                motivo="resultado repetido",
+            )
+
+        nota.refresh_from_db()
+        eventos = [
+            evento
+            for evento in nota.resultado_externo["eventos"]
+            if evento["tentativa"] == str(token)
+        ]
+        self.assertEqual(len(eventos), 1)
+        self.assertEqual(
+            Aviso.objects.filter(
+                tipo=Aviso.Tipo.FISCAL_ERRO,
+                objeto_id=str(nota.pk),
+            ).count(),
+            1,
+        )
+        self.assertEqual(
+            LogAuditoria.objects.filter(
+                acao="fiscal.resultado_externo_obsoleto",
+                objeto_id=str(nota.pk),
+            ).count(),
+            1,
         )
