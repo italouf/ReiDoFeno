@@ -6,10 +6,12 @@ Base auditada: `47f75eb7ce6ca87395f777600d75c157cf44306b`
 
 ## Parecer
 
-A correção L01 foi implementada localmente. A suíte SQLite, cobertura,
-Ruff, `check`, migração histórica, Node, Bandit e `pip-audit` passaram. A
-suíte PostgreSQL + Redis e o Gate C só podem ser comprovados no SHA final
-após autorização de push; o aceite humano (Gate H) permanece pendente.
+A correção L01 foi implementada e validada localmente. A suíte SQLite,
+cobertura, Ruff, `check`, migração histórica, Node, Bandit e `pip-audit`
+passaram. O SHA `2a7a300` foi publicado e a CI `39953967926` aprovou
+PostgreSQL 15 + Redis, check de produção e migração histórica; a reauditoria
+independente aprovou o Gate T com observações não bloqueantes. O aceite
+humano (Gate H) permanece pendente.
 
 ## Matriz L01
 
@@ -68,13 +70,22 @@ A consolidação final desta rodada está registrada em
   `pip-audit` limpos; `check --deploy` com segredos sintéticos sem issues.
 - Sem cliente real, SEFAZ/Bling, Neon, dados reais ou reembolso.
 
+### Reauditoria independente no SHA final
+
+No SHA `2a7a300`, a CI `39953967926` passou PostgreSQL 15 + Redis,
+check de produção e migração histórica. A reauditoria independente reportou
+Gate T aprovado com observações não bloqueantes e preservou os cenários
+L01-A/B/C/D. A contagem SQLite local deste documento é histórica da rodada
+L01; a validação consolidada está em
+`docs/audit/fase-2c-correcao-validacao.md`.
+
 ## Gates
 
 | Gate | Situação |
 |---|---|
-| T — técnico | Correção implementada e validada localmente; falta execução PostgreSQL + Redis e revisão independente no SHA final |
-| C — CI remoto | Pendente; a CI verde `39880437864` pertence a `47f75eb`, não ao código L01 |
-| H — aceite do cliente | Pendente; nenhuma aprovação foi presumida |
+| T — técnico | **Aprovado com observações não bloqueantes** no SHA `2a7a300` |
+| C — CI remoto | **Aprovado**: CI `39953967926` success no SHA `2a7a300` |
+| H — aceite do cliente | **Pendente**; ficha em `docs/operacao/fase-2c-aceite.md` |
 
 ## Riscos remanescentes
 

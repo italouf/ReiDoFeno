@@ -19,7 +19,10 @@
   `analytics/models.py` **97,67%**; Node R05 2/2; Ruff, `check`,
   `makemigrations --check`, `check --deploy`, Bandit (0 medium/high) e
   `pip-audit` (0) limpos; gate histórico `0001 → HEAD` aprovado em SQLite.
-  PostgreSQL 15 + Redis, CI no novo SHA e aceite humano permanecem pendentes.
+- **Publicação e reauditoria:** SHA `2a7a30096f7d3c00b7bba9b5bd7dd12e78894a70`
+  publicado; CI `39953967926` success, incluindo PostgreSQL 15 + Redis e
+  migração histórica. Gate T aprovado com observações não bloqueantes; Gate C
+  aprovado; **Gate H pendente**.
 
 ## [Fase 2C — correção L01 da autoridade fiscal] — 2026-10-22
 

@@ -1,6 +1,7 @@
 # L02/L03 — avisos e identidade durável de eventos externos
 
-Status: contrato local; correção em andamento.
+Status: verificado localmente, no SHA remoto e por reauditoria independente;
+Gate H pendente.
 
 ## Contexto
 
@@ -18,8 +19,9 @@ recentes. Depois da rotação, o mesmo evento pode ser registrado novamente.
 
 ### Invariantes
 
-1. Avisos agregados continuam existindo no máximo um por
-   `(tipo, objeto_tipo, objeto_id, lido=False)`.
+1. Avisos agregados são reutilizados enquanto não lidos; uma unicidade
+   concorrente forte de agregados não é garantida por constraint nesta fase.
+   A busca sempre tolera múltiplos registros sem lançar exceção.
 2. Avisos por evento são distintos, identificáveis e não são reutilizados
    como aviso agregado.
 3. `Aviso.registrar()` nunca lança `MultipleObjectsReturned` por causa de

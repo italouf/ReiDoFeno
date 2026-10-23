@@ -13,7 +13,7 @@ Base remota de L01: `39889483085` (success no SHA inicial)
 | L02 legado | Avisos por evento antigos tinham chave vazia | Dados do SHA anterior continuam utilizáveis sem apagar avisos | Backfill `legado:<pk>` na `analytics/0004` | Evidência de migração em banco descartável | `legado:1`, `legado:2`; dois avisos preservados |
 | L03 | Deduplicação procurava token/tipo apenas em `resultado_externo["eventos"][-20:]` | Identidade sobrevive à rotação, releitura e nova transação | Chave durável por evento no próprio aviso; verificação antes da projeção | `test_evento_repetido_apos_rotacao_de_20_nao_duplica` | 21 eventos/auditorias, JSON com 20 |
 | L03 legado | Evento antigo podia existir só em `LogAuditoria` | Não duplicar replay de evento legado | Fallback por `depois.tentativa`/`depois.tipo`; JSON também é consultado | `test_evento_legado_apenas_em_auditoria_nao_duplica` | Nenhum novo evento/aviso/auditoria |
-| L03 concorrente | Dois replays poderiam criar dois eventos | Um evento lógico e um conjunto de efeitos | Lock da Nota + chave única condicional | `test_l03_replay_concorrente_do_mesmo_evento_postgres` | PG marcado; execução remota pendente |
+| L03 concorrente | Dois replays poderiam criar dois eventos | Um evento lógico e um conjunto de efeitos | Lock da Nota + chave única condicional | `test_l03_replay_concorrente_do_mesmo_evento_postgres` | Aprovado na reauditoria independente/CI |
 | Conflito de chave | Aviso comum após evento podia quebrar o tratamento de `IntegrityError` | Conflito continua domínio tratado, sem HTTP 500 | Fluxo usa `Aviso.registrar()` agregado e preserva evidência `conflito_chave` | `test_conflito_de_chave_com_avisos_previos_nao_quebra` | status erro, claim liberado, evidência retida |
 
 ## RED antes da correção
@@ -54,8 +54,9 @@ Execução de `L02L03AvisosEventosTests` contra `409b9f5`:
 3. cria a constraint condicional de unicidade.
 
 O gate histórico `0001 → HEAD` aplicou a migração e o comando
-`validar_migracao_legado --verificar` passou em SQLite descartável. A
-validação PostgreSQL 15 + Redis depende da CI do novo SHA.
+`validar_migracao_legado --verificar` passou em SQLite descartável. A CI
+`39953967926` aprovou PostgreSQL 15 + Redis e a migração histórica no SHA
+`2a7a300`; a reauditoria independente repetiu o gate em PostgreSQL 16.2.
 
 ## Verificação local
 
@@ -75,16 +76,35 @@ validação PostgreSQL 15 + Redis depende da CI do novo SHA.
 
 | Gate | Situação |
 |---|---|
-| T — técnico | Correção local e regressões verdes; falta execução PG + revisão independente no SHA final |
-| C — remoto | Pendente; a CI `39889483085` valida `409b9f5`, não este código |
-| H — humano | Pendente; roteiro `docs/operacao/fase-2c-aceite.md` não executado |
+| T — técnico | **Aprovado com observações não bloqueantes** pela reauditoria independente no SHA `2a7a300` |
+| C — remoto | **Aprovado**: CI `39953967926` success, incluindo PostgreSQL 15 + Redis, check de produção e migração histórica |
+| H — humano | **Pendente**: roteiro `docs/operacao/fase-2c-aceite.md` e ficha não executados pelo cliente |
+
+## Evidência independente posterior
+
+A reauditoria independente registrou, para `2a7a300`:
+
+- SQLite 655 passed, 24 skipped, 240 subtests; cobertura 86,39%;
+- PostgreSQL 16.2 678 passed, 1 skipped (Redis), 240 subtests; cobertura
+  86,41%;
+- 11 testes adversariais ampliados aprovados, incluindo L02/L03;
+- backfill sintético independente com cinco avisos preservados;
+- gate histórico PostgreSQL com nove cenários legados aprovado;
+- CI `39953967926` aprovada no SHA, com PostgreSQL 15 + Redis.
+
+A execução PostgreSQL 16.2 é evidência da reauditoria externa, não deste
+ambiente local. O warning de conexão remanescente no teardown e as
+depreciações `URLField` são observações não bloqueantes registradas em
+`docs/operacao/fase-2c-backlog.md`.
 
 ## Limites
 
 - O cliente fiscal continua simulado; nenhuma SEFAZ/Bling real foi chamada.
-- O teste concorrente PostgreSQL foi adicionado, mas não executado neste
-  ambiente sem PostgreSQL/Redis.
+- O teste concorrente PostgreSQL foi aprovado na reauditoria independente e a
+  CI PostgreSQL 15 + Redis passou; ele não foi executado neste ambiente local
+  sem PostgreSQL/Redis.
 - A compatibilidade de migração foi exercitada com avisos sintéticos no schema
-  0003; a base real ainda precisa de backup/preflight conforme governança.
+  0003 e o gate histórico passou em SQLite e PostgreSQL; a base real ainda
+  precisa de backup/preflight conforme governança.
 - Não foi criada tela nova de conciliação; os eventos permanecem visíveis na
   central de avisos e na auditoria.

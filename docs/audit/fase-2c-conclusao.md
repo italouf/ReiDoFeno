@@ -9,8 +9,15 @@ Base: `a314a74` (merge da Fase 2B)
 > `docs/audit/fase-2c-reauditoria-r01-r05.md`,
 > `docs/audit/fase-2c-correcao-rastreabilidade.md` e
 > `docs/audit/fase-2c-correcao-validacao.md`. O fechamento N01–N03 está em
-> `docs/audit/fase-2c-reauditoria-n01-n03.md`. O Gate C (CI remoto
-> PostgreSQL 15/Redis) e o Gate H (aceite humano) permanecem pendentes.
+> `docs/audit/fase-2c-reauditoria-n01-n03.md`.
+>
+> **Atualização 2026-10-23:** L01, L02 e L03 foram corrigidos e verificados.
+> O SHA `2a7a30096f7d3c00b7bba9b5bd7dd12e78894a70` tem CI
+> `39953967926` success, incluindo PostgreSQL 15 + Redis e migração
+> histórica. Gate T aprovado com observações não bloqueantes; Gate C
+> aprovado. O **Gate H (aceite humano) permanece pendente** e é o único
+> requisito para declarar a fase encerrada. A ficha está em
+> `docs/operacao/fase-2c-aceite.md`.
 
 ## Entregas
 
@@ -83,8 +90,10 @@ Base: `a314a74` (merge da Fase 2B)
 
 ## Próximo passo
 
-1. Abrir PR de `fase-2c-analytics-fiscal` para `main`.
-2. Rodar o workflow PostgreSQL/Redis e validar a migração histórica
-   `a314a74 → HEAD`.
+1. Executar a ficha de aceite em `docs/operacao/fase-2c-aceite.md` com o
+   cliente/responsável no SHA `2a7a300` e registrar números, evidências,
+   data e decisão.
+2. Somente após o Gate H aprovado, preparar a PR de
+   `fase-2c-analytics-fiscal` para `main` conforme a governança.
 3. Iniciar a Fase 3 (paridade Docker + staging), preservando os contratos de
    ledger, reservas e status financeiro.

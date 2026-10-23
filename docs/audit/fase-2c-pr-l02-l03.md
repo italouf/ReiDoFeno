@@ -40,15 +40,19 @@ bloqueadores:
 - Regressões L01 e suíte anterior preservadas.
 - Validação local: 655 passed, 24 skipped, 240 subtests; cobertura 86,39%;
   Node 2/2; Ruff/check/migrações/Bandit/pip-audit limpos.
+- Reauditoria independente no SHA `2a7a300`: SQLite 655/24 e PostgreSQL 16.2
+  678/1; CI `39953967926` success com PostgreSQL 15 + Redis e migração
+  histórica.
 
 ### Gates
 
-- T: correção local verde; PG + Redis e revisão independente no novo SHA
-  pendentes.
-- C: pendente; CI `39889483085` valida o SHA anterior.
-- H: aceite do cliente pendente.
+- T: **aprovado com observações não bloqueantes** pela reauditoria
+  independente.
+- C: **aprovado** no SHA `2a7a300`, CI `39953967926`.
+- H: **pendente**; aceite do cliente ainda não executado.
 
 ### Fora de escopo
 
-Sem push, PR remota, merge, deploy, Neon, dados/SEFAZ/Bling reais ou
-reembolso.
+Sem merge, deploy, Neon, dados/SEFAZ/Bling reais ou reembolso. A branch já
+foi publicada no SHA `2a7a300`; a PR remota ainda depende de autorização e
+governança.

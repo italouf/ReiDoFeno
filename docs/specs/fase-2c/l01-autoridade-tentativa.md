@@ -1,6 +1,7 @@
 # L01 — autoridade da tentativa fiscal
 
-Status: implementado localmente; Gate C pendente no SHA final.
+Status: verificado localmente, no SHA remoto e por reauditoria independente;
+Gate H pendente.
 
 ## Contrato
 

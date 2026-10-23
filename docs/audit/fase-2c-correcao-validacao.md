@@ -3,8 +3,19 @@
 Data: 2026-10-23
 Branch: `fase-2c-analytics-fiscal`
 Ambiente local: Windows, Python 3.14.3, Django 5.2.17, SQLite.
-PostgreSQL 15/Redis: **não disponíveis neste ambiente**; CI remoto pendente.
-A CI `39889483085` passou em `409b9f5`, mas não cobre L02/L03.
+PostgreSQL 15/Redis: **não disponíveis neste ambiente**; a CI remota foi
+aprovada no SHA `2a7a300` pela reauditoria independente.
+A CI `39953967926` é a evidência remota desse SHA; a CI `39889483085`
+pertence ao SHA anterior e não valida L02/L03.
+
+## Evidência por origem
+
+| Origem | Escopo | Resultado |
+|---|---|---|
+| Execução local do agente | SQLite 3.14.3/Django 5.2.17 | 655 passed, 24 skipped, 240 subtests |
+| CI remota | PostgreSQL 15 + Redis, check de produção e migração histórica | Run `39953967926` success no SHA `2a7a300` |
+| Reauditoria independente | SQLite/PostgreSQL 16.2, testes adversariais | Gate T aprovado com observações não bloqueantes |
+| Cliente/responsável | Homologação e números operacionais | **Gate H pendente** |
 
 ## Suíte e cobertura
 
@@ -77,6 +88,9 @@ que exigem backend real. Não foram apresentados como aprovados.
   PostgreSQL marcados (retry A/B/C e replay concorrente).
 - Contrato: `docs/specs/fase-2c/l02-l03-avisos-eventos.md`;
   rastreabilidade: `docs/audit/fase-2c-reauditoria-l02-l03.md`.
+- **Reauditoria independente:** L02/L03 aprovados nos contraexemplos no SHA
+  `2a7a300`; CI `39953967926` aprovou PostgreSQL 15 + Redis e migração
+  histórica. Gate H permanece pendente.
 
 ## Reauditoria R01-R05
 
@@ -146,11 +160,13 @@ O único erro de console no login foi `favicon.ico` 404, sem relação com CSP.
 
 ## Pendências e limites
 
-- CI remoto (PostgreSQL 15 + Redis) não executado: o prompt não autoriza push
-  e não há PostgreSQL/Redis locais. `workflow_dispatch`/PR devem ser usados
-  após autorização.
-- Aceite do cliente não realizado; roteiro em
-  `docs/operacao/fase-2c-aceite.md`.
+- Gate C aprovado no SHA `2a7a300` pela CI `39953967926`; a execução local
+  continua sem PostgreSQL/Redis e seus skips não são aprovados.
+- Aceite do cliente não realizado; roteiro e ficha em
+  `docs/operacao/fase-2c-aceite.md`. **Gate H pendente.**
+- Observações não bloqueantes da reauditoria: limpeza de conexão remanescente
+  no teardown PostgreSQL, depreciações `URLField` para Django 6 e alinhamento
+  documental da unicidade concorrente de avisos agregados.
 - Emissão/cancelamento fiscal real, reembolso real e SEFAZ não executados.
 - Custo legado continua aproximado pelo custo corrente.
 - `NotaFiscal` de entrada é registro manual; não é autorização externa
