@@ -919,3 +919,43 @@ class L01AutoridadeTentativaTests(BaseFiscalAuditoriaTests):
             ).count(),
             1,
         )
+
+    def test_resultados_externos_distintos_ficam_visiveis(self):
+        from fiscal.services import _registrar_resultado_externo
+
+        nota = self._preparar_cenario()
+        token_sucesso = uuid.uuid4()
+        token_erro = uuid.uuid4()
+        with transaction.atomic():
+            _registrar_resultado_externo(
+                nota,
+                token=token_sucesso,
+                tipo="sucesso",
+                resultado={"numero": "API-A", "chave": self.CHAVE_API_A},
+                motivo="conflito de sucesso",
+            )
+            _registrar_resultado_externo(
+                nota,
+                token=token_erro,
+                tipo="erro",
+                resultado={"erro": "falha antiga"},
+                motivo="conflito de erro",
+            )
+
+        nota.refresh_from_db()
+        self.assertEqual(len(nota.resultado_externo["eventos"]), 2)
+        avisos = Aviso.objects.filter(
+            tipo=Aviso.Tipo.FISCAL_ERRO,
+            objeto_id=str(nota.pk),
+        )
+        self.assertEqual(avisos.count(), 2)
+        self.assertTrue(
+            any("API-A" in aviso.mensagem for aviso in avisos)
+        )
+        self.assertEqual(
+            LogAuditoria.objects.filter(
+                acao="fiscal.resultado_externo_obsoleto",
+                objeto_id=str(nota.pk),
+            ).count(),
+            2,
+        )

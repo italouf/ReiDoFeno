@@ -54,10 +54,11 @@ vence”.
   `NotaFiscal.resultado_externo["eventos"]`, com token, tipo, resultado,
   motivo e instante. O histórico mantém os 20 eventos mais recentes.
 - Um `Aviso` fiscal e `LogAuditoria` com ação
-  `fiscal.resultado_externo_obsoleto` tornam a conciliação visível.
-- Eventos repetidos do mesmo token/tipo são idempotentes. Uma resposta de
-  outro documento não é descartada nem convertida em cancelamento externo
-  fictício.
+  `fiscal.resultado_externo_obsoleto` tornam a conciliação visível. Cada
+  evento/token distinto gera seu próprio aviso identificável; o mesmo evento
+  repetido não duplica efeitos.
+- Uma resposta de outro documento não é descartada nem convertida em
+  cancelamento externo fictício.
 - A evidência não reabre o pedido, não movimenta estoque e não repete
   estorno.
 

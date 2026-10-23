@@ -267,13 +267,17 @@ def _registrar_resultado_externo(
     dados["eventos"] = eventos[-20:]
     nota.resultado_externo = dados
     nota.save(update_fields=["resultado_externo", "atualizado_em"])
-    Aviso.registrar(
+    numero_externo = str((resultado or {}).get("numero") or "").strip()
+    referencia = f" NF-e {numero_externo}" if numero_externo else ""
+    Aviso.objects.create(
         tipo=Aviso.Tipo.FISCAL_ERRO,
         mensagem=(
-            f"Resposta externa conflitante/obsoleta para "
-            f"{nota.pedido.numero}; conciliação fiscal necessária."
-        ),
-        objeto=nota,
+            f"Resposta externa {tipo}{referencia} da tentativa "
+            f"{token_str[:8]} para {nota.pedido.numero}; "
+            "conciliação fiscal necessária."
+        )[:255],
+        objeto_tipo=f"{nota._meta.app_label}.{nota.__class__.__name__}",
+        objeto_id=str(nota.pk),
         severidade=Aviso.Severidade.ERRO,
     )
     from core.auditoria import registrar_auditoria

@@ -30,7 +30,9 @@ após autorização de push; o aceite humano (Gate H) permanece pendente.
 - Sucesso e erro só aplicam transição quando o token relido é o mesmo.
 - Documento autorizado/cancelado é terminal para a tentativa antiga. A
   resposta é retida em `resultado_externo`, com número/chave, motivo, token e
-  instante, e gera `Aviso` e `fiscal.resultado_externo_obsoleto`.
+  instante, e gera `Aviso` e `fiscal.resultado_externo_obsoleto`. Cada evento
+  distinto tem aviso próprio, identificado por tentativa e tipo, para não
+  esconder uma nova evidência atrás de um aviso antigo.
 - Repetição do mesmo token/tipo é idempotente: não duplica evento, aviso ou
   auditoria.
 - Evidência externa conflitante não reabre pedido, não repete estoque/estorno
@@ -54,8 +56,8 @@ após autorização de push; o aceite humano (Gate H) permanece pendente.
 A consolidação final desta rodada está registrada em
 `docs/audit/fase-2c-correcao-validacao.md`. Resumo:
 
-- SQLite local: **647 passed, 22 skipped, 240 subtests**; cobertura total
-  **86,38%** (`fiscal/services.py` 93,89%; `fiscal/views.py` 89,84%).
+- SQLite local: **648 passed, 22 skipped, 240 subtests**; cobertura total
+  **86,38%** (`fiscal/services.py` 93,94%; `fiscal/views.py` 89,84%).
 - PostgreSQL: testes marcados em `fiscal/tests/test_concurrency_postgres.py`;
   não há PostgreSQL/Redis neste ambiente, portanto não foram apresentados
   como aprovados localmente.
