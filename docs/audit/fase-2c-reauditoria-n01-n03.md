@@ -13,3 +13,13 @@
 - N01/N03 concorrentes: PostgreSQL real necessário; testes marcados.
 - CI remota: pendente no novo SHA.
 - Aceite humano: pendente.
+
+## L01 — autoridade da tentativa
+
+A correção L01 foi acrescentada sem alterar os contratos N01–N03. O token
+`NotaFiscal.tentativa_atual` é comparado sob lock na conclusão de sucesso e
+erro; a confirmação manual coordena com o lease; cancelamento invalida o
+claim; resultados antigos/conflitantes ficam em `resultado_externo` com
+`Aviso` e auditoria. A matriz e a política completas estão em
+`docs/audit/fase-2c-reauditoria-l01.md` e
+`docs/specs/fase-2c/l01-autoridade-tentativa.md`.

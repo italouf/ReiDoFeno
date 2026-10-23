@@ -66,6 +66,25 @@ Cada fato tem uma competência e um efeito próprios:
 - O teste concorrente R01 usa `TransactionTestCase` com `setUp`, threads
   iniciadas uma única vez e eventos liberados em falha.
 
+## Fechamento da reauditoria L01
+
+- Cada emissão recebe um token UUID (`tentativa_atual`) na fase curta, sob
+  a ordem `Pedido → NotaFiscal`; `processando_desde` continua sendo o lease
+  curto, mas não é a identidade da tentativa.
+- A conclusão relê o documento sob lock e compara o token antes de aplicar
+  sucesso, erro, número, chave, origem ou limpeza do lease. Uma tentativa
+  antiga não altera o claim nem o resultado de outra.
+- Registro manual durante lease ativo é bloqueado com erro de domínio. Após
+  expiração, o manual pode assumir o claim, limpa o token antigo e é
+  auditado; o retorno antigo fica apenas como evidência.
+- Cancelamento limpa o claim. Documento autorizado/cancelado é terminal para
+  a tentativa antiga.
+- Respostas externas tardias/conflitantes ficam em
+  `NotaFiscal.resultado_externo`, com `Aviso` e auditoria, sem reabrir pedido,
+  repetir estoque/estorno ou inventar cancelamento externo.
+- O contrato completo está em
+  `docs/specs/fase-2c/l01-autoridade-tentativa.md`.
+
 ## Consequências
 
 - Mesmo período e mesmo escopo reconciliam painel, vendedor, produto,

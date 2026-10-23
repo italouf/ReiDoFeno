@@ -1,5 +1,29 @@
 # Changelog
 
+## [Fase 2C — correção L01 da autoridade fiscal] — 2026-10-22
+
+- **L01-A/B/C/D:** cada tentativa fiscal recebe `tentativa_atual` (UUID) e a
+  conclusão de sucesso/erro só altera o documento se o token relido ainda for
+  o dono do claim. Documento confirmado, cancelado ou resultado de tentativa
+  mais nova não é sobrescrito/rebaixado/limpo.
+- **Manual:** registro durante lease ativo retorna erro de domínio; após
+  expiração pode assumir o claim, limpa token/lease antigos e audita
+  `fiscal.tentativa_manual_assumida`.
+- **Evidência externa:** respostas tardias/conflitantes ficam em
+  `NotaFiscal.resultado_externo`, com `Aviso` e auditoria
+  `fiscal.resultado_externo_obsoleto`, sem reabrir pedido, repetir estoque ou
+  estorno. Repetição do mesmo token/tipo é idempotente.
+- **Cancelamento:** `cancelar_nota_fiscal` invalida o claim e preserva a
+  terminalidade; retry ordinário de cancelada continua bloqueado.
+- **Schema:** `fiscal/0006_tentativa_emissao.py` adiciona os campos de forma
+  aditiva; o gate histórico `0001 → HEAD` inclui a nova migração.
+- **Validação local:** SQLite **647 passed, 22 skipped, 240 subtests**;
+  cobertura total **86,38%**, `fiscal/services.py` **93,89%**,
+  `fiscal/views.py` **89,84%**; Node R05 2/2; Ruff, `check`,
+  `makemigrations --check`, `check --deploy`, Bandit (0 medium/high) e
+  `pip-audit` (0) limpos. PostgreSQL 15 + Redis, CI no novo SHA e aceite
+  humano permanecem pendentes.
+
 ## [Fase 2C — fechamento N01–N03] — 2026-10-22
 
 - **N01:** teste concorrente R01 corrigido para `TransactionTestCase`, com

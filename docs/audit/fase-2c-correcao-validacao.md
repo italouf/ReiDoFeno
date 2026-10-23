@@ -9,20 +9,21 @@ PostgreSQL 15/Redis: **não disponíveis neste ambiente**; CI remoto pendente.
 
 | Verificação | Resultado |
 |---|---|
-| Suíte SQLite | **636 passed, 18 skipped, 240 subtests** |
-| Cobertura total dos módulos medidos | **86,90%** |
+| Suíte SQLite | **647 passed, 22 skipped, 240 subtests** |
+| Cobertura total dos módulos medidos | **86,38%** |
 | `analytics/services.py` | **95,24%** |
 | `sales/services.py` | **84,91%** |
-| `fiscal/services.py` | **89,52%** |
+| `fiscal/services.py` | **93,89%** |
+| `fiscal/views.py` | **89,84%** |
 | `ruff check .` | limpo |
 | `manage.py check` | sem issues |
 | `manage.py makemigrations --check --dry-run` | no changes |
 | `manage.py check --deploy` com segredos sintéticos | sem issues |
 | Bandit `-ll` | 0 medium/high |
 | `pip-audit -r requirements.txt` | 0 vulnerabilidades conhecidas |
-| Gate histórico `0001 → HEAD` | aprovado em SQLite descartável |
+| Gate histórico `0001 → HEAD` | aprovado em SQLite descartável, incluindo `fiscal/0006` |
 
-Os 16 skips são os testes marcados `postgres`/Redis já conhecidos e os testes
+Os 22 skips são os testes marcados `postgres`/Redis já conhecidos e os testes
 que exigem backend real. Não foram apresentados como aprovados.
 
 ## Fechamento N01–N03
@@ -35,6 +36,25 @@ que exigem backend real. Não foram apresentados como aprovados.
 - N03: integração fiscal em duas fases com claim/lease; autorização tardia
   gera aviso/auditoria; nota cancelada não é reautorizada; retry concorrente
   não chama o provedor.
+
+## Correção L01 — autoridade da tentativa
+
+- `NotaFiscal.tentativa_atual` recebe UUID na fase curta; sucesso/erro relê e
+  compara o token sob lock antes de alterar documento, número, chave, origem
+  ou lease.
+- Manual durante lease ativo retorna erro tratável; após expiração, assume o
+  claim, limpa o token antigo e registra `fiscal.tentativa_manual_assumida`.
+- Erro/sucesso de tentativa antiga não rebaixa autorizada, não desfaz
+  cancelada e não limpa resultado/claim de tentativa mais nova.
+- Respostas tardias/conflitantes ficam em
+  `NotaFiscal.resultado_externo["eventos"]`, com `Aviso` e auditoria
+  `fiscal.resultado_externo_obsoleto`; repetição do mesmo token/tipo é
+  idempotente.
+- `fiscal/0006_tentativa_emissao.py` adiciona os campos de forma aditiva.
+- Testes SQLite: 11 cenários em `L01AutoridadeTentativaTests`; PostgreSQL:
+  quatro interleavings marcados em `FiscalConcurrencyTests`.
+- Contrato e matriz: `docs/specs/fase-2c/l01-autoridade-tentativa.md` e
+  `docs/audit/fase-2c-reauditoria-l01.md`.
 
 ## Reauditoria R01-R05
 
