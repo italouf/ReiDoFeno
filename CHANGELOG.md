@@ -1,5 +1,100 @@
 # Changelog
 
+## [Fase 3 — propriedade e cleanup do sentinela] — 2026-10-24
+
+- **F3-06:** o harness sentinela instala a trap depois de adquirir uma lock e
+  usa flags de propriedade (`OWN_SMOKE`, `OWN_SENTINELA_VOLUME`,
+  `OWN_SENTINELA_CONTAINER`). Recusas por volume/container preexistente,
+  projeto ocupado ou execução concorrente não executam `down`, `rm` ou
+  `volume rm`; o cleanup remove apenas recursos criados pela execução atual e
+  preserva o exit code original.
+- **F3-06:** harness e `smoke-stack.sh` usam o **mesmo** lock do projeto e um
+  token de owner verificado. O harness mantém a autoridade até o último
+  teardown; o filho herda a lock sem readquiri-la. Uma segunda execução,
+  direta ou pelo harness, não interrompe a primeira.
+- **Regressões:** 10 cenários com Bash real + Docker simulado (preexistência,
+  concorrência, lock comum entre os dois scripts, falha parcial, sucesso,
+  falha inesperada e falha deliberada).
+- **Validação local:** 709 passed, 24 skipped, 240 subtests; 64 testes focados;
+  Ruff limpo; scripts com sintaxe válida. Docker Engine continua indisponível
+  localmente; smoke real/CI permanece pendente no novo SHA.
+
+## [Fase 3 — isolamento do smoke e persistência determinística] — 2026-10-23
+
+- **F3-04:** o smoke agora usa o projeto descartável `reidofeno_smoke`, com
+  `--project-name` explícito, volumes `reidofeno_smoke_*`, envs exclusivos
+  (`infra/.env.smoke` + `.env.docker.smoke`), portas 8080/8443 e rede `_front`
+  descoberta por `docker inspect`. A validação pré-mutação recusa o projeto
+  `reidofeno`, portas 80/443 e volumes de desenvolvimento.
+- **F3-04:** `test-smoke-isolation.sh` cria sentinela descartável, executa o
+  smoke separado e confere que os recursos permanecem após sucesso e falha
+  deliberada; cleanup é limitado a `reidofeno_smoke` e ao sentinela do teste.
+- **F3-05:** `contar_produto` usa `manage.py shell --verbosity 0`; a regressão
+  com Django 5.2.17 prova stdout exato `1`, sem banner. Falha do comando,
+  produto ausente ou contagem divergente continuam reprovando.
+- **CI:** configuração smoke valida projeto/env separados; diagnóstico e
+  cleanup usam `reidofeno_smoke`; dev usa `reidofeno` explicitamente.
+- **Validação local:** 699 passed, 24 skipped, 240 subtests; 54 testes focados;
+  settings 16/16 com pai limpo e staging; Compose CLI v5.6.1 validou
+  base/dev/cron/smoke; Caddy runtime/dev válidos; recusa de projeto dev
+  comprovada. Docker Engine segue indisponível localmente; smoke integrado
+  permanece pendente no CI.
+
+## [Fase 3 — correção de aceite F3-01/F3-02/F3-03] — 2026-10-23
+
+- **F3-01:** o job `docker` montava `infra/caddy/transport.caddy`, que não
+  existe; o arquivo real é `infra/transport.caddy`. O gate agora usa
+  `--mount` com `source` explícito, valida runtime e dev, e um teste resolve
+  os caminhos extraídos do YAML do workflow.
+- **F3-02:** os testes de produção deixam de copiar o ambiente inteiro. Um
+  baseline estrito é montado por allowlist (produção, TLS, fakes desligados) e
+  só então recebe overrides. A classe passa tanto com pai limpo quanto com o
+  ambiente staging do Compose (16/16 em ambos).
+- **F3-03:** endpoint `/healthz/ip/` gated por `SMOKE_DIAGNOSTICS` +
+  `DJANGO_ENVIRONMENT=staging`; `infra/docker-compose.smoke.yml`;
+  `infra/scripts/smoke-stack.sh` verifica healthchecks, HTTPS, página,
+  estático, IP real contra `X-Forwarded-For` forjado, cron com dados
+  sintéticos e persistência de banco/mídia após recriação sem `-v`.
+- **CI:** valida `docker compose config` em base/dev/cron/smoke; constrói
+  runtime e dev; roda a suíte completa no container dev com
+  `config.settings.test`/PostgreSQL/Redis; diagnóstico `if: failure()` e
+  cleanup `if: always()` limitado ao projeto `reidofeno`.
+- **Escopo documentado:** sem CD, sem staging público, sem TLS no PostgreSQL
+  interno, domínios como aliases da mesma instância, HSTS local em 0 e porta
+  dev em loopback por padrão. CI remoto no SHA corrigido permanece pendente.
+- **Validação local:** 695 passed, 24 skipped, 240 subtests; 50 testes
+  focados; classe de settings 16/16 com pai limpo e staging; Ruff, Bandit,
+  `check`, `makemigrations`, `check --deploy`, Caddy e Compose CLI v5.6.1
+  limpos. Docker Engine não está disponível nesta máquina.
+
+## [Fase 3 — Docker, Compose, Caddy e CI] — 2026-10-23
+
+- **Docker:** `infra/Dockerfile` multi-stage (`builder`, `dev`, `runtime`),
+  usuário `app` (uid 1000), `collectstatic` no build com
+  `config.settings.build`, Gunicorn com PROXY protocol, healthcheck em
+  `/healthz/` e `supercronic` para jobs não-root.
+- **Compose:** `infra/docker-compose.yml` com `web`, `db`, `redis`, `caddy` e
+  `cron` (perfil opcional); redes `front`/`back`, PostgreSQL/Redis sem portas
+  publicadas, volumes persistentes e healthchecks em todos os serviços de
+  longa duração. Override de desenvolvimento usa `runserver`, stage `dev` e
+  hot-reload.
+- **Caddy:** TLS automático (Let's Encrypt), domínios parametrizados por
+  ambiente, CA interna para `localhost`, headers de segurança, mídia direta
+  de `/srv/media` e PROXY protocol v1 para preservar `REMOTE_ADDR` (SEC-03).
+- **Staging:** `DJANGO_ENVIRONMENT=staging` permite PostgreSQL interno sem TLS
+  e simuladores; produção continua estrita (`DATABASE_SSL_REQUIRE=True`, sem
+  fake, coletor/live mode obrigatórios). Produção ganhou
+  `SECURE_REDIRECT_EXEMPT` para `/healthz/`.
+- **CI:** `config.settings.test` com PostgreSQL/Redis reais,
+  `makemigrations --check`, Codecov e job `docker` (build, non-root,
+  tamanho < 500 MB, `caddy validate` e `docker compose config`).
+- **Validação local:** 685 testes passed, 24 skipped, 240 subtests; 40 testes
+  de contrato/settings; Caddy 2.11.7 `Valid configuration`; `collectstatic`
+  com storage de produção (147 arquivos, 427 pós-processados); Ruff, Bandit,
+  `check`, `makemigrations --check` e `check --deploy` limpos. Docker/Compose,
+  PostgreSQL/Redis integrados e tamanho da imagem ficam para o CI, pois não há
+  Docker na máquina local.
+
 ## [Fase 2C — correção L02/L03 de avisos e eventos] — 2026-10-23
 
 - **L02:** `Aviso.evento_chave` separa aviso agregado (`""`) de aviso por

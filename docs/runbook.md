@@ -4,11 +4,13 @@
 > [`docs/audit/fase-2b-conclusao.md`](audit/fase-2b-conclusao.md).
 >
 > **Nota de fase:** o alvo da Fase 2A é PostgreSQL **local na VPS**
-> (ADR-001). As seções de Render abaixo permanecem como blueprint legado
-> até a migração de infraestrutura da Fase 3; em qualquer host, o contrato é
+> (ADR-001). A partir da Fase 3, o caminho recomendado é a stack
+> `infra/docker-compose.yml` com Caddy; as seções de Render abaixo permanecem
+> como blueprint legado. Em qualquer host, o contrato é
 > `DATABASE_URL` PostgreSQL com TLS e `REDIS_URL` com incremento atômico.
 > O proxy reverso deve preservar o IP do cliente em `REMOTE_ADDR`; não
 > confie em `X-Forwarded-For` de origem não controlada (SEC-03/rate limit).
+> No compose, isso é feito com PROXY protocol entre Caddy e Gunicorn.
 
 ## 1. Visão geral
 
@@ -20,7 +22,81 @@
 
 ## 2. Deploy
 
-### VPS (alvo da Fase 2A)
+### Docker Compose + Caddy (homologação local; publicação futura)
+
+> **Escopo desta entrega:** a stack e os smokes foram preparados para execução
+> local/CI. Os passos 1–7 descrevem a publicação futura em VPS e **não foram
+> executados** nesta fase. Não há CD, DNS ou HTTPS público validado.
+
+1. Provisionar a VPS com Docker Engine + Compose v2 e liberar 80/443.
+2. Copiar `.env.docker.example` para `.env.docker` e preencher os segredos.
+   Copiar `infra/.env.example` para `infra/.env` e ajustar `APP_DOMAIN`,
+   `STAGING_DOMAIN`, `ACME_EMAIL`, `HSTS_MAX_AGE=31536000` e `DB_PASSWORD`.
+3. Apontar o DNS de `APP_DOMAIN` e `STAGING_DOMAIN` para a VPS **antes** de
+   subir o Caddy (a emissão Let's Encrypt depende disso).
+4. Subir a stack com migrations automáticas e cron:
+   `docker compose -f infra/docker-compose.yml --profile cron up -d --build`.
+5. Conferir `docker compose -f infra/docker-compose.yml ps` (todos
+   `healthy`), `docker compose -f infra/docker-compose.yml logs caddy` e
+   `curl -I https://SEU-DOMINIO/healthz/`.
+6. Executar
+   `docker compose -f infra/docker-compose.yml exec web python manage.py seed_groups`
+   e criar o superusuário. Em seguida, seguir o inventário/backfill da seção 3.
+7. Preservar os volumes `pgdata`, `caddy_data` e `caddy_config` em backup. A
+   recriação de `caddy_data` força nova emissão de certificados.
+
+**Limites que precisam ser resolvidos antes de produção:**
+
+- O PostgreSQL interno do Compose não tem TLS configurado. A produção estrita
+  exige TLS; provisione certificados/Postgres adequado e mantenha
+  `DATABASE_SSL_REQUIRE=True`.
+- `APP_DOMAIN` e `STAGING_DOMAIN` no mesmo Caddy apontam para o mesmo `web`,
+  banco e integrações. São aliases, não ambientes isolados.
+- Não existe etapa de deploy no workflow. Push em `main` executa CI, não CD.
+- O PostgreSQL/Redis do CI são service containers efêmeros do runner; não
+  usam a VPS nem dados reais.
+- O HSTS local usa `HSTS_MAX_AGE=0`; a política pública deve ser habilitada
+  apenas no ambiente público real.
+
+O Caddy preserva `REMOTE_ADDR` via PROXY protocol; não publique a porta 8000
+do serviço `web` em produção. O acesso HTTP é redirecionado para HTTPS e o
+CSP/HSTS ficam no proxy, com defesa em profundidade no Django.
+
+### Smoke descartável de homologação
+
+O smoke usa um projeto próprio (`reidofeno_smoke`), volumes
+`reidofeno_smoke_*`, arquivos `.env.smoke`/`.env.docker.smoke` e portas
+8080/8443. Ele recusa o projeto de desenvolvimento e não remove seus volumes.
+
+```bash
+cp .env.docker.smoke.example .env.docker.smoke
+cp infra/.env.smoke.example infra/.env.smoke
+IMAGE_TAG=local docker compose --project-name reidofeno \
+    -f infra/docker-compose.yml build web
+IMAGE_TAG=local bash infra/scripts/smoke-stack.sh
+```
+
+O script sobe Caddy/web/db/redis/cron, exige healthchecks, valida HTTPS em
+`https://localhost:8443`, página, estático, IP real/`XFF` forjado, executa as
+rotinas do cron com dados sintéticos e recria os containers sem `-v` para
+provar persistência. Ele limpa somente o projeto `reidofeno_smoke`.
+
+Para provar isolamento contra recursos sentinela e exercitar a falha
+deliberada:
+
+```bash
+IMAGE_TAG=local bash infra/scripts/test-smoke-isolation.sh
+```
+
+O harness usa uma lock de execução e só remove recursos cujo ownership foi
+registrado por esta execução. Se ele recusar por volume/container sentinela ou
+projeto de smoke já existente, **não remova nem interrompa** esses recursos;
+confirme que não há execução ativa e faça a limpeza manual do namespace de
+smoke apenas quando seguro. Locks residuais (`/tmp/reidofeno_smoke.lock` e
+`/tmp/reidofeno-smoke-isolation.lock`) só devem ser removidas após essa
+confirmação.
+
+### VPS (procedimento manual legado)
 
 1. Provisionar PostgreSQL 15 com TLS e Redis 7 com persistência adequada.
 2. Definir `DATABASE_URL`, `REDIS_URL`, `DJANGO_SECRET_KEY`, domínios,

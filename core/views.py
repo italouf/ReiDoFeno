@@ -1,7 +1,8 @@
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.db.models import F
-from django.http import JsonResponse
+from django.http import Http404, JsonResponse
 from django.urls import reverse_lazy
 from django.utils import timezone
 from django.views.generic import (
@@ -27,6 +28,13 @@ GRUPOS_CADASTROS = ("Administrador", "Gestor")
 def healthz(request):
     """Endpoint de saúde para monitoramento (sem dados sensíveis)."""
     return JsonResponse({"status": "ok"})
+
+
+def healthz_ip(request):
+    """Diagnóstico de smoke: expõe somente REMOTE_ADDR, nunca em produção."""
+    if not getattr(settings, "SMOKE_DIAGNOSTICS", False):
+        raise Http404
+    return JsonResponse({"remote_addr": request.META.get("REMOTE_ADDR", "")})
 
 
 class PainelView(GrupoRequiredMixin, TemplateView):

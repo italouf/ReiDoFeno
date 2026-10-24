@@ -1,0 +1,43 @@
+# Contexto de build: nunca enviar segredos, banco local, mídia ou caches.
+.git
+.gitignore
+.github
+.venv
+.env
+**/.env
+.env.*
+**/.env.*
+*.env
+
+# Python
+__pycache__
+**/__pycache__
+*.py[cod]
+*.so
+*.egg-info
+.pytest_cache
+.ruff_cache
+.coverage
+htmlcov
+reports
+
+# Django
+db.sqlite3
+*.sqlite3
+media
+staticfiles
+*.log
+
+# Documentação e material local
+docs
+rfenodocs
+*.md
+tests_e2e
+opencode.ai
+.agents
+.gemini
+.impeccable
+.opencode
+.superpowers
+openspec
+node_modules

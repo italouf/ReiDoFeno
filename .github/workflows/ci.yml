@@ -7,6 +7,7 @@ on:
       - fase-2a-seguranca-critica
       - fase-2b-integridade-estoque
       - fase-2c-analytics-fiscal
+      - fase-3-docker-staging
   pull_request:
   workflow_dispatch:
 
@@ -58,6 +59,8 @@ jobs:
     env:
       DATABASE_URL: postgres://reidofeno:reidofeno@localhost:5432/reidofeno
       REDIS_URL: redis://localhost:6379/1
+      DJANGO_SETTINGS_MODULE: config.settings.test
+      DJANGO_SECRET_KEY: ci-only-3f9c2d7a1b8e4f6c0a5d9e2b7c1f4a8d6e3b9c0f2a7d5e1b8c4f6a9d3e0b7c2
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -72,10 +75,19 @@ jobs:
         run: |
           mkdir -p reports
           pytest --junitxml=reports/junit.xml --cov --cov-fail-under=80 --cov-report=xml:reports/coverage.xml --cov-report=term-missing
+      - name: Migrações pendentes
+        run: python manage.py makemigrations --check --dry-run
+      - name: Upload de cobertura (Codecov)
+        uses: codecov/codecov-action@v4
+        if: always()
+        with:
+          files: ./reports/coverage.xml
+          flags: unittests
+          fail_ci_if_error: false
       - name: Check de produção (PostgreSQL + Redis)
         env:
           DJANGO_SETTINGS_MODULE: config.settings.production
-          DJANGO_SECRET_KEY: chave-de-ci-com-mais-de-50-caracteres-1234567890
+          DJANGO_SECRET_KEY: ci-only-3f9c2d7a1b8e4f6c0a5d9e2b7c1f4a8d6e3b9c0f2a7d5e1b8c4f6a9d3e0b7c2
           DJANGO_ALLOWED_HOSTS: example.com
           MERCADOPAGO_COLLECTOR_ID: collector-ci
           MERCADOPAGO_LIVE_MODE: "True"
@@ -108,6 +120,144 @@ jobs:
         with:
           name: relatorios-testes
           path: reports/
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Preparar env descartável
+        run: |
+          cp .env.docker.example .env.docker
+          cp infra/.env.example infra/.env
+          cp .env.docker.smoke.example .env.docker.smoke
+          cp infra/.env.smoke.example infra/.env.smoke
+      - name: Validar sintaxe dos scripts de smoke
+        run: |
+          bash -n infra/scripts/smoke-stack.sh
+          bash -n infra/scripts/test-smoke-isolation.sh
+      - name: Build da imagem runtime
+        env:
+          DOCKER_BUILDKIT: "1"
+        run: docker build --target runtime -t reidofeno:ci -f infra/Dockerfile .
+      - name: Build da imagem dev (pytest/runserver)
+        env:
+          DOCKER_BUILDKIT: "1"
+        run: docker build --target dev -t reidofeno:dev-ci -f infra/Dockerfile .
+      - name: Dependências do stage dev
+        run: |
+          docker run --rm reidofeno:dev-ci python -c \
+            "import django, pytest, factory, coverage; print('DEV_DEPS_OK')"
+      - name: Container roda como non-root
+        run: |
+          uid=$(docker run --rm -e RUN_MIGRATIONS=false reidofeno:ci id -u)
+          echo "uid=$uid"
+          test "$uid" = "1000"
+      - name: Django check dentro da imagem
+        run: |
+          docker run --rm \
+            -e RUN_MIGRATIONS=false \
+            -e DJANGO_SETTINGS_MODULE=config.settings.build \
+            reidofeno:ci python manage.py check
+      - name: Tamanho da imagem (< 500 MB)
+        run: |
+          bytes=$(docker image inspect reidofeno:ci --format '{{.Size}}')
+          echo "Imagem final: $((bytes / 1024 / 1024)) MB"
+          test "$bytes" -lt 500000000
+      - name: Validar Caddyfile (runtime e dev)
+        run: |
+          test -f infra/Caddyfile
+          test -f infra/transport.caddy
+          test -f infra/transport-dev.caddy
+          docker run --rm \
+            --mount "type=bind,source=$PWD/infra/Caddyfile,target=/etc/caddy/Caddyfile,readonly" \
+            --mount "type=bind,source=$PWD/infra/transport.caddy,target=/etc/caddy/transport.caddy,readonly" \
+            caddy:2-alpine caddy validate \
+            --config /etc/caddy/Caddyfile --adapter caddyfile
+          docker run --rm \
+            --mount "type=bind,source=$PWD/infra/Caddyfile,target=/etc/caddy/Caddyfile,readonly" \
+            --mount "type=bind,source=$PWD/infra/transport-dev.caddy,target=/etc/caddy/transport.caddy,readonly" \
+            caddy:2-alpine caddy validate \
+            --config /etc/caddy/Caddyfile --adapter caddyfile
+      - name: Validar modelos Compose
+        run: |
+          docker compose --project-name reidofeno \
+            -f infra/docker-compose.yml config --quiet
+          docker compose --project-name reidofeno \
+            -f infra/docker-compose.yml \
+            -f infra/docker-compose.override.yml config --quiet
+          docker compose --project-name reidofeno \
+            -f infra/docker-compose.yml --profile cron config --quiet
+          docker compose --project-name reidofeno \
+            -f infra/docker-compose.yml \
+            -f infra/docker-compose.override.yml \
+            --profile cron config --quiet
+          docker compose --project-name reidofeno_smoke \
+            --env-file infra/.env.smoke \
+            -f infra/docker-compose.yml \
+            -f infra/docker-compose.smoke.yml \
+            --profile cron config --quiet
+      - name: Settings no container dev (ambiente staging)
+        env:
+          IMAGE_TAG: dev-ci
+        run: |
+          docker compose --project-name reidofeno \
+            -f infra/docker-compose.yml \
+            -f infra/docker-compose.override.yml up -d db redis
+          docker compose --project-name reidofeno \
+            -f infra/docker-compose.yml \
+            -f infra/docker-compose.override.yml \
+            run --rm web pytest -p no:cacheprovider \
+            core/tests/test_settings_production.py -q
+      - name: Suíte completa no container dev (PostgreSQL/Redis)
+        env:
+          IMAGE_TAG: dev-ci
+        run: |
+          docker compose --project-name reidofeno \
+            -f infra/docker-compose.yml \
+            -f infra/docker-compose.override.yml \
+            run --rm \
+            -e DJANGO_SETTINGS_MODULE=config.settings.test \
+            -e REDIS_URL=redis://redis:6379/0 \
+            web pytest -p no:cacheprovider
+      - name: Derrubar stack dev
+        run: |
+          docker compose --project-name reidofeno \
+            -f infra/docker-compose.yml \
+            -f infra/docker-compose.override.yml \
+            down -v --remove-orphans
+      - name: Smoke runtime + isolamento (HTTPS, SEC-03, cron, persistência)
+        env:
+          IMAGE_TAG: ci
+        run: bash infra/scripts/test-smoke-isolation.sh
+      - name: Diagnóstico dos smokes
+        if: failure()
+        run: |
+          docker compose --project-name reidofeno_smoke \
+            --env-file infra/.env.smoke \
+            -f infra/docker-compose.yml -f infra/docker-compose.smoke.yml \
+            --profile cron ps || true
+          docker compose --project-name reidofeno_smoke \
+            --env-file infra/.env.smoke \
+            -f infra/docker-compose.yml -f infra/docker-compose.smoke.yml \
+            --profile cron logs --no-color --tail=200 || true
+          docker compose --project-name reidofeno \
+            -f infra/docker-compose.yml \
+            -f infra/docker-compose.override.yml ps || true
+          docker compose --project-name reidofeno \
+            -f infra/docker-compose.yml \
+            -f infra/docker-compose.override.yml \
+            logs --no-color --tail=200 || true
+      - name: Cleanup descartável
+        if: always()
+        run: |
+          docker compose --project-name reidofeno_smoke \
+            --env-file infra/.env.smoke \
+            -f infra/docker-compose.yml -f infra/docker-compose.smoke.yml \
+            --profile cron down -v --remove-orphans || true
+          docker compose --project-name reidofeno \
+            -f infra/docker-compose.yml \
+            -f infra/docker-compose.override.yml --profile cron \
+            down -v --remove-orphans || true
 
   security:
     runs-on: ubuntu-latest

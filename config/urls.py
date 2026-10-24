@@ -1,12 +1,13 @@
 from django.contrib import admin
 from django.urls import include, path
 
-from core.views import healthz
+from core.views import healthz, healthz_ip
 
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("accounts/", include("accounts.urls")),
     path("healthz/", healthz),
+    path("healthz/ip/", healthz_ip),
     path("", include("catalog.public_urls")),
     path("", include("sales.urls")),
     path("painel/", include("core.urls")),

@@ -1,0 +1,12 @@
+# Normaliza o repositório entre Windows e Linux.
+* text=auto
+
+# Arquivos executados/interpretados dentro do container exigem LF.
+*.sh text eol=lf
+Dockerfile text eol=lf
+Caddyfile text eol=lf
+*.caddy text eol=lf
+crontab text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+requirements*.txt text eol=lf
