@@ -32,6 +32,14 @@ esac
 [ -f "$ENV_DOCKER_SMOKE" ] \
     || erro "ausente: $ENV_DOCKER_SMOKE (copie de .env.docker.smoke.example)"
 
+# Exclusão mútua do projeto fixo: uma segunda execução do smoke (manual ou
+# pelo harness) não pode interromper a primeira.
+SMOKE_LOCK_DIR="${SMOKE_LOCK_DIR:-${TMPDIR:-/tmp}/${PROJETO_SMOKE}.lock}"
+if ! mkdir "$SMOKE_LOCK_DIR" 2>/dev/null; then
+    erro "smoke já está em execução para o projeto $PROJETO_SMOKE"
+fi
+trap 'rmdir "$SMOKE_LOCK_DIR" >/dev/null 2>&1 || true' EXIT
+
 # Força valores isolados; variáveis herdadas do shell não podem redirecionar
 # o smoke para credenciais/portas/arquivos do desenvolvimento.
 export APP_ENV_FILE=.env.docker.smoke
