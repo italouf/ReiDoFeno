@@ -8,11 +8,14 @@
   projeto ocupado ou execução concorrente não executam `down`, `rm` ou
   `volume rm`; o cleanup remove apenas recursos criados pela execução atual e
   preserva o exit code original.
-- **F3-06:** o `smoke-stack.sh` também tem lock por projeto; uma segunda
-  execução não interrompe a primeira.
-- **Regressões:** 8 cenários com Bash real + Docker simulado (preexistência,
-  concorrência, falha parcial, sucesso, falha inesperada e falha deliberada).
-- **Validação local:** 707 passed, 24 skipped, 240 subtests; 62 testes focados;
+- **F3-06:** harness e `smoke-stack.sh` usam o **mesmo** lock do projeto e um
+  token de owner verificado. O harness mantém a autoridade até o último
+  teardown; o filho herda a lock sem readquiri-la. Uma segunda execução,
+  direta ou pelo harness, não interrompe a primeira.
+- **Regressões:** 10 cenários com Bash real + Docker simulado (preexistência,
+  concorrência, lock comum entre os dois scripts, falha parcial, sucesso,
+  falha inesperada e falha deliberada).
+- **Validação local:** 709 passed, 24 skipped, 240 subtests; 64 testes focados;
   Ruff limpo; scripts com sintaxe válida. Docker Engine continua indisponível
   localmente; smoke real/CI permanece pendente no novo SHA.
 
