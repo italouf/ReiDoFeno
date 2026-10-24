@@ -88,6 +88,14 @@ deliberada:
 IMAGE_TAG=local bash infra/scripts/test-smoke-isolation.sh
 ```
 
+O harness usa uma lock de execução e só remove recursos cujo ownership foi
+registrado por esta execução. Se ele recusar por volume/container sentinela ou
+projeto de smoke já existente, **não remova nem interrompa** esses recursos;
+confirme que não há execução ativa e faça a limpeza manual do namespace de
+smoke apenas quando seguro. Locks residuais (`/tmp/reidofeno_smoke.lock` e
+`/tmp/reidofeno-smoke-isolation.lock`) só devem ser removidas após essa
+confirmação.
+
 ### VPS (procedimento manual legado)
 
 1. Provisionar PostgreSQL 15 com TLS e Redis 7 com persistência adequada.

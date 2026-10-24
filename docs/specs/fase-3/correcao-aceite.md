@@ -17,6 +17,7 @@ documenta os limites reais.
 | F3-03 | Smoke só verifica `/healthz/` e imprime `ps`; não prova stack, IP, cron nem persistência | Aceite executável de saúde, página, estático, SEC-03, cron e volumes | Endpoint de diagnóstico gated por staging, script de smoke e CI com cron/peristência | Script real + logs/limpeza no CI; pendente de execução local sem Docker |
 | F3-04 | Smoke usava o mesmo projeto/volumes do dev (`reidofeno`) e semeava/removia recursos compartilhados | Projeto descartável próprio, sem fallback, com volumes/credenciais isolados e recusa antes da primeira mutação | `reidofeno_smoke`, `--project-name`, `.env.smoke`/`.env.docker.smoke`, portas 8080/8443, validação de config e teste de sentinela | Teste de isolamento e CI; execução Docker pendente |
 | F3-05 | `manage.py shell -c` imprime banner de importações; comparação exata com `1` falha | Saída de máquina determinística e exit code propagado | `shell --verbosity 0` nas consultas e regressão com Django 5.2.17 | Reprodução: sem flag imprime banner+1; com flag imprime somente `1` |
+| F3-06 | Trap de EXIT instalado antes dos guards; recusa por recurso preexistente ainda executava `down -v`, `rm -f` e `volume rm` | Lock de execução + flags de propriedade por recurso; cleanup só remove o que esta execução criou; guards antes de qualquer mutação | 8 regressões com Bash real + Docker simulado inspecionando chamadas | **8 passed** localmente; integração real pendente |
 
 
 ## F3-01 — caminho e gate Caddy
@@ -95,6 +96,26 @@ produto ausente ou contagem diferente de 1 reprovam a verificação; não há
 `tail -1`, filtro permissivo ou `|| true` na assertion. Uma regressão executa a
 forma real de invocação e exige stdout exato.
 
+## F3-06 — propriedade no cleanup do sentinela
+
+O harness adquire uma lock (`mkdir` atômico) antes de qualquer verificação e
+instala o trap depois dela. Recusas por lock ocupado, volume/container
+preexistente ou projeto de smoke ocupado não executam comandos destrutivos;
+apenas a lock de quem a criou é removida.
+
+Ownership é explícita: `OWN_SENTINELA_VOLUME` só é marcado após
+`docker volume create`; `OWN_SENTINELA_CONTAINER` após `docker run`;
+`OWN_SMOKE` só depois dos guards e antes do smoke. O cleanup remove
+exatamente as flags ativas, preserva o exit code original e nunca usa
+`down -v`/`rm` em recursos preexistentes. Uma falha parcial remove só o volume
+já criado. Uma segunda execução concorrente é recusada pela lock sem tocar na
+primeira.
+
+Regressões em `core/tests/test_smoke_isolation.py` executam o Bash real com
+`docker` simulado e cobrem: volume preexistente, container preexistente,
+projeto ocupado, lock concorrente, falha parcial, sucesso, falha inesperada
+(exit 7) e falha deliberada.
+
 ## Fora de escopo (documentado)
 
 - TLS do PostgreSQL interno do Compose; produção estrita continua exigindo TLS
@@ -122,9 +143,11 @@ forma real de invocação e exige stdout exato.
   alternativas e validação pré-mutação; teste de sentinela preparado para CI.
 - F3-05 reproduzido (banner + `1`) e corrigido com `--verbosity 0`; regressão
   preparada.
+- F3-06 reproduzido com Docker simulado; guards de propriedade, lock e cleanup
+  seletivo implementados; 8 regressões de comportamento passam.
 - Compose CLI v5.6.1 validou base/dev/cron/smoke sem daemon e o modelo smoke
   isolado (`reidofeno_smoke`, volumes, portas 8080/8443).
-- Suíte local: 699 passed, 24 skipped, 240 subtests; 54 testes focados.
+- Suíte local: 707 passed, 24 skipped, 240 subtests; 62 testes focados.
 - Docker Engine não está disponível nesta máquina: build, up, HTTPS, IP, cron e
   persistência **não foram executados localmente**. O aceite integrado fica
   pendente até o CI rodar no SHA corrigido.

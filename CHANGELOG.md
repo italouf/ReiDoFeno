@@ -1,5 +1,21 @@
 # Changelog
 
+## [Fase 3 — propriedade e cleanup do sentinela] — 2026-10-24
+
+- **F3-06:** o harness sentinela instala a trap depois de adquirir uma lock e
+  usa flags de propriedade (`OWN_SMOKE`, `OWN_SENTINELA_VOLUME`,
+  `OWN_SENTINELA_CONTAINER`). Recusas por volume/container preexistente,
+  projeto ocupado ou execução concorrente não executam `down`, `rm` ou
+  `volume rm`; o cleanup remove apenas recursos criados pela execução atual e
+  preserva o exit code original.
+- **F3-06:** o `smoke-stack.sh` também tem lock por projeto; uma segunda
+  execução não interrompe a primeira.
+- **Regressões:** 8 cenários com Bash real + Docker simulado (preexistência,
+  concorrência, falha parcial, sucesso, falha inesperada e falha deliberada).
+- **Validação local:** 707 passed, 24 skipped, 240 subtests; 62 testes focados;
+  Ruff limpo; scripts com sintaxe válida. Docker Engine continua indisponível
+  localmente; smoke real/CI permanece pendente no novo SHA.
+
 ## [Fase 3 — isolamento do smoke e persistência determinística] — 2026-10-23
 
 - **F3-04:** o smoke agora usa o projeto descartável `reidofeno_smoke`, com

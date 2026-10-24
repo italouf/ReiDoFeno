@@ -8,8 +8,8 @@ separado do que permanece pendente.
 
 | Verificação | Resultado |
 |---|---|
-| `pytest -q` (SQLite/development) | **699 passed, 24 skipped, 240 subtests** |
-| Testes focados (infra + CI + healthz + settings + shell) | **54 passed** |
+| `pytest -q` (SQLite/development) | **707 passed, 24 skipped, 240 subtests** |
+| Testes focados (infra + CI + healthz + settings + shell) | **62 passed** |
 | Classe de settings com pai limpo | **16 passed** |
 | Classe de settings com pai staging do Compose | **16 passed** |
 | `ruff check .` | limpo |

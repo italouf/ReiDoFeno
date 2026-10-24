@@ -145,8 +145,9 @@ validação pré-mutação recusa o projeto `reidofeno`, volume com prefixo de d
 ou portas 80/443. O script sobe também o perfil `cron` e grava um arquivo em
 `/app/media`, recriando os containers sem `-v` para provar persistência.
 `infra/docker-compose.smoke.yml` habilita `SMOKE_DIAGNOSTICS` apenas no cenário
-descartável. `infra/scripts/test-smoke-isolation.sh` usa sentinela e falha
-deliberada para provar que o projeto habitual não é tocado.
+descartável. `infra/scripts/test-smoke-isolation.sh` usa sentinela, lock de
+execução e falha deliberada para provar que o projeto habitual não é tocado;
+o cleanup só remove recursos criados pela execução atual.
 
 Limites: este compose é uma instância única de homologação. `APP_DOMAIN` e
 `STAGING_DOMAIN` são aliases do mesmo `web`/banco; o PostgreSQL interno não tem
