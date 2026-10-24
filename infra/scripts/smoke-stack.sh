@@ -8,8 +8,8 @@ cd "$RAIZ"
 
 BASE="infra/docker-compose.yml"
 SMOKE="infra/docker-compose.smoke.yml"
-ENV_SMOKE="infra/.env.smoke"
-ENV_DOCKER_SMOKE=".env.docker.smoke"
+ENV_SMOKE="${SMOKE_ENV_SMOKE:-infra/.env.smoke}"
+ENV_DOCKER_SMOKE="${SMOKE_ENV_DOCKER:-.env.docker.smoke}"
 PROJETO_SMOKE="${SMOKE_PROJECT_NAME:-reidofeno_smoke}"
 SERVICOS_RUNTIME=(caddy web db redis cron)
 
@@ -33,12 +33,37 @@ esac
     || erro "ausente: $ENV_DOCKER_SMOKE (copie de .env.docker.smoke.example)"
 
 # Exclusão mútua do projeto fixo: uma segunda execução do smoke (manual ou
-# pelo harness) não pode interromper a primeira.
+# pelo harness) não pode interromper a primeira. O harness pode transferir a
+# autoridade via token somente se o token corresponder ao owner do lock.
 SMOKE_LOCK_DIR="${SMOKE_LOCK_DIR:-${TMPDIR:-/tmp}/${PROJETO_SMOKE}.lock}"
-if ! mkdir "$SMOKE_LOCK_DIR" 2>/dev/null; then
-    erro "smoke já está em execução para o projeto $PROJETO_SMOKE"
+SMOKE_LOCK_HELD=0
+SMOKE_LOCK_INHERITED=0
+SMOKE_LOCK_TOKEN="${SMOKE_LOCK_OWNER_TOKEN:-}"
+
+liberar_lock() {
+    if [ "$SMOKE_LOCK_HELD" = "1" ]; then
+        rm -f "$SMOKE_LOCK_DIR/owner" 2>/dev/null || true
+        rmdir "$SMOKE_LOCK_DIR" 2>/dev/null || true
+    fi
+}
+
+if [ -n "$SMOKE_LOCK_TOKEN" ]; then
+    if [ ! -f "$SMOKE_LOCK_DIR/owner" ]; then
+        erro "token de lock inválido: owner ausente em $SMOKE_LOCK_DIR"
+    fi
+    dono="$(cat "$SMOKE_LOCK_DIR/owner" 2>/dev/null || true)"
+    [ "$dono" = "$SMOKE_LOCK_TOKEN" ] \
+        || erro "token de lock inválido: não pertence à execução atual"
+    SMOKE_LOCK_INHERITED=1
+else
+    if ! mkdir "$SMOKE_LOCK_DIR" 2>/dev/null; then
+        erro "smoke já está em execução para o projeto $PROJETO_SMOKE"
+    fi
+    SMOKE_LOCK_HELD=1
+    trap 'liberar_lock' EXIT
+    SMOKE_LOCK_TOKEN="$$-$(date +%s)-$RANDOM"
+    printf '%s' "$SMOKE_LOCK_TOKEN" > "$SMOKE_LOCK_DIR/owner"
 fi
-trap 'rmdir "$SMOKE_LOCK_DIR" >/dev/null 2>&1 || true' EXIT
 
 # Força valores isolados; variáveis herdadas do shell não podem redirecionar
 # o smoke para credenciais/portas/arquivos do desenvolvimento.

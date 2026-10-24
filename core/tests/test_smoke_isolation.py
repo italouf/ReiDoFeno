@@ -8,6 +8,7 @@ import shutil
 import stat
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -70,7 +71,24 @@ case "$1" in
   exec) echo sentinel; exit 0 ;;
   inspect) echo true; exit 0 ;;
   rm) exit 0 ;;
-  compose) exit 0 ;;
+  compose)
+    case "$*" in
+      *" config"*)
+        if [ "${FAKE_BLOCK_CONFIG:-0}" = "1" ] && [ ! -f "$FAKE_CONFIG_BLOCKED" ]; then
+          : > "$FAKE_CONFIG_BLOCKED"
+          : > "$FAKE_READY"
+          while [ ! -f "$FAKE_RELEASE" ]; do sleep 0.05; done
+        fi
+        ;;
+      *" down "*)
+        if [ "${FAKE_REQUIRE_LOCK_AT_DOWN:-0}" = "1" ]; then
+          [ -f "${SMOKE_LOCK_DIR:-}/owner" ] || \
+            printf '%s\\n' "MISSING_LOCK" >> "$FAKE_DOCKER_LOG"
+        fi
+        ;;
+    esac
+    exit 0
+    ;;
 esac
 exit 0
 """,
@@ -79,7 +97,7 @@ exit 0
         )
         script.chmod(script.stat().st_mode | stat.S_IXUSR)
 
-    def _executar(self, *, comando=None, **fake_env):
+    def _ambiente(self, *, comando=None, usar_hook=True, **fake_env):
         env = os.environ.copy()
         env["PATH"] = f"{self.bin}{os.pathsep}{env.get('PATH', '')}"
         env.update(
@@ -89,20 +107,24 @@ exit 0
                 "SMOKE_ISOLATION_ENV_SMOKE": self.env_smoke.as_posix(),
                 "SMOKE_ISOLATION_ENV_DOCKER": self.env_docker.as_posix(),
                 "SMOKE_ISOLATION_LOCK_DIR": self.lock.as_posix(),
-                "SMOKE_ISOLATION_COMMAND": comando
-                or (
-                    'if [ "${SMOKE_PROJECT_NAME:-}" = "reidofeno" ]; '
-                    "then exit 1; fi; "
-                    'if [ "${SMOKE_TEST_FAIL_AFTER_SEED:-0}" = "1" ]; '
-                    "then exit 1; fi; exit 0"
-                ),
+                "SMOKE_LOCK_DIR": self.lock.as_posix(),
             }
         )
+        if usar_hook:
+            env["SMOKE_ISOLATION_COMMAND"] = comando or (
+                'if [ "${SMOKE_PROJECT_NAME:-}" = "reidofeno" ]; '
+                "then exit 1; fi; "
+                'if [ "${SMOKE_TEST_FAIL_AFTER_SEED:-0}" = "1" ]; '
+                "then exit 1; fi; exit 0"
+            )
         env.update({chave: str(valor) for chave, valor in fake_env.items()})
+        return env
+
+    def _executar(self, *, comando=None, **fake_env):
         return subprocess.run(
             [BASH, str(SCRIPT)],
             cwd=RAIZ,
-            env=env,
+            env=self._ambiente(comando=comando, **fake_env),
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -162,8 +184,22 @@ exit 0
         self.assertNotIn("rm -f", chamadas)
         self.assertNotIn(" down ", f" {chamadas} ")
 
-    def test_sucesso_limpa_somente_recursos_proprios(self):
+    def test_lock_comum_do_smoke_ocupado_e_preservado(self):
+        self.lock.mkdir()
+        (self.lock / "owner").write_text("smoke-direto-externo", encoding="utf-8")
+
         resultado = self._executar()
+
+        self.assertNotEqual(resultado.returncode, 0)
+        self.assertIn("outra execução de isolamento", resultado.stderr)
+        self._assert_sem_destrutivo()
+        self.assertEqual(
+            (self.lock / "owner").read_text(encoding="utf-8"),
+            "smoke-direto-externo",
+        )
+
+    def test_sucesso_limpa_somente_recursos_proprios(self):
+        resultado = self._executar(FAKE_REQUIRE_LOCK_AT_DOWN="1")
 
         self.assertEqual(resultado.returncode, 0, resultado.stderr)
         chamadas = self._chamadas()
@@ -172,6 +208,7 @@ exit 0
         self.assertIn("rm -f reidofeno_sentinel_smoke_test", chamadas)
         self.assertIn("volume rm reidofeno_sentinel_smoke_test_dados", chamadas)
         self.assertNotIn("--project-name reidofeno ", chamadas)
+        self.assertNotIn("MISSING_LOCK", chamadas)
 
     def test_falha_inesperada_preserva_exit_e_limpa_proprios(self):
         resultado = self._executar(comando="exit 7")
@@ -190,3 +227,69 @@ exit 0
         self.assertIn("SENTINELA_OK_APOS_FALHA", resultado.stdout)
         self.assertIn(" down ", f" {chamadas} ")
         self.assertIn("volume rm reidofeno_sentinel_smoke_test_dados", chamadas)
+
+    def test_smoke_direto_ocupa_lock_e_harness_nao_derruba(self):
+        """Dois scripts reais; sem hook substituindo o filho."""
+        ready = self.tmp / "ready"
+        blocked = self.tmp / "blocked"
+        release = self.tmp / "release"
+        env = self._ambiente(usar_hook=False)
+        env.update(
+            {
+                "SMOKE_ENV_SMOKE": self.env_smoke.as_posix(),
+                "SMOKE_ENV_DOCKER": self.env_docker.as_posix(),
+                "FAKE_BLOCK_CONFIG": "1",
+                "FAKE_CONFIG_BLOCKED": blocked.as_posix(),
+                "FAKE_READY": ready.as_posix(),
+                "FAKE_RELEASE": release.as_posix(),
+            }
+        )
+        processo = subprocess.Popen(
+            [BASH, "infra/scripts/smoke-stack.sh"],
+            cwd=RAIZ,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        try:
+            limite = time.monotonic() + 15
+            while not ready.exists():
+                if processo.poll() is not None:
+                    self.fail("smoke direto terminou antes de adquirir a lock")
+                if time.monotonic() > limite:
+                    self.fail("smoke direto não sinalizou a lock a tempo")
+                time.sleep(0.05)
+
+            self.assertTrue((self.lock / "owner").is_file())
+            dono = (self.lock / "owner").read_text(encoding="utf-8")
+
+            resultado = subprocess.run(
+                [BASH, str(SCRIPT)],
+                cwd=RAIZ,
+                env=self._ambiente(usar_hook=False),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=60,
+                check=False,
+            )
+
+            self.assertNotEqual(resultado.returncode, 0)
+            self.assertIn("outra execução de isolamento", resultado.stderr)
+            self.assertNotIn(" down ", f" {self._chamadas()} ")
+            self.assertEqual(
+                (self.lock / "owner").read_text(encoding="utf-8"), dono
+            )
+        finally:
+            release.write_text("release", encoding="utf-8")
+            try:
+                processo.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                processo.kill()
+                processo.wait(timeout=5)
+
+        self.assertFalse(self.lock.exists())

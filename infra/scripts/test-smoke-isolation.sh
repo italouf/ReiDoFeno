@@ -13,13 +13,14 @@ ENV_DOCKER_SMOKE="${SMOKE_ISOLATION_ENV_DOCKER:-.env.docker.smoke}"
 PROJETO_SMOKE="reidofeno_smoke"
 SENTINELA="reidofeno_sentinel_smoke_test"
 VOLUME_SENTINELA="reidofeno_sentinel_smoke_test_dados"
-LOCK_DIR="${SMOKE_ISOLATION_LOCK_DIR:-${TMPDIR:-/tmp}/reidofeno-smoke-isolation.lock}"
+LOCK_DIR="${SMOKE_ISOLATION_LOCK_DIR:-${SMOKE_LOCK_DIR:-${TMPDIR:-/tmp}/reidofeno_smoke.lock}}"
 IMAGEM="${IMAGE_TAG:?defina IMAGE_TAG (imagem runtime já construída)}"
 
 OWN_SMOKE=0
 OWN_SENTINELA_CONTAINER=0
 OWN_SENTINELA_VOLUME=0
 LOCK_HELD=0
+LOCK_TOKEN=""
 
 erro() {
     echo "ERRO: $*" >&2
@@ -47,6 +48,7 @@ cleanup() {
         docker volume rm "$VOLUME_SENTINELA" >/dev/null 2>&1 || true
     fi
     if [ "$LOCK_HELD" = "1" ]; then
+        rm -f "$LOCK_DIR/owner" 2>/dev/null || true
         rmdir "$LOCK_DIR" >/dev/null 2>&1 || true
     fi
 
@@ -58,13 +60,18 @@ cleanup() {
 [ -f "$ENV_DOCKER_SMOKE" ] \
     || erro "ausente: $ENV_DOCKER_SMOKE (copie de .env.docker.smoke.example)"
 
-# Exclusão mútua do harness sentinela: uma segunda execução não pode
-# interromper a primeira. A lock só é removida se esta execução a criou.
+# Exclusão mútua do harness sentinela: usa o MESMO lock do smoke direto.
+# A lock só é removida se esta execução a criou; o token é herdado pelo filho
+# somente após verificação do owner.
 if ! mkdir "$LOCK_DIR" 2>/dev/null; then
     erro "outra execução de isolamento está ativa em $LOCK_DIR"
 fi
 LOCK_HELD=1
 trap cleanup EXIT
+LOCK_TOKEN="$$-$(date +%s)-$RANDOM"
+printf '%s' "$LOCK_TOKEN" > "$LOCK_DIR/owner"
+export SMOKE_LOCK_DIR="$LOCK_DIR"
+export SMOKE_LOCK_OWNER_TOKEN="$LOCK_TOKEN"
 
 # Guards de propriedade: nenhum recurso é criado/removido antes destas
 # verificações. Existência de nome fixo não prova propriedade.
@@ -121,8 +128,12 @@ executar_smoke() {
     # O hook abaixo existe apenas para as regressões com Docker simulado.
     # Em uso normal/CI, executa o smoke real.
     if [ -n "${SMOKE_ISOLATION_COMMAND:-}" ]; then
+        SMOKE_LOCK_DIR="$LOCK_DIR" \
+        SMOKE_LOCK_OWNER_TOKEN="$LOCK_TOKEN" \
         bash -c "$SMOKE_ISOLATION_COMMAND"
     else
+        SMOKE_LOCK_DIR="$LOCK_DIR" \
+        SMOKE_LOCK_OWNER_TOKEN="$LOCK_TOKEN" \
         IMAGE_TAG="$IMAGEM" bash infra/scripts/smoke-stack.sh
     fi
 }
