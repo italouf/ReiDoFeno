@@ -2,6 +2,7 @@ from datetime import date
 
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.utils import timezone
 
 
 def _cinco_anos_depois(data: date) -> date:
@@ -142,13 +143,18 @@ class NotaFiscal(models.Model):
         return f"NF-e {self.numero or '(pendente)'} — {self.pedido.numero}"
 
     def save(self, *args, **kwargs):
-        if self.data_emissao and not self.retido_ate:
-            self.retido_ate = _cinco_anos_depois(self.data_emissao.date())
-            update_fields = kwargs.get("update_fields")
-            if update_fields is not None:
-                kwargs["update_fields"] = list(
-                    set(update_fields) | {"retido_ate"}
-                )
+        if self.data_emissao:
+            data_local = self.data_emissao
+            if timezone.is_aware(data_local):
+                data_local = timezone.localtime(data_local)
+            self.retido_ate = _cinco_anos_depois(data_local.date())
+        else:
+            self.retido_ate = None
+        update_fields = kwargs.get("update_fields")
+        if update_fields is not None:
+            kwargs["update_fields"] = list(
+                set(update_fields) | {"retido_ate"}
+            )
         super().save(*args, **kwargs)
 
     def clean(self):

@@ -1,22 +1,37 @@
+from datetime import timedelta
+
 from django import forms
 from django.core.validators import RegexValidator
+from django.utils import timezone
+
+from core.uploads import validar_arquivo
 
 TAMANHO_MAXIMO_PDF = 5 * 1024 * 1024
+JANELA_RETROATIVA_EMISSAO = timedelta(days=730)
+
+
+def _validar_data_emissao(valor):
+    if valor is None:
+        return valor
+    agora = timezone.now()
+    if valor > agora + timedelta(days=1):
+        raise forms.ValidationError(
+            "Data de emissão não pode estar no futuro."
+        )
+    if valor < agora - JANELA_RETROATIVA_EMISSAO:
+        raise forms.ValidationError(
+            "Data de emissão anterior a dois anos exige revisão fiscal."
+        )
+    return valor
 
 
 def _validar_pdf(arquivo):
-    if arquivo is None:
-        return arquivo
-    if arquivo.size > TAMANHO_MAXIMO_PDF:
-        raise forms.ValidationError("PDF muito grande (máximo 5 MB).")
-    content_type = getattr(arquivo, "content_type", "") or ""
-    nome = (arquivo.name or "").lower()
-    if content_type and content_type != "application/pdf":
-        raise forms.ValidationError("Envie um arquivo PDF.")
-    if not content_type and not nome.endswith(".pdf"):
-        raise forms.ValidationError("Envie um arquivo PDF.")
-    if arquivo.size == 0:
-        raise forms.ValidationError("Arquivo vazio.")
+    validar_arquivo(
+        arquivo,
+        tipos={"application/pdf"},
+        extensoes=(".pdf",),
+        tamanho_maximo=TAMANHO_MAXIMO_PDF,
+    )
     return arquivo
 
 
@@ -70,6 +85,11 @@ class NotaManualForm(forms.Form):
     def clean_pdf(self):
         return _validar_pdf(self.cleaned_data.get("pdf"))
 
+    def clean_data_emissao(self):
+        return _validar_data_emissao(
+            self.cleaned_data.get("data_emissao")
+        )
+
     def clean_cfop(self):
         from .services import calcular_cfop_inverso
 
@@ -116,6 +136,11 @@ class AnexoNotaFiscalForm(forms.Form):
 
     def clean_pdf(self):
         return _validar_pdf(self.cleaned_data.get("pdf"))
+
+    def clean_data_emissao(self):
+        return _validar_data_emissao(
+            self.cleaned_data.get("data_emissao")
+        )
 
 
 class NotaEntradaManualForm(forms.Form):

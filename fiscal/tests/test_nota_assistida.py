@@ -2,13 +2,17 @@
 
 import json
 import tempfile
+import uuid
+from datetime import timedelta
 from decimal import Decimal
+from unittest import mock
 
 from django.contrib.auth.models import Group
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.test import TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 
 from accounts.models import Usuario
 from catalog.factories import ProdutoFactory
@@ -221,6 +225,26 @@ class AnexoNotaTests(BaseNotaAssistidaTests):
         self.assertIn("pdf", resposta.context["form"].errors)
         self.assertFalse(NotaFiscal.objects.filter(pedido=pedido).exists())
 
+    def test_anexo_pdf_com_assinatura_invalida_e_rejeitado(self):
+        pedido = self.criar_pedido_pago()
+        self.client.force_login(self.emissor)
+
+        resposta = self.client.post(
+            reverse("fiscal:nota_anexar", args=[pedido.pk]),
+            {
+                "numero": "123",
+                "pdf": SimpleUploadedFile(
+                    "nota.pdf",
+                    b"<html>nao e pdf</html>",
+                    content_type="application/pdf",
+                ),
+            },
+        )
+
+        self.assertEqual(resposta.status_code, 200)
+        self.assertIn("pdf", resposta.context["form"].errors)
+        self.assertFalse(NotaFiscal.objects.filter(pedido=pedido).exists())
+
     def test_anexar_nota_autorizada_e_rejeitado(self):
         pedido = self.criar_pedido_pago()
         self.client.force_login(self.emissor)
@@ -241,6 +265,116 @@ class AnexoNotaTests(BaseNotaAssistidaTests):
         )
 
         self.assertEqual(resposta.status_code, 400)
+
+    def test_completar_nota_de_pedido_cancelado_e_rejeitado(self):
+        pedido = self.criar_pedido_pago()
+        self.client.force_login(self.emissor)
+        self.client.post(
+            reverse("fiscal:nota_anexar", args=[pedido.pk]),
+            {"pdf": self.pdf()},
+        )
+        pedido.status = Pedido.Status.CANCELADO
+        pedido.status_financeiro = Pedido.StatusFinanceiro.ESTORNADO
+        pedido.financeiro_conciliado = False
+        pedido.save(
+            update_fields=[
+                "status",
+                "status_financeiro",
+                "financeiro_conciliado",
+            ]
+        )
+
+        resposta = self.client.post(
+            reverse("fiscal:nota_manual", args=[pedido.pk]),
+            {
+                "numero": "123",
+                "serie": "1",
+                "chave_acesso": CHAVE,
+                "data_emissao": "2026-11-10T14:30",
+            },
+        )
+
+        self.assertEqual(resposta.status_code, 200)
+        nota = NotaFiscal.objects.get(pedido=pedido, tipo=NotaFiscal.Tipo.SAIDA)
+        self.assertEqual(nota.status, NotaFiscal.Status.ANEXADA)
+
+    def test_anexar_bloqueado_durante_emissao_automatica(self):
+        pedido = self.criar_pedido_pago()
+        NotaFiscal.objects.create(
+            pedido=pedido,
+            tipo=NotaFiscal.Tipo.SAIDA,
+            status=NotaFiscal.Status.PENDENTE,
+            processando_desde=timezone.now(),
+        )
+        self.client.force_login(self.emissor)
+
+        resposta = self.client.post(
+            reverse("fiscal:nota_anexar", args=[pedido.pk]),
+            {"pdf": self.pdf()},
+        )
+
+        self.assertEqual(resposta.status_code, 400)
+
+    def test_anexar_limpa_claim_expirado(self):
+        pedido = self.criar_pedido_pago()
+        nota = NotaFiscal.objects.create(
+            pedido=pedido,
+            tipo=NotaFiscal.Tipo.SAIDA,
+            status=NotaFiscal.Status.PENDENTE,
+            processando_desde=timezone.now() - timedelta(minutes=10),
+            tentativa_atual=uuid.uuid4(),
+        )
+        self.client.force_login(self.emissor)
+
+        resposta = self.client.post(
+            reverse("fiscal:nota_anexar", args=[pedido.pk]),
+            {"pdf": self.pdf()},
+        )
+
+        self.assertEqual(resposta.status_code, 302)
+        nota.refresh_from_db()
+        self.assertEqual(nota.status, NotaFiscal.Status.ANEXADA)
+        self.assertIsNone(nota.processando_desde)
+        self.assertIsNone(nota.tentativa_atual)
+
+    def test_fila_automatica_nao_reivindica_nota_anexada(self):
+        from fiscal.services import _preparar_emissao
+
+        pedido = self.criar_pedido_pago()
+        nota = NotaFiscal.objects.create(
+            pedido=pedido,
+            tipo=NotaFiscal.Tipo.SAIDA,
+            status=NotaFiscal.Status.ANEXADA,
+            origem=NotaFiscal.Origem.MANUAL,
+        )
+
+        _pedido, nota_ret, reivindicada, token = _preparar_emissao(
+            pedido, mock.Mock()
+        )
+
+        self.assertFalse(reivindicada)
+        self.assertIsNone(token)
+        self.assertEqual(nota_ret.pk, nota.pk)
+        self.assertEqual(nota_ret.status, NotaFiscal.Status.ANEXADA)
+
+
+class EmissaoAutomaticaTests(BaseNotaAssistidaTests):
+    def test_emissao_automatica_preenche_snapshot_e_retencao(self):
+        from fiscal.client import BlingFake
+        from fiscal.services import enviar_para_emissao
+
+        pedido = self.criar_pedido_pago()
+
+        nota = enviar_para_emissao(pedido, client=BlingFake())
+
+        nota.refresh_from_db()
+        self.assertEqual(nota.status, NotaFiscal.Status.AUTORIZADA)
+        self.assertEqual(nota.cliente_nome, "Cliente Teste")
+        self.assertEqual(nota.cliente_documento, "52998224725")
+        self.assertEqual(nota.valor_total, Decimal("100.00"))
+        self.assertEqual(len(nota.itens_json), 1)
+        self.assertIsNotNone(nota.data_emissao)
+        self.assertIsNotNone(nota.retido_ate)
 
 
 class RegistroNotaCompletaTests(BaseNotaAssistidaTests):
@@ -266,6 +400,75 @@ class RegistroNotaCompletaTests(BaseNotaAssistidaTests):
         self.assertEqual(nota.valor_total, Decimal("100.00"))
         self.assertIsNotNone(nota.pdf)
         self.assertIsNotNone(nota.data_emissao)
+
+    def test_nota_autorizada_nao_troca_serie_nem_pdf(self):
+        pedido = self.criar_pedido_pago()
+        self.client.force_login(self.emissor)
+        self.client.post(
+            reverse("fiscal:nota_manual", args=[pedido.pk]),
+            {
+                "numero": "123456",
+                "serie": "1",
+                "chave_acesso": CHAVE,
+                "data_emissao": "2026-11-10T14:30",
+                "pdf": self.pdf("original.pdf"),
+            },
+        )
+
+        resposta = self.client.post(
+            reverse("fiscal:nota_manual", args=[pedido.pk]),
+            {
+                "numero": "123456",
+                "serie": "2",
+                "chave_acesso": CHAVE,
+                "data_emissao": "2026-11-10T14:30",
+                "pdf": self.pdf("outro.pdf"),
+            },
+        )
+
+        self.assertEqual(resposta.status_code, 200)
+        nota = NotaFiscal.objects.get(pedido=pedido, tipo=NotaFiscal.Tipo.SAIDA)
+        self.assertEqual(nota.serie, "1")
+        self.assertTrue(nota.pdf.name.endswith("original.pdf"))
+
+    def test_data_emissao_muito_antiga_e_rejeitada(self):
+        pedido = self.criar_pedido_pago()
+        self.client.force_login(self.emissor)
+
+        resposta = self.client.post(
+            reverse("fiscal:nota_manual", args=[pedido.pk]),
+            {
+                "numero": "123456",
+                "serie": "1",
+                "chave_acesso": CHAVE,
+                "data_emissao": "2020-01-01T10:00",
+            },
+        )
+
+        self.assertEqual(resposta.status_code, 200)
+        self.assertIn("data_emissao", resposta.context["form"].errors)
+        self.assertFalse(NotaFiscal.objects.filter(pedido=pedido).exists())
+
+    def test_data_emissao_futura_e_rejeitada(self):
+        pedido = self.criar_pedido_pago()
+        self.client.force_login(self.emissor)
+        futura = (timezone.localdate() + timedelta(days=10)).strftime(
+            "%Y-%m-%dT10:00"
+        )
+
+        resposta = self.client.post(
+            reverse("fiscal:nota_manual", args=[pedido.pk]),
+            {
+                "numero": "123456",
+                "serie": "1",
+                "chave_acesso": CHAVE,
+                "data_emissao": futura,
+            },
+        )
+
+        self.assertEqual(resposta.status_code, 200)
+        self.assertIn("data_emissao", resposta.context["form"].errors)
+        self.assertFalse(NotaFiscal.objects.filter(pedido=pedido).exists())
 
     def test_snapshot_nao_muda_quando_cliente_edita(self):
         pedido = self.criar_pedido_pago()

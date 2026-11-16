@@ -21,7 +21,13 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         hoje = timezone.localdate()
         notas = (
-            NotaFiscal.objects.filter(retido_ate__lt=hoje)
+            NotaFiscal.objects.filter(
+                retido_ate__lt=hoje,
+                status__in=(
+                    NotaFiscal.Status.AUTORIZADA,
+                    NotaFiscal.Status.CANCELADA,
+                ),
+            )
             .select_related("pedido")
             .order_by("pk")
         )

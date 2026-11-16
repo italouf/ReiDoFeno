@@ -24,6 +24,11 @@ duplicar o registro fiscal usado por relatórios e pela fila de emissão.
 4. O snapshot não é recalculado depois de preenchido: mudanças posteriores
    no cliente não alteram o documento fiscal.
 5. A exportação usa escape contra fórmulas em CSV.
+6. O anexo/autorização respeita o lease de emissão automática, invalida
+   claims antigos e a fila automática ignora notas anexadas ou de origem
+   manual.
+7. A emissão automática também preenche snapshot, `data_emissao` e
+   `retido_ate`; migration de backfill cobre notas anteriores à Fase 4.
 
 ## Consequências
 

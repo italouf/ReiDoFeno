@@ -505,6 +505,11 @@ class ComprovantePagamento(models.Model):
                 condition=models.Q(valor__lt=Decimal("10000000000.00")),
                 name="comprovante_valor_dentro_do_limite",
             ),
+            models.UniqueConstraint(
+                fields=("referencia",),
+                condition=models.Q(metodo="pix") & ~models.Q(referencia=""),
+                name="comprovante_pix_referencia_unica",
+            ),
         ]
 
     def __str__(self):

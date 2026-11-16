@@ -31,12 +31,19 @@ ignorarem os recebimentos manuais.
    prova e marca `financeiro_conciliado=True`. Somente depois disso o pedido
    pode avançar para separação/entrega (ADR-002/015).
 4. Rejeitar a conciliação reverte `status_financeiro` para `pendente`,
-   marca os comprovantes como `rejeitado` e cancela o `Pagamento` com
-   `estornado_em` preenchido, produzindo receita negativa no período
-   (ADR-016). O estoque **não** é devolvido automaticamente: rejeição
-   financeira não é retorno físico (ADR-017).
+   marca os comprovantes como `rejeitado` e cancela o `Pagamento` limpando
+   `aprovado_em` e `estornado_em`. A receita manual era provisória (a prova
+   nunca foi confirmada), então ela é removida sem gerar um estorno sem
+   contrapartida no período do reconhecimento. O estoque **não** é devolvido
+   automaticamente: rejeição financeira não é retorno físico (ADR-017).
 5. Comprovantes rejeitados permanecem armazenados como evidência histórica,
    mas não contam para o saldo devedor.
+6. PIX exige referência única; a data do pagamento não pode estar no futuro
+   nem retroceder mais de um ano; o upload valida extensão, MIME e assinatura
+   binária. Enquanto houver prova ativa, o checkout online do pedido fica
+   bloqueado. Aprovação do provedor com prova manual não auto-concilia.
+7. Cancelamento de pedido pendente com baixa já efetivada devolve ao estoque
+   somente quantidades com evidência, via movimento de ledger auditado.
 
 ## Consequências
 

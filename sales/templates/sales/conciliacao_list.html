@@ -20,6 +20,7 @@
       <thead><tr>
         <th scope="col">Método</th><th scope="col" class="num">Valor</th>
         <th scope="col">Data</th><th scope="col">Referência</th>
+        <th scope="col">Status</th>
         <th scope="col">Comprovante</th>
       </tr></thead>
       <tbody>
@@ -29,6 +30,7 @@
           <td class="num">R$ {{ comprovante.valor }}</td>
           <td>{{ comprovante.data_pagamento|date:"d/m/Y H:i" }}</td>
           <td>{{ comprovante.referencia|default:"—" }}</td>
+          <td>{% include "components/status_pedido.html" with status=comprovante.status rotulo=comprovante.get_status_display %}</td>
           <td>
             {% if comprovante.arquivo %}
               <a href="{{ comprovante.arquivo.url }}" target="_blank" rel="noopener">Abrir</a>

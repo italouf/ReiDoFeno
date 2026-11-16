@@ -141,10 +141,14 @@ def anonimizar_cliente(cliente: Cliente) -> bool:
         return False
 
     antes = {
-        "nome": cliente.nome,
-        "documento": cliente.documento,
-        "telefone": cliente.telefone,
-        "email": cliente.email,
+        "campos_anonimizados": [
+            "nome",
+            "documento",
+            "telefone",
+            "email",
+            "endereco",
+        ],
+        "motivo": "exclusão LGPD com retenção fiscal",
     }
     sufixo = uuid.uuid4().hex[:10]
     cliente.nome = f"Titular removido ({sufixo})"
@@ -160,11 +164,10 @@ def anonimizar_cliente(cliente: Cliente) -> bool:
     cliente.cep = ""
     cliente.preferencia = ""
     cliente.usuario = None
-    cliente.save()
 
-    from core.auditoria import registrar_auditoria
+    from core.auditoria import auditar_atomicamente
 
-    registrar_auditoria(
+    auditar_atomicamente(
         acao=(
             "cliente_anonimizado_com_notas"
             if tem_notas
@@ -178,6 +181,7 @@ def anonimizar_cliente(cliente: Cliente) -> bool:
             "notas_preservadas": tem_notas,
             "pedidos_preservados": True,
         },
+        salvar=cliente.save,
     )
 
     logger.info("Cliente %s anonimizado com retenção fiscal.", cliente.pk)

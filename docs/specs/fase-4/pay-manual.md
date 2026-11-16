@@ -48,6 +48,15 @@ Constraint de banco: `valor > 0` e `valor < 10000000000.00`.
 6. Toda operação grava `LogAuditoria` com ação
    `pagamento_manual_registrado`, incluindo método, valor, saldo e status.
 7. Comprovantes rejeitados na conciliação não contam para o saldo devedor.
+8. A data do pagamento não pode estar no futuro nem ser anterior a um ano.
+9. Referência PIX é obrigatória e única entre comprovantes PIX.
+10. Upload exige extensão, MIME e assinatura binária compatíveis
+    (JPEG/PNG/PDF), além do limite de 5 MB.
+11. Enquanto houver comprovante ativo, o checkout online do pedido fica
+    bloqueado para evitar pagamento duplicado. Aprovação do provedor em
+    pedido com prova manual não auto-concilia: exige revisão financeira.
+12. Em rejeição, a receita provisória é removida (`aprovado_em=None`) sem
+    criar estorno sem contrapartida; o evento fica na auditoria.
 
 ## CSV de comprovantes? Não.
 

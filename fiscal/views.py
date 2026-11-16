@@ -19,6 +19,7 @@ from sales.models import Pedido
 from .forms import AnexoNotaFiscalForm, NotaEntradaManualForm, NotaManualForm
 from .models import NotaFiscal
 from .services import (
+    LEASE_EMISSAO,
     cancelar_nota_fiscal,
     exportar_para_iob,
     exportar_para_iob_csv,
@@ -28,6 +29,13 @@ from .services import (
 )
 
 GRUPOS_FISCAIS = ("Administrador", "Gestor", "Emissor Fiscal")
+
+
+def _emissao_em_andamento(nota) -> bool:
+    return (
+        nota.processando_desde is not None
+        and timezone.now() - nota.processando_desde < LEASE_EMISSAO
+    )
 
 
 def _csv_seguro(valor) -> str:
@@ -73,9 +81,8 @@ class RegistrarNotaManualView(
             form.cleaned_data.get("evidencia_retificacao") or ""
         ).strip()
         link = form.cleaned_data.get("link_documento", "")
-        data_emissao = (
-            form.cleaned_data.get("data_emissao") or timezone.now()
-        )
+        data_emissao_informada = form.cleaned_data.get("data_emissao")
+        data_emissao = data_emissao_informada or timezone.now()
         pdf = form.cleaned_data.get("pdf")
         pedido_id = self.pedido.pk
         with transaction.atomic():
@@ -88,13 +95,22 @@ class RegistrarNotaManualView(
                 .filter(pedido=pedido, tipo=NotaFiscal.Tipo.SAIDA)
                 .first()
             )
-            if nota is None and not pedido_elegivel(pedido):
-                form.add_error(
-                    None,
-                    "O pedido precisa estar pago, conciliado e com documento "
-                    "válido.",
-                )
-                return self.form_invalid(form)
+            if nota is None:
+                if not pedido_elegivel(pedido):
+                    form.add_error(
+                        None,
+                        "O pedido precisa estar pago, conciliado e com "
+                        "documento válido.",
+                    )
+                    return self.form_invalid(form)
+            elif nota.status != NotaFiscal.Status.AUTORIZADA:
+                if not pedido_elegivel(pedido):
+                    form.add_error(
+                        None,
+                        "O pedido não está mais pago/conciliado ou foi "
+                        "cancelado; a NF-e não pode ser autorizada.",
+                    )
+                    return self.form_invalid(form)
             if (
                 nota is not None
                 and nota.status == NotaFiscal.Status.CANCELADA
@@ -123,6 +139,19 @@ class RegistrarNotaManualView(
                     nota.numero != numero
                     or nota.chave_acesso != chave
                     or nota.link_documento != link
+                    or (serie and nota.serie != serie)
+                    or (
+                        pdf
+                        and (
+                            not nota.pdf
+                            or nota.pdf.name != pdf.name
+                        )
+                    )
+                    or (
+                        data_emissao_informada
+                        and nota.data_emissao
+                        and data_emissao_informada != nota.data_emissao
+                    )
                 )
             ):
                 form.add_error(
@@ -339,14 +368,19 @@ class AnexarNotaFiscalView(LoginRequiredMixin, GrupoRequiredMixin, FormView):
                 return HttpResponseBadRequest(
                     "Nota autorizada ou cancelada não pode ser reanexada."
                 )
+            if nota is not None and _emissao_em_andamento(nota):
+                return HttpResponseBadRequest(
+                    "Há uma emissão automática em andamento para este pedido. "
+                    "Aguarde a conclusão antes de anexar manualmente."
+                )
+            if not pedido_elegivel(pedido):
+                form.add_error(
+                    None,
+                    "O pedido precisa estar pago, conciliado e com "
+                    "documento válido.",
+                )
+                return self.form_invalid(form)
             if nota is None:
-                if not pedido_elegivel(pedido):
-                    form.add_error(
-                        None,
-                        "O pedido precisa estar pago, conciliado e com "
-                        "documento válido.",
-                    )
-                    return self.form_invalid(form)
                 nota = NotaFiscal(
                     pedido=pedido, tipo=NotaFiscal.Tipo.SAIDA
                 )
@@ -370,6 +404,8 @@ class AnexarNotaFiscalView(LoginRequiredMixin, GrupoRequiredMixin, FormView):
                 nota.chave_acesso = chave
             nota.origem = NotaFiscal.Origem.MANUAL
             nota.status = NotaFiscal.Status.ANEXADA
+            nota.tentativa_atual = None
+            nota.processando_desde = None
             nota.data_emissao = (
                 form.cleaned_data.get("data_emissao")
                 or nota.data_emissao
@@ -465,6 +501,16 @@ class ConfirmarNotaAutorizadaView(
                 )
             if nota.status == NotaFiscal.Status.AUTORIZADA:
                 return redirect("fiscal:nota_lista")
+            if _emissao_em_andamento(nota):
+                return HttpResponseBadRequest(
+                    "Há uma emissão automática em andamento para este pedido. "
+                    "Aguarde a conclusão antes de autorizar manualmente."
+                )
+            if not pedido_elegivel(nota.pedido):
+                return HttpResponseBadRequest(
+                    "O pedido não está pago/conciliado ou foi cancelado; "
+                    "a NF-e não pode ser autorizada."
+                )
             chave = (nota.chave_acesso or "").strip()
             if not nota.numero.strip() or len(chave) != 44 or not chave.isdigit():
                 return HttpResponseBadRequest(
@@ -478,6 +524,9 @@ class ConfirmarNotaAutorizadaView(
             }
             nota.status = NotaFiscal.Status.AUTORIZADA
             nota.origem = NotaFiscal.Origem.MANUAL
+            nota.tentativa_atual = None
+            nota.processando_desde = None
+            nota.data_emissao = nota.data_emissao or timezone.now()
             try:
                 nota.full_clean()
                 nota.save()

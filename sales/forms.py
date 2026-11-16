@@ -1,6 +1,11 @@
+from datetime import timedelta
+
 from django import forms
+from django.core.exceptions import ValidationError
+from django.utils import timezone
 
 from core.models import Unidade
+from core.uploads import validar_arquivo
 from customers.validators import DocumentoValidator
 from sales.models import ComprovantePagamento, Pedido
 
@@ -86,6 +91,19 @@ class ComprovantePagamentoForm(forms.ModelForm):
             )
         return valor
 
+    def clean_data_pagamento(self):
+        valor = self.cleaned_data["data_pagamento"]
+        agora = timezone.now()
+        if valor > agora + timedelta(minutes=5):
+            raise forms.ValidationError(
+                "Data do pagamento não pode estar no futuro."
+            )
+        if valor < agora - timedelta(days=365):
+            raise forms.ValidationError(
+                "Data do pagamento anterior a um ano exige revisão."
+            )
+        return valor
+
     def clean(self):
         limpo = super().clean()
         metodo = limpo.get("metodo")
@@ -93,26 +111,27 @@ class ComprovantePagamentoForm(forms.ModelForm):
 
         if metodo == ComprovantePagamento.Metodo.PIX and not referencia:
             self.add_error("referencia", "PIX exige o ID da transação.")
+        if metodo == ComprovantePagamento.Metodo.PIX and referencia:
+            if ComprovantePagamento.objects.filter(
+                metodo=ComprovantePagamento.Metodo.PIX,
+                referencia=referencia,
+            ).exists():
+                self.add_error(
+                    "referencia",
+                    "Já existe comprovante PIX com esta referência.",
+                )
 
         arquivo = limpo.get("arquivo")
         if arquivo:
-            if arquivo.size > TAMANHO_MAXIMO_COMPROVANTE:
-                self.add_error(
-                    "arquivo", "Arquivo muito grande (máximo 5 MB)."
+            try:
+                validar_arquivo(
+                    arquivo,
+                    tipos=TIPOS_COMPROVANTE,
+                    extensoes=EXTENSOES_COMPROVANTE,
+                    tamanho_maximo=TAMANHO_MAXIMO_COMPROVANTE,
                 )
-            content_type = getattr(arquivo, "content_type", "") or ""
-            nome = (arquivo.name or "").lower()
-            if content_type:
-                tipo_valido = content_type in TIPOS_COMPROVANTE
-            else:
-                tipo_valido = nome.endswith(EXTENSOES_COMPROVANTE)
-            if not tipo_valido:
-                self.add_error(
-                    "arquivo",
-                    "Apenas imagens (JPG/PNG) ou PDF são aceitos.",
-                )
-            if arquivo.size == 0:
-                self.add_error("arquivo", "Arquivo vazio.")
+            except ValidationError as erro:
+                self.add_error("arquivo", erro)
         return limpo
 
 

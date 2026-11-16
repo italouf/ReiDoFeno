@@ -1,5 +1,6 @@
 """Conciliação financeira manual (CONCILIACAO)."""
 
+import uuid
 from decimal import Decimal
 
 from django.contrib.auth.models import Group
@@ -15,8 +16,9 @@ from core.models import LogAuditoria
 from customers.factories import ClienteFactory
 from sales.factories import ItemPedidoFactory, PedidoFactory
 from sales.models import ComprovantePagamento, Pagamento, Pedido
-from sales.services import registrar_pagamento_manual
+from sales.services import cancelar_pedido, registrar_pagamento_manual
 from stock.factories import EstoqueFactory
+from stock.models import Estoque, MovimentoEstoque
 from stock.services import reservar
 
 
@@ -78,7 +80,7 @@ class ConciliacaoBaseTests(TestCase):
             metodo=ComprovantePagamento.Metodo.PIX,
             valor=valor or pedido.total,
             data_pagamento=timezone.now(),
-            referencia=f"E{pedido.pk:033d}"[:100],
+            referencia=f"E{uuid.uuid4().hex}",
             usuario=usuario or self.vendedor,
         )
 
@@ -112,6 +114,9 @@ class ConciliacaoTests(ConciliacaoBaseTests):
         ).first()
         self.assertIsNotNone(log)
         self.assertEqual(log.usuario, self.financeiro)
+        self.assertEqual(
+            log.depois["comprovantes_conciliados"], [comprovante.pk]
+        )
 
     def test_responsavel_financeiro_rejeita_pedido(self):
         pedido = self.criar_pedido_pago_manual()
@@ -134,7 +139,8 @@ class ConciliacaoTests(ConciliacaoBaseTests):
         )
         pagamento = Pagamento.objects.get(pedido=pedido)
         self.assertEqual(pagamento.status, Pagamento.Status.CANCELADO)
-        self.assertIsNotNone(pagamento.estornado_em)
+        self.assertIsNone(pagamento.aprovado_em)
+        self.assertIsNone(pagamento.estornado_em)
         log = LogAuditoria.objects.filter(
             acao="pedido_rejeitado_conciliacao",
             objeto_id=str(pedido.pk),
@@ -143,8 +149,11 @@ class ConciliacaoTests(ConciliacaoBaseTests):
         self.assertEqual(log.usuario, self.financeiro)
         self.assertEqual(log.depois["justificativa"], "Comprovante inválido")
 
-    def test_rejeicao_gera_receita_negativa(self):
-        from analytics.services import pagamentos_estornados
+    def test_rejeicao_remove_receita_provisoria_sem_gerar_estorno(self):
+        from analytics.services import (
+            pagamentos_estornados,
+            receita_do_periodo,
+        )
 
         pedido = self.criar_pedido_pago_manual()
         self.client.force_login(self.financeiro)
@@ -154,10 +163,39 @@ class ConciliacaoTests(ConciliacaoBaseTests):
         )
 
         hoje = timezone.localdate()
-        estornos = pagamentos_estornados(hoje, hoje)
-        self.assertIn(
-            Pagamento.objects.get(pedido=pedido).pk,
-            list(estornos.values_list("pk", flat=True)),
+        self.assertEqual(receita_do_periodo(hoje, hoje), Decimal("0.00"))
+        self.assertFalse(
+            pagamentos_estornados(hoje, hoje)
+            .filter(pedido=pedido)
+            .exists()
+        )
+
+    def test_cancelamento_apos_rejeicao_devolve_estoque(self):
+        pedido = self.criar_pedido_pago_manual()
+        self.client.force_login(self.financeiro)
+        self.client.post(
+            reverse("sales:rejeitar_pedido", args=[pedido.pk]),
+            {"justificativa": "Comprovante inválido"},
+        )
+        pedido.refresh_from_db()
+        item = pedido.itens.select_related("produto").first()
+        estoque = Estoque.objects.get(
+            produto=item.produto, unidade=pedido.unidade
+        )
+        self.assertEqual(estoque.quantidade, Decimal("90.00"))
+
+        cancelar_pedido(pedido, usuario=self.financeiro)
+
+        pedido.refresh_from_db()
+        estoque.refresh_from_db()
+        self.assertEqual(pedido.status, Pedido.Status.CANCELADO)
+        self.assertEqual(estoque.quantidade, Decimal("100.00"))
+        self.assertEqual(estoque.quantidade_bloqueada, Decimal("0.00"))
+        self.assertTrue(
+            MovimentoEstoque.objects.filter(
+                obrigacao__pedido=pedido,
+                tipo=MovimentoEstoque.Tipo.ENTRADA_DEVOLUCAO,
+            ).exists()
         )
 
     def test_rejeicao_sem_justificativa_e_rejeitada(self):

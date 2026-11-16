@@ -1,7 +1,7 @@
 """Registro manual de pagamento (PAY-MANUAL)."""
 
 import tempfile
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from unittest import mock
 
@@ -302,7 +302,7 @@ class ValidacaoComprovanteTests(BasePagamentoManualTests):
         pedido = self.criar_pedido()
         imagem = SimpleUploadedFile(
             "comprovante.jpg",
-            b"fake image content",
+            b"\xff\xd8\xff\xe0fake image content",
             content_type="image/jpeg",
         )
         self.client.force_login(self.vendedor)
@@ -342,6 +342,21 @@ class ValidacaoComprovanteTests(BasePagamentoManualTests):
         self.assertIn("arquivo", resposta.context["form"].errors)
         self.assertFalse(pedido.comprovantes.exists())
 
+    def test_upload_com_assinatura_invalida_e_rejeitado(self):
+        pedido = self.criar_pedido()
+        arquivo = SimpleUploadedFile(
+            "comprovante.jpg",
+            b"<html>nao e imagem</html>",
+            content_type="image/jpeg",
+        )
+        self.client.force_login(self.vendedor)
+
+        resposta = self.postar(pedido, arquivo=arquivo)
+
+        self.assertEqual(resposta.status_code, 200)
+        self.assertIn("arquivo", resposta.context["form"].errors)
+        self.assertFalse(pedido.comprovantes.exists())
+
     def test_upload_acima_de_5mb_e_rejeitado(self):
         pedido = self.criar_pedido()
         arquivo = SimpleUploadedFile(
@@ -367,6 +382,92 @@ class ValidacaoComprovanteTests(BasePagamentoManualTests):
         self.assertIn("valor", resposta.context["form"].errors)
         self.assertFalse(pedido.comprovantes.exists())
 
+    def test_data_futura_e_rejeitada(self):
+        pedido = self.criar_pedido()
+        futura = (
+            timezone.localtime(timezone.now()) + timedelta(days=2)
+        ).strftime("%Y-%m-%dT%H:%M")
+        self.client.force_login(self.vendedor)
+
+        resposta = self.postar(pedido, data_pagamento=futura)
+
+        self.assertEqual(resposta.status_code, 200)
+        self.assertIn("data_pagamento", resposta.context["form"].errors)
+        self.assertFalse(pedido.comprovantes.exists())
+
+    def test_data_muito_antiga_e_rejeitada(self):
+        pedido = self.criar_pedido()
+        self.client.force_login(self.vendedor)
+
+        resposta = self.postar(
+            pedido, data_pagamento="2020-01-01T10:00"
+        )
+
+        self.assertEqual(resposta.status_code, 200)
+        self.assertIn("data_pagamento", resposta.context["form"].errors)
+        self.assertFalse(pedido.comprovantes.exists())
+
+    def test_pix_referencia_duplicada_e_rejeitada(self):
+        pedido = self.criar_pedido()
+        self.client.force_login(self.vendedor)
+        self.postar(pedido, valor="50.00", referencia="E-DUPLICADA")
+
+        resposta = self.postar(
+            pedido, valor="50.00", referencia="E-DUPLICADA"
+        )
+
+        self.assertEqual(resposta.status_code, 200)
+        self.assertIn("referencia", resposta.context["form"].errors)
+        self.assertEqual(pedido.comprovantes.count(), 1)
+        pedido.refresh_from_db()
+        self.assertEqual(
+            pedido.status_financeiro, Pedido.StatusFinanceiro.PENDENTE
+        )
+
+
+class IntegracaoProvedorTests(BasePagamentoManualTests):
+    def test_pagamento_parcial_bloqueia_novo_checkout_online(self):
+        pedido = self.criar_pedido()
+        self.client.force_login(self.vendedor)
+        self.postar(pedido, valor="50.00")
+        pedido.refresh_from_db()
+
+        from sales.views import PagamentoIniciarView
+
+        self.assertFalse(PagamentoIniciarView._pode_iniciar(pedido))
+
+        with mock.patch("sales.payments.obter_client") as obter:
+            resposta = self.client.post(
+                reverse("sales:pagamento_iniciar", args=[pedido.token_acesso])
+            )
+
+        self.assertEqual(resposta.status_code, 302)
+        obter.assert_not_called()
+
+    def test_provedor_com_prova_manual_nao_auto_concilia(self):
+        from sales.services import marcar_pagamento_aprovado
+
+        pedido = self.criar_pedido()
+        self.client.force_login(self.vendedor)
+        self.postar(pedido, valor="50.00")
+        pedido.refresh_from_db()
+
+        marcar_pagamento_aprovado(pedido, id_externo="mp-1")
+
+        pedido.refresh_from_db()
+        self.assertEqual(pedido.status_financeiro, Pedido.StatusFinanceiro.PAGO)
+        self.assertFalse(pedido.financeiro_conciliado)
+        self.assertEqual(
+            pedido.comprovantes.get().status,
+            ComprovantePagamento.Status.PENDENTE,
+        )
+        self.assertTrue(
+            LogAuditoria.objects.filter(
+                acao="pedido.pagamento_provedor_com_manual",
+                objeto_id=str(pedido.pk),
+            ).exists()
+        )
+
 
 class AcessoPagamentoManualTests(BasePagamentoManualTests):
     def test_anonimo_e_redirecionado_para_login(self):
@@ -378,6 +479,22 @@ class AcessoPagamentoManualTests(BasePagamentoManualTests):
 
         self.assertEqual(resposta.status_code, 302)
         self.assertIn("/accounts/login/", resposta["Location"])
+
+    def test_integridade_duplicada_vira_erro_de_formulario(self):
+        from django.db import IntegrityError
+
+        pedido = self.criar_pedido()
+        self.client.force_login(self.vendedor)
+
+        with mock.patch(
+            "sales.views.registrar_pagamento_manual",
+            side_effect=IntegrityError("duplicada"),
+        ):
+            resposta = self.postar(pedido)
+
+        self.assertEqual(resposta.status_code, 200)
+        self.assertIn("referencia", resposta.context["form"].errors)
+        self.assertFalse(pedido.comprovantes.exists())
 
     def test_erro_de_servico_vira_erro_de_formulario(self):
         pedido = self.criar_pedido()

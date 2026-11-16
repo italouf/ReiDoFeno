@@ -47,8 +47,9 @@ referência, arquivo) e as ações.
 3. Marca comprovantes como `rejeitado` (não os apaga).
 4. Reverte `status_financeiro` para `pendente` e mantém
    `financeiro_conciliado=False`.
-5. Cancela o `Pagamento` manual com `estornado_em=agora`, produzindo o
-   evento financeiro negativo (ADR-016).
+5. Cancela o `Pagamento` manual limpando `aprovado_em` e `estornado_em`,
+   removendo a receita provisória. Não há estorno porque a prova nunca foi
+   confirmada; o evento fica na auditoria.
 6. Libera reservas ainda ativas; **não** devolve estoque já baixado, pois
    rejeição financeira não é retorno físico (ADR-017).
 7. Grava `LogAuditoria` `pedido_rejeitado_conciliacao`.

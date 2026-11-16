@@ -25,8 +25,12 @@ autorização no IOB ou cancelar com justificativa.
 2. Nota `cancelada` não pode ser autorizada (400).
 3. Nota já `autorizada` é idempotente (302, sem novo log).
 4. Exige `numero` e `chave_acesso` com 44 dígitos (400 caso contrário).
-5. Muda para `autorizada`, valida e grava `fiscal.nota_autorizada_manual`
-   com antes/depois.
+5. Exige pedido elegível (pago, conciliado, não cancelado) e emissão
+   automática não pode estar em andamento.
+6. Muda para `autorizada`, preenche `data_emissao` quando ausente, invalida
+   claims antigos e grava `fiscal.nota_autorizada_manual` com antes/depois.
+7. Série, PDF, número e chave de nota já autorizada são imutáveis por esta
+   rota; correção exige fluxo formal com evidência.
 
 ## Cancelar
 

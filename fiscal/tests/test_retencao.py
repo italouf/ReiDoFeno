@@ -1,6 +1,6 @@
 """Retenção fiscal: cálculo de prazo e limpeza operacional (ADR-012)."""
 
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 
 from django.core.management import call_command
 from django.test import TestCase
@@ -12,12 +12,19 @@ from sales.factories import PedidoFactory
 from sales.models import Pedido
 
 
-def data_emissao(ano, mes, dia):
-    return timezone.make_aware(datetime(ano, mes, dia, 14, 30))
+def data_emissao(ano, mes, dia, hora=14):
+    return timezone.make_aware(datetime(ano, mes, dia, hora, 30))
 
 
 class RetencaoNotaTests(TestCase):
-    def criar_nota(self, *, emissao=None, retido_ate=None, numero="123"):
+    def criar_nota(
+        self,
+        *,
+        emissao=None,
+        retido_ate=None,
+        numero="123",
+        status=NotaFiscal.Status.AUTORIZADA,
+    ):
         pedido = PedidoFactory(status=Pedido.Status.PAGO)
         return NotaFiscal.objects.create(
             pedido=pedido,
@@ -26,6 +33,7 @@ class RetencaoNotaTests(TestCase):
             chave_acesso=str(pedido.pk).zfill(44),
             data_emissao=emissao,
             retido_ate=retido_ate,
+            status=status,
         )
 
     def test_nota_recebe_retencao_de_cinco_anos(self):
@@ -43,13 +51,20 @@ class RetencaoNotaTests(TestCase):
 
         self.assertIsNone(nota.retido_ate)
 
-    def test_retencao_existente_nao_e_sobrescrita(self):
-        nota = self.criar_nota(
-            emissao=data_emissao(2026, 11, 10),
-            retido_ate=date(2035, 1, 1),
-        )
+    def test_retencao_e_recalculada_quando_data_muda(self):
+        nota = self.criar_nota(emissao=data_emissao(2026, 11, 10))
 
-        self.assertEqual(nota.retido_ate, date(2035, 1, 1))
+        nota.data_emissao = data_emissao(2027, 1, 1)
+        nota.save()
+
+        self.assertEqual(nota.retido_ate, date(2032, 1, 1))
+
+    def test_retencao_usa_data_local_de_emissao(self):
+        emissao_utc = datetime(2026, 11, 11, 2, 30, tzinfo=UTC)
+
+        nota = self.criar_nota(emissao=emissao_utc)
+
+        self.assertEqual(nota.retido_ate, date(2031, 11, 10))
 
     def test_comando_remove_somente_notas_expiradas(self):
         antiga = self.criar_nota(
@@ -67,6 +82,17 @@ class RetencaoNotaTests(TestCase):
         self.assertTrue(
             NotaFiscal.objects.filter(pk=recente.pk).exists()
         )
+
+    def test_comando_preserva_nota_em_andamento(self):
+        anexada = self.criar_nota(
+            emissao=data_emissao(2020, 1, 1),
+            numero="3",
+            status=NotaFiscal.Status.ANEXADA,
+        )
+
+        call_command("limpar_notas_expiradas", verbosity=0)
+
+        self.assertTrue(NotaFiscal.objects.filter(pk=anexada.pk).exists())
 
     def test_comando_audita_cada_remocao(self):
         nota = self.criar_nota(

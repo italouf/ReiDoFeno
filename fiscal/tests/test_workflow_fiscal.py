@@ -1,9 +1,13 @@
 """Workflow fiscal: listagem, autorização e cancelamento."""
 
+import uuid
+from datetime import timedelta
+
 from django.contrib.auth.models import Group
 from django.core.management import call_command
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from accounts.models import Usuario
 from core.models import LogAuditoria
@@ -112,6 +116,29 @@ class WorkflowFiscalTests(TestCase):
 
         self.assertEqual(resposta.status_code, 400)
 
+    def test_confirmar_nota_de_pedido_cancelado_retorna_400(self):
+        nota = self.criar_nota(status=NotaFiscal.Status.ANEXADA)
+        pedido = nota.pedido
+        pedido.status = Pedido.Status.CANCELADO
+        pedido.status_financeiro = Pedido.StatusFinanceiro.ESTORNADO
+        pedido.financeiro_conciliado = False
+        pedido.save(
+            update_fields=[
+                "status",
+                "status_financeiro",
+                "financeiro_conciliado",
+            ]
+        )
+        self.client.force_login(self.emissor)
+
+        resposta = self.client.post(
+            reverse("fiscal:nota_autorizar", args=[nota.pk])
+        )
+
+        self.assertEqual(resposta.status_code, 400)
+        nota.refresh_from_db()
+        self.assertEqual(nota.status, NotaFiscal.Status.ANEXADA)
+
     def test_confirmar_nota_ja_autorizada_e_idempotente(self):
         nota = self.criar_nota(status=NotaFiscal.Status.AUTORIZADA)
         self.client.force_login(self.emissor)
@@ -127,6 +154,46 @@ class WorkflowFiscalTests(TestCase):
                 objeto_id=str(nota.pk),
             ).exists()
         )
+
+    def test_autorizar_bloqueado_durante_emissao_automatica(self):
+        nota = self.criar_nota(status=NotaFiscal.Status.PENDENTE)
+        nota.processando_desde = timezone.now()
+        nota.save(update_fields=["processando_desde"])
+        self.client.force_login(self.emissor)
+
+        resposta = self.client.post(
+            reverse("fiscal:nota_autorizar", args=[nota.pk])
+        )
+
+        self.assertEqual(resposta.status_code, 400)
+        nota.refresh_from_db()
+        self.assertEqual(nota.status, NotaFiscal.Status.PENDENTE)
+
+    def test_autorizar_limpa_claim_expirado_e_preenche_data(self):
+        nota = self.criar_nota(status=NotaFiscal.Status.ANEXADA)
+        nota.processando_desde = timezone.now() - timedelta(minutes=10)
+        nota.tentativa_atual = uuid.uuid4()
+        nota.data_emissao = None
+        nota.save(
+            update_fields=[
+                "processando_desde",
+                "tentativa_atual",
+                "data_emissao",
+            ]
+        )
+        self.client.force_login(self.emissor)
+
+        resposta = self.client.post(
+            reverse("fiscal:nota_autorizar", args=[nota.pk])
+        )
+
+        self.assertEqual(resposta.status_code, 302)
+        nota.refresh_from_db()
+        self.assertEqual(nota.status, NotaFiscal.Status.AUTORIZADA)
+        self.assertIsNone(nota.processando_desde)
+        self.assertIsNone(nota.tentativa_atual)
+        self.assertIsNotNone(nota.data_emissao)
+        self.assertIsNotNone(nota.retido_ate)
 
     def test_cancelar_nota_com_justificativa(self):
         nota = self.criar_nota(status=NotaFiscal.Status.AUTORIZADA)

@@ -1,6 +1,8 @@
 """Retenção fiscal na anonimização LGPD (ADR-012)."""
 
+import json
 from datetime import datetime
+from unittest import mock
 
 from django.test import TestCase
 from django.utils import timezone
@@ -90,3 +92,42 @@ class RetencaoDadosFiscaisTests(TestCase):
         nota = self.criar_nota(cliente)
 
         self.assertEqual(nota.retido_ate.isoformat(), "2031-11-10")
+
+    def test_auditoria_nao_contem_pii_bruta(self):
+        cliente = ClienteFactory(
+            nome="Cliente Original",
+            documento="52998224725",
+            telefone="(75) 90000-0001",
+            email="fulano@example.com",
+        )
+        self.criar_nota(cliente)
+
+        anonimizar_cliente(cliente)
+
+        log = LogAuditoria.objects.get(
+            acao="cliente_anonimizado_com_notas",
+            objeto_id=str(cliente.pk),
+        )
+        serializado = json.dumps(
+            {"antes": log.antes, "depois": log.depois}, ensure_ascii=False
+        )
+        self.assertNotIn("52998224725", serializado)
+        self.assertNotIn("fulano@example.com", serializado)
+        self.assertNotIn("90000-0001", serializado)
+
+    def test_falha_de_auditoria_reverte_anonimizacao(self):
+        cliente = ClienteFactory(
+            nome="Cliente Original", documento="52998224725"
+        )
+        self.criar_nota(cliente)
+
+        with mock.patch(
+            "core.auditoria.registrar_auditoria",
+            side_effect=RuntimeError("auditoria indisponível"),
+        ):
+            with self.assertRaises(RuntimeError):
+                anonimizar_cliente(cliente)
+
+        cliente.refresh_from_db()
+        self.assertEqual(cliente.nome, "Cliente Original")
+        self.assertEqual(cliente.documento, "52998224725")

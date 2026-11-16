@@ -47,6 +47,17 @@ class PosLoginTests(TestCase):
             fetch_redirect_response=False,
         )
 
+    def test_financeiro_vai_para_conciliacao(self):
+        self.client.force_login(
+            self._usuario("financeiro_pos", "Financeiro")
+        )
+        resposta = self.client.get(reverse("accounts:pos_login"))
+        self.assertRedirects(
+            resposta,
+            reverse("sales:conciliacao_list"),
+            fetch_redirect_response=False,
+        )
+
     def test_cliente_vai_para_loja(self):
         self.client.force_login(self._usuario("cliente_pos", "Cliente"))
         resposta = self.client.get(reverse("accounts:pos_login"))

@@ -276,8 +276,7 @@ post-mortem obrigatório para SEV1/SEV2).
 1. Responsável do grupo `Financeiro` acessa `/gestao/conciliacao/`.
 2. Confere os comprovantes contra extrato/WhatsApp.
 3. **Conciliar** marca a prova como validada e libera o avanço operacional.
-4. **Rejeitar** exige justificativa, devolve o pedido para pendente, cancela
-   o pagamento com estorno e mantém o estoque já baixado (rejeição financeira
+4. **Rejeitar** exige justificativa, devolve o pedido para pendente, remove a receita provisoria do pagamento e mantém o estoque já baixado (rejeição financeira
    não é devolução física).
 
 ### NF-e assistida (IOB)

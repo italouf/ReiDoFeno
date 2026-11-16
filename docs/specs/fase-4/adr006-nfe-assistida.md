@@ -23,6 +23,11 @@ usado por relatório, fila, cancelamento e devolução. Criar um segundo modelo
   de download JSON/CSV. Não grava estado.
 - O snapshot é preenchido uma única vez, no primeiro registro/anexo, e nunca
   é sobrescrito por edição cadastral.
+- Anexo e autorização respeitam o lease de emissão automática e invalidam a
+  tentativa antiga; a fila automática não reivindica nota `anexada` ou de
+  origem manual.
+- A emissão automática também preenche snapshot, `data_emissao` e
+  `retido_ate`; uma migration de dados faz o backfill das notas existentes.
 
 ## Consequências
 

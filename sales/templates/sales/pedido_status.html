@@ -63,7 +63,7 @@
     </table>
   </div>
 
-  {% if pedido.status_financeiro == 'pendente' and pedido.status in 'aguardando_pagamento pagamento_pendente' %}
+  {% if pedido.status_financeiro == 'pendente' and pedido.status in 'aguardando_pagamento pagamento_pendente' and pedido.saldo_devedor == pedido.total %}
   <form method="post" action="{% url 'sales:pagamento_iniciar' pedido.token_acesso %}" style="margin-top:var(--e5);">
     {% csrf_token %}
     <button type="submit" class="btn" style="min-height:48px;">Ir para o pagamento</button>

@@ -28,7 +28,11 @@
     <tbody>
       {% for nota in notas %}
       <tr>
-        <td><a href="{% url 'sales:pedido_interno_detail' nota.pedido_id %}">{{ nota.pedido.numero }}</a></td>
+        <td>
+          {% if pode_operacao %}
+          <a href="{% url 'sales:pedido_interno_detail' nota.pedido_id %}">{{ nota.pedido.numero }}</a>
+          {% else %}{{ nota.pedido.numero }}{% endif %}
+        </td>
         <td>{{ nota.pedido.cliente.nome }}</td>
         <td>
           {{ nota.numero|default:"—" }}{% if nota.serie %} / {{ nota.serie }}{% endif %}

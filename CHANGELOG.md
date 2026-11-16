@@ -10,9 +10,9 @@
   conciliação continua obrigatória antes de separar/entregar (ADR-018).
 - **CONCILIACAO:** grupo `Financeiro`; fila `/gestao/conciliacao/`; conciliar
   marca `financeiro_conciliado=True` e audita; rejeitar exige justificativa,
-  marca comprovantes como rejeitados, cancela o pagamento com estorno e não
-  devolve estoque automaticamente (ADR-017). Criador não concilia o próprio
-  pedido.
+  marca comprovantes como rejeitados, remove a receita provisória (sem
+  estorno artificial) e não devolve estoque automaticamente (ADR-017).
+  Criador não concilia o próprio pedido.
 - **ADR-006:** `NotaFiscal` recebe snapshot de cliente/itens, PDF, série e
   data de emissão; exportação JSON/CSV para IOB; anexo de PDF em
   `status=anexada`; registro completo em `status=autorizada`. Sem modelo
@@ -26,6 +26,13 @@
   auditoria por nota.
 - **E2E:** fluxo completo vendedor → pagamento manual → conciliação →
   anexo/autorização de NF-e validado localmente (1 passed).
+- **Revisão final:** rejeição remove a receita provisória sem estorno
+  artificial; cancelamento após rejeição devolve estoque com evidência;
+  retenção recalcula pela data local e só limpa notas autorizadas/canceladas;
+  anexo/autorização respeitam lease e a fila não reivindica nota manual;
+  uploads validam assinatura binária; PIX duplicado, datas abusivas e
+  checkout online com prova ativa são bloqueados; anonimização não grava PII
+  bruta na auditoria.
 - **Pendências:** execução em staging e aceite de Nilton, Neto e Caio não
   foram realizados nesta sessão.
 

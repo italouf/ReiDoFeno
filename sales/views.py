@@ -7,7 +7,7 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.http import (
     Http404,
     HttpResponseBadRequest,
@@ -239,11 +239,17 @@ class PagamentoIniciarView(View):
 
     @staticmethod
     def _pode_iniciar(pedido: Pedido) -> bool:
-        return pedido.status_financeiro == (
-            Pedido.StatusFinanceiro.PENDENTE
-        ) and pedido.status in (
-            Pedido.Status.AGUARDANDO_PAGAMENTO,
-            Pedido.Status.PAGAMENTO_PENDENTE,
+        return (
+            pedido.status_financeiro
+            == Pedido.StatusFinanceiro.PENDENTE
+            and pedido.status
+            in (
+                Pedido.Status.AGUARDANDO_PAGAMENTO,
+                Pedido.Status.PAGAMENTO_PENDENTE,
+            )
+            and not pedido.comprovantes.exclude(
+                status="rejeitado"
+            ).exists()
         )
 
     def get(self, request, token):
@@ -718,6 +724,12 @@ class RegistrarPagamentoManualView(
             mensagens = getattr(erro, "messages", None) or [str(erro)]
             for mensagem in mensagens:
                 form.add_error(None, mensagem)
+            return self.form_invalid(form)
+        except IntegrityError:
+            form.add_error(
+                "referencia",
+                "Já existe comprovante com esta referência.",
+            )
             return self.form_invalid(form)
 
         messages.success(

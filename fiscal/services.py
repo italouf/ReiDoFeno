@@ -484,7 +484,14 @@ def _preparar_emissao(pedido, client):
     if nota.status == NotaFiscal.Status.CANCELADA:
         _aviso_nota_cancelada(nota)
         return pedido, nota, False, None
-    if nota.status == NotaFiscal.Status.AUTORIZADA:
+    if nota.status in (
+        NotaFiscal.Status.AUTORIZADA,
+        NotaFiscal.Status.ANEXADA,
+    ):
+        return pedido, nota, False, None
+    if nota.origem == NotaFiscal.Origem.MANUAL:
+        # Documento manual é autoridade do operador; a fila automática não
+        # pode reivindicar, sobrescrever ou reenviar.
         return pedido, nota, False, None
 
     agora = timezone.now()
@@ -647,6 +654,8 @@ def enviar_para_emissao(pedido, client=None) -> NotaFiscal | None:
         nota.processando_desde = None
         nota.ultimo_erro = ""
         nota.status = NotaFiscal.Status.AUTORIZADA
+        nota.data_emissao = nota.data_emissao or timezone.now()
+        snapshot_fiscal(nota, pedido_atual)
 
         if (
             pedido_atual.status == "cancelado"
@@ -667,6 +676,13 @@ def enviar_para_emissao(pedido, client=None) -> NotaFiscal | None:
                         "processando_desde",
                         "ultimo_erro",
                         "status",
+                        "data_emissao",
+                        "cliente_nome",
+                        "cliente_documento",
+                        "cliente_tipo_pessoa",
+                        "cliente_endereco",
+                        "valor_total",
+                        "itens_json",
                         "atualizado_em",
                     ]
                 )
@@ -751,6 +767,7 @@ def processar_fila_fiscal() -> int:
         tipo=NotaFiscal.Tipo.SAIDA,
         status__in=(
             NotaFiscal.Status.AUTORIZADA,
+            NotaFiscal.Status.ANEXADA,
             NotaFiscal.Status.CANCELADA,
         ),
     )
