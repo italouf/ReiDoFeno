@@ -21,7 +21,7 @@ from stock.services import (
 )
 
 from .cart import Carrinho
-from .models import ObrigacaoEstoquePedido, Pagamento, Pedido
+from .models import ComprovantePagamento, ObrigacaoEstoquePedido, Pagamento, Pedido
 from .pricing import (  # noqa: F401 - reexportado para compatibilidade
     LIMIAR_ATACADO,
     calcular_item_pedido,
@@ -1324,6 +1324,142 @@ def reconciliar_pedido_financeiro(
         },
     )
     return pedido
+
+
+def _normalizar_data_pagamento(data_pagamento):
+    if timezone.is_naive(data_pagamento):
+        return timezone.make_aware(data_pagamento)
+    return data_pagamento
+
+
+def _sincronizar_pagamento_manual(
+    pedido: Pedido,
+    *,
+    valor: Decimal,
+    data_pagamento,
+    referencia: str = "",
+) -> Pagamento:
+    """Mantém o Pagamento único do pedido como receita manual reconhecida."""
+    pagamento = (
+        Pagamento.objects.select_for_update().filter(pedido=pedido).first()
+    )
+    campos = {
+        "provedor": "manual",
+        "status": Pagamento.Status.APROVADO,
+        "valor": valor,
+        "aprovado_em": data_pagamento,
+        "estornado_em": None,
+        "preferencia_id": "",
+        "init_point": "",
+        "criacao_expira_em": None,
+        "id_externo": referencia[:60],
+    }
+    if pagamento is None:
+        return Pagamento.objects.create(pedido=pedido, **campos)
+    for campo, conteudo in campos.items():
+        setattr(pagamento, campo, conteudo)
+    pagamento.save(update_fields=list(campos))
+    return pagamento
+
+
+@transaction.atomic
+def registrar_pagamento_manual(
+    pedido: Pedido,
+    *,
+    metodo: str,
+    valor,
+    data_pagamento,
+    referencia: str = "",
+    observacao: str = "",
+    arquivo=None,
+    usuario,
+    request=None,
+) -> ComprovantePagamento:
+    """Registra prova manual e reconhece a receita quando o saldo fecha.
+
+    A baixa de estoque segue o mesmo caminho do pagamento aprovado pelo
+    provedor: consumo de reservas e obrigações. A conciliação financeira
+    continua pendente e é o que libera o avanço operacional (ADR-002/018).
+    """
+    from core.auditoria import registrar_auditoria
+
+    pedido = _pedido_bloqueado(pedido)
+    if (
+        pedido.status == Pedido.Status.CANCELADO
+        or pedido.status_financeiro != Pedido.StatusFinanceiro.PENDENTE
+    ):
+        raise ValidationError(
+            "Pedido não está apto a receber pagamento manual."
+        )
+
+    try:
+        valor_decimal = Decimal(str(valor))
+    except (ArithmeticError, TypeError, ValueError) as erro:
+        raise ValidationError("Valor de pagamento inválido.") from erro
+    if not valor_decimal.is_finite() or valor_decimal <= 0:
+        raise ValidationError("Valor de pagamento deve ser positivo.")
+
+    saldo_antes = pedido.saldo_devedor
+    if valor_decimal > saldo_antes:
+        raise ValidationError(
+            f"Valor excede o saldo devedor de R$ {saldo_antes}."
+        )
+
+    data_pagamento = _normalizar_data_pagamento(data_pagamento)
+    antes = {
+        "status_financeiro": pedido.status_financeiro,
+        "financeiro_conciliado": pedido.financeiro_conciliado,
+        "saldo_devedor": str(saldo_antes),
+    }
+    comprovante = ComprovantePagamento.objects.create(
+        pedido=pedido,
+        metodo=metodo,
+        valor=valor_decimal,
+        data_pagamento=data_pagamento,
+        referencia=referencia.strip(),
+        observacao=observacao.strip(),
+        arquivo=arquivo,
+        registrado_por=usuario,
+    )
+
+    total_pago = pedido.total_comprovantes_ativos()
+    fechou_saldo = total_pago >= pedido.total
+    if fechou_saldo:
+        pedido.definir_status_financeiro(
+            Pedido.StatusFinanceiro.PAGO,
+            request=request,
+            usuario=usuario,
+            motivo="pagamento manual registrado",
+        )
+        pedido.financeiro_conciliado = False
+        pedido.save(update_fields=["financeiro_conciliado", "atualizado_em"])
+        _sincronizar_pagamento_manual(
+            pedido,
+            valor=pedido.total,
+            data_pagamento=data_pagamento,
+            referencia=referencia,
+        )
+        _baixar_estoque_do_pedido(pedido, request=request)
+
+    registrar_auditoria(
+        acao="pagamento_manual_registrado",
+        instancia=pedido,
+        request=request,
+        usuario=usuario,
+        antes=antes,
+        depois={
+            "status_financeiro": pedido.status_financeiro,
+            "financeiro_conciliado": pedido.financeiro_conciliado,
+            "metodo": metodo,
+            "valor": str(valor_decimal),
+            "referencia": referencia,
+            "total_pago": str(total_pago),
+            "saldo_devedor": str(pedido.saldo_devedor),
+            "fechou_saldo": fechou_saldo,
+            "comprovante_id": comprovante.pk,
+        },
+    )
+    return comprovante
 
 
 def _liberar_reservas_do_pedido(

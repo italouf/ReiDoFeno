@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Registrar pagamento — {{ pedido.numero }}{% endblock %}
+{% block content %}
+{% include "components/cabecalho_pagina.html" with titulo="Registrar pagamento manual" %}
+<div class="cartao form-cartao">
+  <p style="margin-top:0; color:var(--tinta-700);">
+    Pedido <strong>{{ pedido.numero }}</strong> · {{ pedido.cliente.nome }} ·
+    Total R$ {{ pedido.total }} · Saldo devedor R$ {{ saldo_devedor }}
+  </p>
+  <form method="post" enctype="multipart/form-data" data-enviar>
+    {% csrf_token %}
+    {% include "components/form_campos.html" with form=form %}
+    <div class="form-acoes">
+      <button type="submit" class="btn">Registrar pagamento</button>
+      <a class="btn btn--secundario" href="{% url 'sales:pedido_interno_detail' pedido.pk %}">Cancelar</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

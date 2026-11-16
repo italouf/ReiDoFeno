@@ -8,7 +8,12 @@ from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
-from django.http import Http404, HttpResponseNotAllowed, JsonResponse
+from django.http import (
+    Http404,
+    HttpResponseBadRequest,
+    HttpResponseNotAllowed,
+    JsonResponse,
+)
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse, reverse_lazy
 from django.utils import timezone
@@ -24,7 +29,7 @@ from customers.models import Cliente
 
 from .cart import Carrinho
 from .emails import email_pedido_criado
-from .forms import CancelamentoForm, CheckoutForm
+from .forms import CancelamentoForm, CheckoutForm, ComprovantePagamentoForm
 from .models import Pagamento, Pedido
 from .services import (
     ResultadoPagamentoInvalido,
@@ -33,6 +38,7 @@ from .services import (
     criar_pedido_do_carrinho,
     pedidos_visiveis_para,
     registrar_devolucao,
+    registrar_pagamento_manual,
 )
 
 logger = logging.getLogger(__name__)
@@ -633,7 +639,7 @@ class PedidoInternoDetailView(LoginRequiredMixin, GrupoRequiredMixin, DetailView
         return (
             pedidos_visiveis_para(self.request.user)
             .select_related("cliente", "unidade")
-            .prefetch_related("itens", "notas_fiscais")
+            .prefetch_related("itens", "notas_fiscais", "comprovantes")
         )
 
     def get_context_data(self, **kwargs):
@@ -649,6 +655,76 @@ class PedidoInternoDetailView(LoginRequiredMixin, GrupoRequiredMixin, DetailView
             for valor in sorted(permitidos)
         ]
         return contexto
+
+
+class RegistrarPagamentoManualView(
+    LoginRequiredMixin, GrupoRequiredMixin, FormView
+):
+    """Registra PIX, dinheiro ou cartão presencial com comprovante."""
+
+    form_class = ComprovantePagamentoForm
+    template_name = "sales/registrar_pagamento_manual.html"
+    grupos_permitidos = GRUPOS_INTERNOS
+
+    def dispatch(self, request, *args, **kwargs):
+        if not request.user.is_authenticated:
+            return self.handle_no_permission()
+        self.pedido = get_object_or_404(
+            pedidos_visiveis_para(request.user),
+            pk=self.kwargs["pedido_pk"],
+        )
+        if (
+            self.pedido.status == Pedido.Status.CANCELADO
+            or self.pedido.status_financeiro
+            in (
+                Pedido.StatusFinanceiro.PAGO,
+                Pedido.StatusFinanceiro.ESTORNADO,
+                Pedido.StatusFinanceiro.CANCELADO,
+            )
+        ):
+            return HttpResponseBadRequest(
+                "Pedido já pago, estornado ou cancelado."
+            )
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["pedido"] = self.pedido
+        return kwargs
+
+    def get_context_data(self, **kwargs):
+        contexto = super().get_context_data(**kwargs)
+        contexto["pedido"] = self.pedido
+        contexto["saldo_devedor"] = self.pedido.saldo_devedor
+        return contexto
+
+    def form_valid(self, form):
+        try:
+            comprovante = registrar_pagamento_manual(
+                self.pedido,
+                metodo=form.cleaned_data["metodo"],
+                valor=form.cleaned_data["valor"],
+                data_pagamento=form.cleaned_data["data_pagamento"],
+                referencia=form.cleaned_data.get("referencia", ""),
+                observacao=form.cleaned_data.get("observacao", ""),
+                arquivo=form.cleaned_data.get("arquivo"),
+                usuario=self.request.user,
+                request=self.request,
+            )
+        except ValidationError as erro:
+            mensagens = getattr(erro, "messages", None) or [str(erro)]
+            for mensagem in mensagens:
+                form.add_error(None, mensagem)
+            return self.form_invalid(form)
+
+        messages.success(
+            self.request,
+            f"Pagamento de R$ {comprovante.valor} registrado "
+            f"para o pedido {self.pedido.numero}.",
+        )
+        return redirect(
+            "sales:pedido_interno_detail", pk=self.pedido.pk
+        )
 
 
 class PedidoCancelamentoView(
