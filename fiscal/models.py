@@ -1,5 +1,15 @@
+from datetime import date
+
 from django.core.exceptions import ValidationError
 from django.db import models
+
+
+def _cinco_anos_depois(data: date) -> date:
+    """Soma cinco anos de calendário, ajustando 29/02 para 28/02."""
+    try:
+        return data.replace(year=data.year + 5)
+    except ValueError:
+        return data.replace(year=data.year + 5, day=28)
 
 
 class NotaFiscal(models.Model):
@@ -71,6 +81,13 @@ class NotaFiscal(models.Model):
         blank=True,
         null=True,
     )
+    retido_ate = models.DateField(
+        "retido até",
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="Data de retenção legal (5 anos após a emissão).",
+    )
     link_documento = models.URLField(
         "link do documento/XML-DANFE", max_length=300, blank=True
     )
@@ -123,6 +140,16 @@ class NotaFiscal(models.Model):
 
     def __str__(self):
         return f"NF-e {self.numero or '(pendente)'} — {self.pedido.numero}"
+
+    def save(self, *args, **kwargs):
+        if self.data_emissao and not self.retido_ate:
+            self.retido_ate = _cinco_anos_depois(self.data_emissao.date())
+            update_fields = kwargs.get("update_fields")
+            if update_fields is not None:
+                kwargs["update_fields"] = list(
+                    set(update_fields) | {"retido_ate"}
+                )
+        super().save(*args, **kwargs)
 
     def clean(self):
         super().clean()

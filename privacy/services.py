@@ -127,7 +127,10 @@ def anonimizar_cliente(cliente: Cliente) -> bool:
     Retorna True quando houve anonimização; False quando o cadastro foi
     excluído por completo (nenhuma retenção legal aplicável).
     """
-    tem_retencacao = cliente.pedidos.exists()
+    from fiscal.models import NotaFiscal
+
+    tem_notas = NotaFiscal.objects.filter(pedido__cliente=cliente).exists()
+    tem_retencacao = tem_notas or cliente.pedidos.exists()
 
     if not tem_retencacao:
         logger.info(
@@ -137,6 +140,12 @@ def anonimizar_cliente(cliente: Cliente) -> bool:
         cliente.delete()
         return False
 
+    antes = {
+        "nome": cliente.nome,
+        "documento": cliente.documento,
+        "telefone": cliente.telefone,
+        "email": cliente.email,
+    }
     sufixo = uuid.uuid4().hex[:10]
     cliente.nome = f"Titular removido ({sufixo})"
     # Documento pseudonimizado apenas com dígitos (save() normaliza).
@@ -152,6 +161,24 @@ def anonimizar_cliente(cliente: Cliente) -> bool:
     cliente.preferencia = ""
     cliente.usuario = None
     cliente.save()
+
+    from core.auditoria import registrar_auditoria
+
+    registrar_auditoria(
+        acao=(
+            "cliente_anonimizado_com_notas"
+            if tem_notas
+            else "cliente_anonimizado_com_pedidos"
+        ),
+        instancia=cliente,
+        antes=antes,
+        depois={
+            "nome": cliente.nome,
+            "documento": cliente.documento,
+            "notas_preservadas": tem_notas,
+            "pedidos_preservados": True,
+        },
+    )
 
     logger.info("Cliente %s anonimizado com retenção fiscal.", cliente.pk)
     return True
