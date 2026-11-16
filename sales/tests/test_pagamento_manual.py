@@ -6,6 +6,7 @@ from decimal import Decimal
 from unittest import mock
 
 from django.contrib.auth.models import Group
+from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.test import TestCase, override_settings
@@ -364,6 +365,35 @@ class ValidacaoComprovanteTests(BasePagamentoManualTests):
 
         self.assertEqual(resposta.status_code, 200)
         self.assertIn("valor", resposta.context["form"].errors)
+        self.assertFalse(pedido.comprovantes.exists())
+
+
+class AcessoPagamentoManualTests(BasePagamentoManualTests):
+    def test_anonimo_e_redirecionado_para_login(self):
+        pedido = self.criar_pedido()
+
+        resposta = self.client.get(
+            reverse("sales:pedido_pagamento_manual", args=[pedido.pk])
+        )
+
+        self.assertEqual(resposta.status_code, 302)
+        self.assertIn("/accounts/login/", resposta["Location"])
+
+    def test_erro_de_servico_vira_erro_de_formulario(self):
+        pedido = self.criar_pedido()
+        self.client.force_login(self.vendedor)
+
+        with mock.patch(
+            "sales.views.registrar_pagamento_manual",
+            side_effect=ValidationError("Pedido mudou de estado."),
+        ):
+            resposta = self.postar(pedido)
+
+        self.assertEqual(resposta.status_code, 200)
+        self.assertIn(
+            "Pedido mudou de estado.",
+            resposta.context["form"].non_field_errors(),
+        )
         self.assertFalse(pedido.comprovantes.exists())
 
 

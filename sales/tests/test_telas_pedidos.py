@@ -169,3 +169,32 @@ class PedidosInternosTests(TestCase):
             reverse("sales:pedido_interno_detail", args=[pedido.pk])
         )
         self.assertContains(resposta, "https://wa.me/5575988887777")
+
+    def test_vendedor_abre_minhas_metricas(self):
+        from django.utils import timezone
+
+        from sales.factories import (
+            ItemPedidoFactory,
+            PagamentoFactory,
+            PedidoFactory,
+        )
+
+        pedido = PedidoFactory(
+            status=Pedido.Status.PAGO,
+            usuario_criador=self.usuarios["vendedor"],
+        )
+        ItemPedidoFactory(pedido=pedido)
+        PagamentoFactory(
+            pedido=pedido,
+            status="aprovado",
+            aprovado_em=timezone.now(),
+            valor="110.00",
+        )
+        self.client.force_login(self.usuarios["vendedor"])
+
+        resposta = self.client.get(reverse("sales:minhas_metricas"))
+
+        self.assertEqual(resposta.status_code, 200)
+        self.assertIn("metricas", resposta.context)
+        self.assertIn("receita", resposta.context)
+        self.assertIn("pendentes", resposta.context)

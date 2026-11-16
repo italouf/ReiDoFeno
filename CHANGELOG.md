@@ -1,5 +1,34 @@
 # Changelog
 
+## [Fase 4 — pagamento manual + fiscal assistido] — 2026-11-16
+
+- **PAY-MANUAL:** `ComprovantePagamento` registra PIX, dinheiro e cartão
+  presencial com referência, observação, arquivo (JPG/PNG/PDF até 5 MB),
+  autor e status. Pagamento parcial mantém o pedido pendente; ao fechar o
+  saldo, o financeiro vira `pago`, a receita manual é registrada no
+  `Pagamento` do pedido e o estoque é baixado pelo fluxo existente. A
+  conciliação continua obrigatória antes de separar/entregar (ADR-018).
+- **CONCILIACAO:** grupo `Financeiro`; fila `/gestao/conciliacao/`; conciliar
+  marca `financeiro_conciliado=True` e audita; rejeitar exige justificativa,
+  marca comprovantes como rejeitados, cancela o pagamento com estorno e não
+  devolve estoque automaticamente (ADR-017). Criador não concilia o próprio
+  pedido.
+- **ADR-006:** `NotaFiscal` recebe snapshot de cliente/itens, PDF, série e
+  data de emissão; exportação JSON/CSV para IOB; anexo de PDF em
+  `status=anexada`; registro completo em `status=autorizada`. Sem modelo
+  fiscal paralelo.
+- **FISCAL-WORKFLOW:** `/fiscal/notas/` com filtro por status, autorização
+  idempotente com número/chave e cancelamento com justificativa, tudo
+  auditado.
+- **ADR-012:** `NotaFiscal.retido_ate` calculado em +5 anos de calendário;
+  anonimização LGPD preserva snapshot e audita; comando
+  `limpar_notas_expiradas` remove apenas notas expiradas, com `--dry-run` e
+  auditoria por nota.
+- **E2E:** fluxo completo vendedor → pagamento manual → conciliação →
+  anexo/autorização de NF-e validado localmente (1 passed).
+- **Pendências:** execução em staging e aceite de Nilton, Neto e Caio não
+  foram realizados nesta sessão.
+
 ## [Fase 3 — propriedade e cleanup do sentinela] — 2026-10-24
 
 - **F3-06:** o harness sentinela instala a trap depois de adquirir uma lock e
