@@ -12,6 +12,7 @@ def papeis(request):
             "pode_operacao": False,
             "pode_catalogo": False,
             "pode_clientes": False,
+            "pode_financeiro": False,
             "url_inicio": "/",
         }
 
@@ -24,9 +25,12 @@ def papeis(request):
     fiscal = bool(
         grupos & {"Administrador", "Gestor", "Emissor Fiscal"}
     )
+    financeiro = bool(grupos & {"Administrador", "Financeiro"})
     metricas = bool(grupos & {"Administrador", "Gestor", "Vendedor"})
     if gestao:
         url_inicio = reverse("core:painel")
+    elif financeiro:
+        url_inicio = reverse("sales:conciliacao_list")
     elif fiscal:
         url_inicio = reverse("fiscal:relatorio_fiscal")
     elif metricas:
@@ -43,5 +47,6 @@ def papeis(request):
         "pode_clientes": bool(
             grupos & {"Administrador", "Gestor", "Vendedor"}
         ),
+        "pode_financeiro": financeiro,
         "url_inicio": url_inicio,
     }

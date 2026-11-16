@@ -35,10 +35,12 @@ from .services import (
     ResultadoPagamentoInvalido,
     alterar_status_operacional,
     cancelar_pedido_padrao,
+    conciliar_pagamento_manual,
     criar_pedido_do_carrinho,
     pedidos_visiveis_para,
     registrar_devolucao,
     registrar_pagamento_manual,
+    rejeitar_conciliacao_pagamento,
 )
 
 logger = logging.getLogger(__name__)
@@ -59,6 +61,7 @@ STATUS_FINANCEIROS = frozenset(
 PERMIS_SO_TRANSICOES_OPERACIONAIS = frozenset(
     set(Pedido.Status.values) - Pedido.STATUS_FINANCEIROS_LEGADOS
 )
+GRUPOS_FINANCEIROS = ("Administrador", "Financeiro")
 
 
 class CarrinhoView(TemplateView):
@@ -725,6 +728,72 @@ class RegistrarPagamentoManualView(
         return redirect(
             "sales:pedido_interno_detail", pk=self.pedido.pk
         )
+
+
+class ConciliacaoListView(LoginRequiredMixin, GrupoRequiredMixin, ListView):
+    """Fila de pagamentos manuais aguardando validação financeira."""
+
+    template_name = "sales/conciliacao_list.html"
+    context_object_name = "pedidos"
+    grupos_permitidos = GRUPOS_FINANCEIROS
+    paginate_by = 25
+
+    def get_queryset(self):
+        return (
+            Pedido.objects.filter(
+                status_financeiro=Pedido.StatusFinanceiro.PAGO,
+                financeiro_conciliado=False,
+            )
+            .exclude(status=Pedido.Status.CANCELADO)
+            .select_related("cliente", "unidade")
+            .prefetch_related("comprovantes")
+            .order_by("criado_em")
+        )
+
+
+class ConciliarPedidoView(LoginRequiredMixin, GrupoRequiredMixin, View):
+    grupos_permitidos = GRUPOS_FINANCEIROS
+
+    def post(self, request, pk):
+        pedido = get_object_or_404(Pedido, pk=pk)
+        if pedido.usuario_criador_id == request.user.pk:
+            raise PermissionDenied("Não é possível conciliar o próprio pedido.")
+        try:
+            conciliar_pagamento_manual(
+                pedido, usuario=request.user, request=request
+            )
+        except ValidationError as erro:
+            return HttpResponseBadRequest(
+                getattr(erro, "message", str(erro))
+            )
+        messages.success(
+            request, f"Pedido {pedido.numero} conciliado."
+        )
+        return redirect("sales:conciliacao_list")
+
+
+class RejeitarPedidoView(LoginRequiredMixin, GrupoRequiredMixin, View):
+    grupos_permitidos = GRUPOS_FINANCEIROS
+
+    def post(self, request, pk):
+        pedido = get_object_or_404(Pedido, pk=pk)
+        if pedido.usuario_criador_id == request.user.pk:
+            raise PermissionDenied("Não é possível rejeitar o próprio pedido.")
+        try:
+            rejeitar_conciliacao_pagamento(
+                pedido,
+                justificativa=request.POST.get("justificativa", ""),
+                usuario=request.user,
+                request=request,
+            )
+        except ValidationError as erro:
+            return HttpResponseBadRequest(
+                getattr(erro, "message", str(erro))
+            )
+        messages.success(
+            request, f"Pedido {pedido.numero} devolvido para pendente."
+        )
+        return redirect("sales:conciliacao_list")
 
 
 class PedidoCancelamentoView(

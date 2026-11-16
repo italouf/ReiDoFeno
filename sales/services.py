@@ -1462,6 +1462,123 @@ def registrar_pagamento_manual(
     return comprovante
 
 
+@transaction.atomic
+def conciliar_pagamento_manual(
+    pedido: Pedido, *, usuario, request=None
+) -> Pedido:
+    """Valida a prova manual e libera o avanço operacional do pedido."""
+    from core.auditoria import registrar_auditoria
+
+    pedido = _pedido_bloqueado(pedido)
+    if pedido.status_financeiro != Pedido.StatusFinanceiro.PAGO:
+        raise ValidationError(
+            "Só é possível conciliar pedido com financeiro pago."
+        )
+    if pedido.financeiro_conciliado:
+        return pedido
+    total_provas = pedido.total_comprovantes_ativos()
+    if total_provas < pedido.total:
+        raise ValidationError(
+            "Comprovantes ativos não cobrem o total do pedido "
+            f"(R$ {total_provas} de R$ {pedido.total})."
+        )
+
+    pedido.financeiro_conciliado = True
+    pedido.save(update_fields=["financeiro_conciliado", "atualizado_em"])
+    conciliados = pedido.comprovantes.filter(
+        status=ComprovantePagamento.Status.PENDENTE
+    ).update(status=ComprovantePagamento.Status.CONCILIADO)
+
+    registrar_auditoria(
+        acao="pedido_conciliado",
+        instancia=pedido,
+        request=request,
+        usuario=usuario,
+        antes={"financeiro_conciliado": False},
+        depois={
+            "financeiro_conciliado": True,
+            "total_comprovantes": str(total_provas),
+            "comprovantes_conciliados": conciliados,
+        },
+    )
+    return pedido
+
+
+@transaction.atomic
+def rejeitar_conciliacao_pagamento(
+    pedido: Pedido, *, justificativa: str, usuario, request=None
+) -> Pedido:
+    """Rejeita a prova: reverte o financeiro sem inventar retorno físico."""
+    from core.auditoria import registrar_auditoria
+
+    if not (justificativa or "").strip():
+        raise ValidationError("Justificativa é obrigatória.")
+
+    pedido = _pedido_bloqueado(pedido)
+    if pedido.status_financeiro != Pedido.StatusFinanceiro.PAGO:
+        raise ValidationError(
+            "Só é possível rejeitar conciliação de pedido pago."
+        )
+    if pedido.financeiro_conciliado:
+        raise ValidationError(
+            "Pedido já conciliado não pode ser rejeitado; use o fluxo de "
+            "cancelamento/estorno."
+        )
+
+    antes = {
+        "status_financeiro": pedido.status_financeiro,
+        "financeiro_conciliado": pedido.financeiro_conciliado,
+    }
+    pedido.definir_status_financeiro(
+        Pedido.StatusFinanceiro.PENDENTE,
+        request=request,
+        usuario=usuario,
+        motivo="conciliação rejeitada",
+    )
+    pedido.financeiro_conciliado = False
+    pedido.save(update_fields=["financeiro_conciliado", "atualizado_em"])
+
+    rejeitados = pedido.comprovantes.exclude(
+        status=ComprovantePagamento.Status.REJEITADO
+    ).update(status=ComprovantePagamento.Status.REJEITADO)
+
+    pagamento = (
+        Pagamento.objects.select_for_update().filter(pedido=pedido).first()
+    )
+    if pagamento is not None and pagamento.status != Pagamento.Status.CANCELADO:
+        pagamento.status = Pagamento.Status.CANCELADO
+        pagamento.estornado_em = timezone.now()
+        pagamento.save(update_fields=["status", "estornado_em"])
+
+    _liberar_reservas_do_pedido(
+        pedido,
+        request=request,
+        usuario=usuario,
+        motivo="rejeição de conciliação",
+    )
+
+    registrar_auditoria(
+        acao="pedido_rejeitado_conciliacao",
+        instancia=pedido,
+        request=request,
+        usuario=usuario,
+        antes=antes,
+        depois={
+            "status_financeiro": pedido.status_financeiro,
+            "financeiro_conciliado": pedido.financeiro_conciliado,
+            "justificativa": justificativa.strip()[:500],
+            "comprovantes_rejeitados": rejeitados,
+            "pagamento_id": getattr(pagamento, "pk", None),
+            "pagamento_estornado": bool(
+                pagamento is not None
+                and pagamento.status == Pagamento.Status.CANCELADO
+                and pagamento.estornado_em is not None
+            ),
+        },
+    )
+    return pedido
+
+
 def _liberar_reservas_do_pedido(
     pedido: Pedido, *, request=None, usuario=None, motivo: str = "cancelamento"
 ) -> int:

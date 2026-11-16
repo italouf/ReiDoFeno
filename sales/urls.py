@@ -70,6 +70,21 @@ urlpatterns = [
         name="pedido_pagamento_manual",
     ),
     path(
+        "gestao/conciliacao/",
+        views.ConciliacaoListView.as_view(),
+        name="conciliacao_list",
+    ),
+    path(
+        "gestao/conciliacao/<int:pk>/conciliar/",
+        views.ConciliarPedidoView.as_view(),
+        name="conciliar_pedido",
+    ),
+    path(
+        "gestao/conciliacao/<int:pk>/rejeitar/",
+        views.RejeitarPedidoView.as_view(),
+        name="rejeitar_pedido",
+    ),
+    path(
         "gestao/pedidos/<int:pk>/cancelar/",
         views.PedidoCancelamentoView.as_view(),
         name="pedido_cancelamento",

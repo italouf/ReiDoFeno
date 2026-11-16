@@ -11,6 +11,7 @@ GRUPOS = (
     "Administrador",
     "Gestor",
     "Vendedor",
+    "Financeiro",
     "Emissor Fiscal",
     "Cliente",
 )
@@ -46,6 +47,13 @@ PERMISSOES_POR_GRUPO = {
         "fiscal.add_notafiscal",
         "fiscal.change_notafiscal",
         "sales.view_pedido",
+    ],
+    "Financeiro": [
+        # Conciliação de recebimentos manuais.
+        "sales.view_pedido",
+        "sales.change_pedido",
+        "sales.view_comprovantepagamento",
+        "sales.change_comprovantepagamento",
     ],
     "Cliente": [
         # Direitos LGPD próprios serão acrescentados na Fase 4.
