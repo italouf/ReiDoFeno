@@ -21,6 +21,21 @@ urlpatterns = [
         name="exportar_iob",
     ),
     path(
+        "notas/",
+        views.NotaFiscalListView.as_view(),
+        name="nota_lista",
+    ),
+    path(
+        "notas/<int:pk>/autorizar/",
+        views.ConfirmarNotaAutorizadaView.as_view(),
+        name="nota_autorizar",
+    ),
+    path(
+        "notas/<int:pk>/cancelar/",
+        views.CancelarNotaView.as_view(),
+        name="nota_cancelar",
+    ),
+    path(
         "notas-entrada/",
         views.NotaEntradaListView.as_view(),
         name="nota_entrada_lista",

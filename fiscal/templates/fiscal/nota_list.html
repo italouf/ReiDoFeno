@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Notas fiscais — Rei do Feno{% endblock %}
+{% block content %}
+{% include "components/cabecalho_pagina.html" with titulo="Notas fiscais" contador=notas|length %}
+
+<form method="get" style="display:flex; gap:var(--espaco-2); align-items:flex-end; flex-wrap:wrap; margin-bottom:var(--espaco-4);">
+  <div class="campo" style="margin:0;">
+    <label for="filtro-status">Status</label>
+    <select id="filtro-status" name="status">
+      <option value="">Todas</option>
+      {% for valor, rotulo in status_choices %}
+      <option value="{{ valor }}" {% if status_filtro == valor %}selected{% endif %}>{{ rotulo }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <button type="submit" class="btn btn--secundario">Filtrar</button>
+</form>
+
+{% if notas %}
+<div class="tabela-envolve">
+  <table class="tabela">
+    <thead><tr>
+      <th scope="col">Pedido</th><th scope="col">Cliente</th>
+      <th scope="col">NF-e</th><th scope="col">Status</th>
+      <th scope="col">Emissão</th><th scope="col">PDF</th>
+      <th scope="col"><span class="visually-hidden">Ações</span></th>
+    </tr></thead>
+    <tbody>
+      {% for nota in notas %}
+      <tr>
+        <td><a href="{% url 'sales:pedido_interno_detail' nota.pedido_id %}">{{ nota.pedido.numero }}</a></td>
+        <td>{{ nota.pedido.cliente.nome }}</td>
+        <td>
+          {{ nota.numero|default:"—" }}{% if nota.serie %} / {{ nota.serie }}{% endif %}
+          {% if nota.chave_acesso %}<br><span class="helptext">{{ nota.chave_acesso }}</span>{% endif %}
+        </td>
+        <td>{% include "components/status_pedido.html" with status=nota.status rotulo=nota.get_status_display %}</td>
+        <td>{{ nota.data_emissao|date:"d/m/Y H:i"|default:"—" }}</td>
+        <td>
+          {% if nota.pdf %}<a href="{{ nota.pdf.url }}" target="_blank" rel="noopener">Abrir</a>{% else %}—{% endif %}
+        </td>
+        <td>
+          {% if nota.status == 'autorizada' %}
+          <form method="post" action="{% url 'fiscal:nota_cancelar' nota.pk %}" style="display:flex; gap:var(--espaco-2); align-items:flex-end; flex-wrap:wrap;">
+            {% csrf_token %}
+            <input type="text" name="justificativa" required maxlength="500" placeholder="Justificativa" aria-label="Justificativa do cancelamento">
+            <button type="submit" class="btn btn--secundario btn--pequeno">Cancelar</button>
+          </form>
+          {% elif nota.status == 'cancelada' %}
+          <span class="helptext">Estado final</span>
+          {% else %}
+          <div style="display:flex; gap:var(--espaco-2); flex-wrap:wrap;">
+            {% if nota.numero and nota.chave_acesso %}
+            <form method="post" action="{% url 'fiscal:nota_autorizar' nota.pk %}">
+              {% csrf_token %}
+              <button type="submit" class="btn btn--pequeno">Autorizar</button>
+            </form>
+            {% else %}
+            <a class="btn btn--secundario btn--pequeno" href="{% url 'fiscal:nota_manual' nota.pedido_id %}">Completar</a>
+            {% endif %}
+            <a class="btn btn--secundario btn--pequeno" href="{% url 'fiscal:nota_anexar' nota.pedido_id %}">Anexar PDF</a>
+          </div>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% include "components/paginacao.html" %}
+{% else %}
+{% include "components/estado_vazio.html" with icone="i-documento" titulo="Nenhuma nota fiscal encontrada." descricao="Notas emitidas no IOB e registradas no sistema aparecem aqui." %}
+{% endif %}
+{% endblock %}

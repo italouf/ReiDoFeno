@@ -8,10 +8,9 @@ from django.db import IntegrityError, transaction
 from django.db.models import Case, IntegerField, Value, When
 from django.http import HttpResponse, HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect
-from django.urls import reverse
 from django.utils import timezone
 from django.utils.dateparse import parse_date
-from django.views.generic import FormView, ListView, TemplateView
+from django.views.generic import FormView, ListView, TemplateView, View
 
 from core.auditoria import registrar_auditoria
 from core.mixins import GrupoRequiredMixin
@@ -20,6 +19,7 @@ from sales.models import Pedido
 from .forms import AnexoNotaFiscalForm, NotaEntradaManualForm, NotaManualForm
 from .models import NotaFiscal
 from .services import (
+    cancelar_nota_fiscal,
     exportar_para_iob,
     exportar_para_iob_csv,
     pedido_elegivel,
@@ -255,7 +255,7 @@ class RegistrarNotaManualView(
             self.request,
             f"NF-e manual {nota.numero} vinculada ao pedido {pedido.numero}.",
         )
-        return redirect(reverse("fiscal:relatorio_fiscal"))
+        return redirect("fiscal:nota_lista")
 
 
 class ExportarIOBPedidoView(LoginRequiredMixin, GrupoRequiredMixin, FormView):
@@ -414,7 +414,112 @@ class AnexarNotaFiscalView(LoginRequiredMixin, GrupoRequiredMixin, FormView):
             f"NF-e de {pedido.numero} anexada; confirme no IOB para "
             "autorizar.",
         )
-        return redirect(reverse("fiscal:relatorio_fiscal"))
+        return redirect("fiscal:nota_lista")
+
+
+class NotaFiscalListView(LoginRequiredMixin, GrupoRequiredMixin, ListView):
+    """Fila fiscal com filtro por status e ações de confirmação."""
+
+    template_name = "fiscal/nota_list.html"
+    context_object_name = "notas"
+    grupos_permitidos = GRUPOS_FISCAIS
+    paginate_by = 50
+
+    def get(self, request, *args, **kwargs):
+        self.status_filtro = (request.GET.get("status") or "").strip()
+        if (
+            self.status_filtro
+            and self.status_filtro not in NotaFiscal.Status.values
+        ):
+            return HttpResponseBadRequest("Status fiscal inválido.")
+        return super().get(request, *args, **kwargs)
+
+    def get_queryset(self):
+        queryset = NotaFiscal.objects.select_related(
+            "pedido", "pedido__cliente"
+        ).order_by("-criado_em")
+        if getattr(self, "status_filtro", ""):
+            queryset = queryset.filter(status=self.status_filtro)
+        return queryset
+
+    def get_context_data(self, **kwargs):
+        contexto = super().get_context_data(**kwargs)
+        contexto["status_filtro"] = getattr(self, "status_filtro", "")
+        contexto["status_choices"] = NotaFiscal.Status.choices
+        return contexto
+
+
+class ConfirmarNotaAutorizadaView(
+    LoginRequiredMixin, GrupoRequiredMixin, View
+):
+    grupos_permitidos = GRUPOS_FISCAIS
+
+    def post(self, request, pk):
+        with transaction.atomic():
+            nota = get_object_or_404(
+                NotaFiscal.objects.select_for_update(), pk=pk
+            )
+            if nota.status == NotaFiscal.Status.CANCELADA:
+                return HttpResponseBadRequest(
+                    "Nota cancelada não pode ser autorizada."
+                )
+            if nota.status == NotaFiscal.Status.AUTORIZADA:
+                return redirect("fiscal:nota_lista")
+            chave = (nota.chave_acesso or "").strip()
+            if not nota.numero.strip() or len(chave) != 44 or not chave.isdigit():
+                return HttpResponseBadRequest(
+                    "Informe número e chave de acesso com 44 dígitos antes "
+                    "de autorizar."
+                )
+            antes = {
+                "status": nota.status,
+                "numero": nota.numero,
+                "chave": nota.chave_acesso,
+            }
+            nota.status = NotaFiscal.Status.AUTORIZADA
+            nota.origem = NotaFiscal.Origem.MANUAL
+            try:
+                nota.full_clean()
+                nota.save()
+            except ValidationError as erro:
+                return HttpResponseBadRequest(
+                    getattr(erro, "message", str(erro))
+                )
+            registrar_auditoria(
+                acao="fiscal.nota_autorizada_manual",
+                instancia=nota,
+                request=request,
+                antes=antes,
+                depois={
+                    "status": nota.status,
+                    "numero": nota.numero,
+                    "serie": nota.serie,
+                    "chave": nota.chave_acesso,
+                    "pdf": nota.pdf.name if nota.pdf else None,
+                },
+            )
+        messages.success(request, f"NF-e {nota.numero} autorizada.")
+        return redirect("fiscal:nota_lista")
+
+
+class CancelarNotaView(LoginRequiredMixin, GrupoRequiredMixin, View):
+    grupos_permitidos = GRUPOS_FISCAIS
+
+    def post(self, request, pk):
+        nota = get_object_or_404(NotaFiscal, pk=pk)
+        try:
+            cancelar_nota_fiscal(
+                nota,
+                motivo=request.POST.get("justificativa", ""),
+                usuario=request.user,
+                request=request,
+            )
+        except ValidationError as erro:
+            return HttpResponseBadRequest(
+                getattr(erro, "message", str(erro))
+            )
+        messages.success(request, f"NF-e {nota.numero} cancelada.")
+        return redirect("fiscal:nota_lista")
 
 
 class NotaEntradaListView(
