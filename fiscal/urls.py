@@ -11,6 +11,16 @@ urlpatterns = [
         name="nota_manual",
     ),
     path(
+        "pedidos/<int:pedido_pk>/nota-anexar/",
+        views.AnexarNotaFiscalView.as_view(),
+        name="nota_anexar",
+    ),
+    path(
+        "pedidos/<int:pedido_pk>/exportar-iob/",
+        views.ExportarIOBPedidoView.as_view(),
+        name="exportar_iob",
+    ),
+    path(
         "notas-entrada/",
         views.NotaEntradaListView.as_view(),
         name="nota_entrada_lista",

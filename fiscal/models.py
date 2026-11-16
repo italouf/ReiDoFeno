@@ -7,6 +7,7 @@ class NotaFiscal(models.Model):
 
     class Status(models.TextChoices):
         PENDENTE = "pendente", "Pendente de envio"
+        ANEXADA = "anexada", "Anexada (PDF)"
         AUTORIZADA = "autorizada", "Autorizada"
         ERRO = "erro", "Erro"
         CANCELADA = "cancelada", "Cancelada"
@@ -42,7 +43,34 @@ class NotaFiscal(models.Model):
         "origem", max_length=10, choices=Origem.choices, default=Origem.API
     )
     numero = models.CharField("número", max_length=20, blank=True)
+    serie = models.CharField("série", max_length=10, blank=True)
     chave_acesso = models.CharField("chave de acesso", max_length=44, blank=True)
+    data_emissao = models.DateTimeField(
+        "data de emissão", null=True, blank=True
+    )
+
+    # Snapshot do pedido no momento da emissão; nunca é recalculado.
+    cliente_nome = models.CharField("nome do cliente", max_length=120, blank=True)
+    cliente_documento = models.CharField(
+        "documento do cliente", max_length=18, blank=True
+    )
+    cliente_tipo_pessoa = models.CharField(
+        "tipo de pessoa", max_length=10, blank=True
+    )
+    cliente_endereco = models.TextField("endereço do cliente", blank=True)
+    valor_total = models.DecimalField(
+        "valor total", max_digits=12, decimal_places=2, default=0
+    )
+    itens_json = models.JSONField(
+        "itens do pedido", default=list, blank=True,
+        help_text="Snapshot dos itens no momento da emissão.",
+    )
+    pdf = models.FileField(
+        "PDF da NF-e",
+        upload_to="notas_fiscais/%Y/%m/",
+        blank=True,
+        null=True,
+    )
     link_documento = models.URLField(
         "link do documento/XML-DANFE", max_length=300, blank=True
     )
@@ -82,6 +110,14 @@ class NotaFiscal(models.Model):
                 fields=("chave_acesso",),
                 condition=~models.Q(chave_acesso=""),
                 name="nota_fiscal_chave_acesso_unica",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(valor_total__gte=0),
+                name="nota_fiscal_valor_total_nao_negativo",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(valor_total__lt=10000000000),
+                name="nota_fiscal_valor_total_dentro_do_limite",
             ),
         ]
 

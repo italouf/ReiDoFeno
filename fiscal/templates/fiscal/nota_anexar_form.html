@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Anexar NF-e — {{ pedido.numero }}{% endblock %}
+{% block content %}
+<div class="cartao form-cartao">
+  <h1>Anexar NF-e emitida no IOB</h1>
+  <p style="color:var(--tinta-700);">Pedido <strong>{{ pedido.numero }}</strong> · {{ pedido.cliente.nome }}</p>
+
+  <section style="margin:var(--espaco-4) 0;">
+    <h2 style="margin-top:0;">Dados para o IOB</h2>
+    <p style="margin:0 0 var(--espaco-2); color:var(--tinta-700);">
+      Cliente: {{ dados_iob.cliente.nome }} · {{ dados_iob.cliente.documento }}
+      · Total R$ {{ dados_iob.total }}
+    </p>
+    <p style="margin:0;">
+      <a href="{% url 'fiscal:exportar_iob' pedido.pk %}?formato=json">Baixar JSON</a>
+      · <a href="{% url 'fiscal:exportar_iob' pedido.pk %}?formato=csv">Baixar CSV</a>
+    </p>
+  </section>
+
+  <form method="post" enctype="multipart/form-data" data-enviar>
+    {% csrf_token %}
+    {% include "components/form_campos.html" with form=form %}
+    <div class="form-acoes">
+      <button type="submit" class="btn">Anexar PDF</button>
+      <a class="btn btn--secundario" href="{% url 'fiscal:relatorio_fiscal' %}">Cancelar</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

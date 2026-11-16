@@ -1,4 +1,6 @@
 """Serviço fiscal: elegibilidade, envio ao ERP e reprocessamento."""
+import csv
+import io
 import logging
 import uuid
 from datetime import date, timedelta
@@ -210,6 +212,141 @@ def pedido_elegivel(pedido) -> bool:
     except ValidationError:
         return False
     return True
+
+
+def _endereco_estruturado(pedido) -> dict:
+    cliente = pedido.cliente
+    return {
+        "logradouro": pedido.logradouro or cliente.logradouro,
+        "numero": pedido.numero_endereco or cliente.numero,
+        "bairro": pedido.bairro or cliente.bairro,
+        "cidade": pedido.cidade or cliente.cidade,
+        "uf": pedido.uf or cliente.uf,
+        "cep": pedido.cep or cliente.cep,
+    }
+
+
+def _endereco_texto(pedido) -> str:
+    endereco = _endereco_estruturado(pedido)
+    partes = [
+        endereco["logradouro"],
+        endereco["numero"],
+        endereco["bairro"],
+        endereco["cidade"],
+    ]
+    texto = ", ".join(parte for parte in partes if parte)
+    if endereco["uf"]:
+        texto = f"{texto}/{endereco['uf']}" if texto else endereco["uf"]
+    if endereco["cep"]:
+        texto = f"{texto} - CEP {endereco['cep']}"
+    return texto
+
+
+def snapshot_fiscal(nota, pedido) -> NotaFiscal:
+    """Preenche o snapshot fiscal uma única vez, sem sobrescrever prova."""
+    if nota.itens_json:
+        return nota
+    nota.cliente_nome = pedido.cliente.nome[:120]
+    nota.cliente_documento = pedido.cliente.documento[:18]
+    nota.cliente_tipo_pessoa = pedido.cliente.tipo_pessoa[:10]
+    nota.cliente_endereco = _endereco_texto(pedido)
+    nota.valor_total = pedido.total
+    nota.itens_json = [
+        {
+            "produto": item.produto_nome,
+            "ncm": item.produto.ncm if item.produto_id else "",
+            "quantidade": str(item.quantidade),
+            "preco_unitario": str(item.preco_unitario),
+            "subtotal": str(item.subtotal),
+        }
+        for item in pedido.itens.select_related("produto")
+    ]
+    return nota
+
+
+def exportar_para_iob(pedido) -> dict:
+    """Dados do pedido no formato esperado pelo IOB (sem alterar estado)."""
+    endereco = _endereco_estruturado(pedido)
+    itens = []
+    for item in pedido.itens.select_related("produto"):
+        itens.append(
+            {
+                "produto": item.produto_nome,
+                "ncm": item.produto.ncm if item.produto_id else "",
+                "quantidade": float(item.quantidade),
+                "valor_unitario": float(item.preco_unitario),
+                "valor_total": float(item.subtotal),
+            }
+        )
+    return {
+        "pedido": pedido.numero,
+        "cliente": {
+            "nome": pedido.cliente.nome,
+            "documento": pedido.cliente.documento,
+            "tipo_pessoa": pedido.cliente.tipo_pessoa,
+            "endereco": endereco,
+        },
+        "itens": itens,
+        "total": float(pedido.total),
+    }
+
+
+def _csv_seguro(valor) -> str:
+    texto = str(valor or "")
+    if texto.lstrip().startswith(("=", "+", "-", "@")):
+        return "'" + texto
+    return texto
+
+
+def exportar_para_iob_csv(pedido) -> str:
+    """CSV achatado (um item por linha) para importação assistida no IOB."""
+    dados = exportar_para_iob(pedido)
+    buffer = io.StringIO()
+    escritor = csv.writer(buffer, lineterminator="\n")
+    escritor.writerow(
+        [
+            "Pedido",
+            "Cliente",
+            "Documento",
+            "Tipo de pessoa",
+            "Logradouro",
+            "Numero",
+            "Bairro",
+            "Cidade",
+            "UF",
+            "CEP",
+            "Produto",
+            "NCM",
+            "Quantidade",
+            "Valor unitario",
+            "Valor total do item",
+            "Total do pedido",
+        ]
+    )
+    cliente = dados["cliente"]
+    endereco = cliente["endereco"]
+    for item in dados["itens"]:
+        escritor.writerow(
+            [
+                _csv_seguro(dados["pedido"]),
+                _csv_seguro(cliente["nome"]),
+                _csv_seguro(cliente["documento"]),
+                _csv_seguro(cliente["tipo_pessoa"]),
+                _csv_seguro(endereco["logradouro"]),
+                _csv_seguro(endereco["numero"]),
+                _csv_seguro(endereco["bairro"]),
+                _csv_seguro(endereco["cidade"]),
+                _csv_seguro(endereco["uf"]),
+                _csv_seguro(endereco["cep"]),
+                _csv_seguro(item["produto"]),
+                _csv_seguro(item["ncm"]),
+                f"{item['quantidade']:.2f}",
+                f"{item['valor_unitario']:.2f}",
+                f"{item['valor_total']:.2f}",
+                f"{dados['total']:.2f}",
+            ]
+        )
+    return buffer.getvalue()
 
 
 def _aviso_documento_invalido(pedido) -> None:

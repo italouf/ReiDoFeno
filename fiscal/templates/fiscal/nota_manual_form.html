@@ -4,7 +4,41 @@
 <div class="cartao form-cartao">
   <h1>Registrar NF-e manual</h1>
   <p style="color:var(--tinta-700);">Pedido <strong>{{ pedido.numero }}</strong> · {{ pedido.cliente.nome }}</p>
-  <form method="post" data-enviar>
+
+  <section style="margin:var(--espaco-4) 0;">
+    <h2 style="margin-top:0;">Dados para o IOB</h2>
+    <p style="margin:0 0 var(--espaco-2); color:var(--tinta-700);">
+      Cliente: {{ dados_iob.cliente.nome }} · {{ dados_iob.cliente.documento }}
+      · {{ dados_iob.cliente.tipo_pessoa }}
+    </p>
+    <div class="tabela-envolve">
+      <table class="tabela">
+        <thead><tr>
+          <th scope="col">Produto</th><th scope="col">NCM</th>
+          <th scope="col" class="num">Qtd.</th><th scope="col" class="num">Unitário</th>
+          <th scope="col" class="num">Total</th>
+        </tr></thead>
+        <tbody>
+          {% for item in dados_iob.itens %}
+          <tr>
+            <td>{{ item.produto }}</td>
+            <td>{{ item.ncm|default:"—" }}</td>
+            <td class="num">{{ item.quantidade }}</td>
+            <td class="num">R$ {{ item.valor_unitario }}</td>
+            <td class="num">R$ {{ item.valor_total }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p style="margin:var(--espaco-2) 0 0;">
+      Total: <strong>R$ {{ dados_iob.total }}</strong>
+      · <a href="{% url 'fiscal:exportar_iob' pedido.pk %}?formato=json">Baixar JSON</a>
+      · <a href="{% url 'fiscal:exportar_iob' pedido.pk %}?formato=csv">Baixar CSV</a>
+    </p>
+  </section>
+
+  <form method="post" enctype="multipart/form-data" data-enviar>
     {% csrf_token %}
     {% include "components/form_campos.html" with form=form %}
     <div class="form-acoes">
