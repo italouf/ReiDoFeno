@@ -7,8 +7,13 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db import transaction
-from django.http import Http404, HttpResponseNotAllowed, JsonResponse
+from django.db import IntegrityError, transaction
+from django.http import (
+    Http404,
+    HttpResponseBadRequest,
+    HttpResponseNotAllowed,
+    JsonResponse,
+)
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse, reverse_lazy
 from django.utils import timezone
@@ -24,15 +29,18 @@ from customers.models import Cliente
 
 from .cart import Carrinho
 from .emails import email_pedido_criado
-from .forms import CancelamentoForm, CheckoutForm
+from .forms import CancelamentoForm, CheckoutForm, ComprovantePagamentoForm
 from .models import Pagamento, Pedido
 from .services import (
     ResultadoPagamentoInvalido,
     alterar_status_operacional,
     cancelar_pedido_padrao,
+    conciliar_pagamento_manual,
     criar_pedido_do_carrinho,
     pedidos_visiveis_para,
     registrar_devolucao,
+    registrar_pagamento_manual,
+    rejeitar_conciliacao_pagamento,
 )
 
 logger = logging.getLogger(__name__)
@@ -53,6 +61,7 @@ STATUS_FINANCEIROS = frozenset(
 PERMIS_SO_TRANSICOES_OPERACIONAIS = frozenset(
     set(Pedido.Status.values) - Pedido.STATUS_FINANCEIROS_LEGADOS
 )
+GRUPOS_FINANCEIROS = ("Administrador", "Financeiro")
 
 
 class CarrinhoView(TemplateView):
@@ -230,11 +239,17 @@ class PagamentoIniciarView(View):
 
     @staticmethod
     def _pode_iniciar(pedido: Pedido) -> bool:
-        return pedido.status_financeiro == (
-            Pedido.StatusFinanceiro.PENDENTE
-        ) and pedido.status in (
-            Pedido.Status.AGUARDANDO_PAGAMENTO,
-            Pedido.Status.PAGAMENTO_PENDENTE,
+        return (
+            pedido.status_financeiro
+            == Pedido.StatusFinanceiro.PENDENTE
+            and pedido.status
+            in (
+                Pedido.Status.AGUARDANDO_PAGAMENTO,
+                Pedido.Status.PAGAMENTO_PENDENTE,
+            )
+            and not pedido.comprovantes.exclude(
+                status="rejeitado"
+            ).exists()
         )
 
     def get(self, request, token):
@@ -633,7 +648,7 @@ class PedidoInternoDetailView(LoginRequiredMixin, GrupoRequiredMixin, DetailView
         return (
             pedidos_visiveis_para(self.request.user)
             .select_related("cliente", "unidade")
-            .prefetch_related("itens", "notas_fiscais")
+            .prefetch_related("itens", "notas_fiscais", "comprovantes")
         )
 
     def get_context_data(self, **kwargs):
@@ -649,6 +664,148 @@ class PedidoInternoDetailView(LoginRequiredMixin, GrupoRequiredMixin, DetailView
             for valor in sorted(permitidos)
         ]
         return contexto
+
+
+class RegistrarPagamentoManualView(
+    LoginRequiredMixin, GrupoRequiredMixin, FormView
+):
+    """Registra PIX, dinheiro ou cartão presencial com comprovante."""
+
+    form_class = ComprovantePagamentoForm
+    template_name = "sales/registrar_pagamento_manual.html"
+    grupos_permitidos = GRUPOS_INTERNOS
+
+    def dispatch(self, request, *args, **kwargs):
+        if not request.user.is_authenticated:
+            return self.handle_no_permission()
+        self.pedido = get_object_or_404(
+            pedidos_visiveis_para(request.user),
+            pk=self.kwargs["pedido_pk"],
+        )
+        if (
+            self.pedido.status == Pedido.Status.CANCELADO
+            or self.pedido.status_financeiro
+            in (
+                Pedido.StatusFinanceiro.PAGO,
+                Pedido.StatusFinanceiro.ESTORNADO,
+                Pedido.StatusFinanceiro.CANCELADO,
+            )
+        ):
+            return HttpResponseBadRequest(
+                "Pedido já pago, estornado ou cancelado."
+            )
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["pedido"] = self.pedido
+        return kwargs
+
+    def get_context_data(self, **kwargs):
+        contexto = super().get_context_data(**kwargs)
+        contexto["pedido"] = self.pedido
+        contexto["saldo_devedor"] = self.pedido.saldo_devedor
+        return contexto
+
+    def form_valid(self, form):
+        try:
+            comprovante = registrar_pagamento_manual(
+                self.pedido,
+                metodo=form.cleaned_data["metodo"],
+                valor=form.cleaned_data["valor"],
+                data_pagamento=form.cleaned_data["data_pagamento"],
+                referencia=form.cleaned_data.get("referencia", ""),
+                observacao=form.cleaned_data.get("observacao", ""),
+                arquivo=form.cleaned_data.get("arquivo"),
+                usuario=self.request.user,
+                request=self.request,
+            )
+        except ValidationError as erro:
+            mensagens = getattr(erro, "messages", None) or [str(erro)]
+            for mensagem in mensagens:
+                form.add_error(None, mensagem)
+            return self.form_invalid(form)
+        except IntegrityError:
+            form.add_error(
+                "referencia",
+                "Já existe comprovante com esta referência.",
+            )
+            return self.form_invalid(form)
+
+        messages.success(
+            self.request,
+            f"Pagamento de R$ {comprovante.valor} registrado "
+            f"para o pedido {self.pedido.numero}.",
+        )
+        return redirect(
+            "sales:pedido_interno_detail", pk=self.pedido.pk
+        )
+
+
+class ConciliacaoListView(LoginRequiredMixin, GrupoRequiredMixin, ListView):
+    """Fila de pagamentos manuais aguardando validação financeira."""
+
+    template_name = "sales/conciliacao_list.html"
+    context_object_name = "pedidos"
+    grupos_permitidos = GRUPOS_FINANCEIROS
+    paginate_by = 25
+
+    def get_queryset(self):
+        return (
+            Pedido.objects.filter(
+                status_financeiro=Pedido.StatusFinanceiro.PAGO,
+                financeiro_conciliado=False,
+            )
+            .exclude(status=Pedido.Status.CANCELADO)
+            .select_related("cliente", "unidade")
+            .prefetch_related("comprovantes")
+            .order_by("criado_em")
+        )
+
+
+class ConciliarPedidoView(LoginRequiredMixin, GrupoRequiredMixin, View):
+    grupos_permitidos = GRUPOS_FINANCEIROS
+
+    def post(self, request, pk):
+        pedido = get_object_or_404(Pedido, pk=pk)
+        if pedido.usuario_criador_id == request.user.pk:
+            raise PermissionDenied("Não é possível conciliar o próprio pedido.")
+        try:
+            conciliar_pagamento_manual(
+                pedido, usuario=request.user, request=request
+            )
+        except ValidationError as erro:
+            return HttpResponseBadRequest(
+                getattr(erro, "message", str(erro))
+            )
+        messages.success(
+            request, f"Pedido {pedido.numero} conciliado."
+        )
+        return redirect("sales:conciliacao_list")
+
+
+class RejeitarPedidoView(LoginRequiredMixin, GrupoRequiredMixin, View):
+    grupos_permitidos = GRUPOS_FINANCEIROS
+
+    def post(self, request, pk):
+        pedido = get_object_or_404(Pedido, pk=pk)
+        if pedido.usuario_criador_id == request.user.pk:
+            raise PermissionDenied("Não é possível rejeitar o próprio pedido.")
+        try:
+            rejeitar_conciliacao_pagamento(
+                pedido,
+                justificativa=request.POST.get("justificativa", ""),
+                usuario=request.user,
+                request=request,
+            )
+        except ValidationError as erro:
+            return HttpResponseBadRequest(
+                getattr(erro, "message", str(erro))
+            )
+        messages.success(
+            request, f"Pedido {pedido.numero} devolvido para pendente."
+        )
+        return redirect("sales:conciliacao_list")
 
 
 class PedidoCancelamentoView(

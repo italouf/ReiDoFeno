@@ -258,3 +258,52 @@ post-mortem obrigatório para SEV1/SEV2).
 - [ ] Crons habilitados (expirar/fiscal/avisos)
 - [ ] Usuários administrativos criados por grupo correto (sem superusuário no dia a dia)
 - [ ] Política de privacidade revisada juridicamente publicada
+
+## 9. Pagamento manual e fiscal assistido (Fase 4)
+
+### Pagamento manual
+
+1. Vendedor abre o pedido em `/gestao/pedidos/<pk>/`.
+2. Clica em **Registrar pagamento manual**.
+3. Informa método (PIX/dinheiro/cartão), valor, data, referência e anexa o
+   comprovante (JPG/PNG/PDF até 5 MB).
+4. PIX exige o ID da transação. Pagamento parcial mantém o pedido pendente.
+5. Ao fechar o saldo, o pedido fica `status_financeiro=pago` e
+   `financeiro_conciliado=False`; a operação **não** avança até a conciliação.
+
+### Conciliação
+
+1. Responsável do grupo `Financeiro` acessa `/gestao/conciliacao/`.
+2. Confere os comprovantes contra extrato/WhatsApp.
+3. **Conciliar** marca a prova como validada e libera o avanço operacional.
+4. **Rejeitar** exige justificativa, devolve o pedido para pendente, remove a receita provisoria do pagamento e mantém o estoque já baixado (rejeição financeira
+   não é devolução física).
+
+### NF-e assistida (IOB)
+
+1. Emissor acessa o pedido ou `/fiscal/notas/`.
+2. Baixa os dados para o IOB em JSON/CSV.
+3. Emite a NF-e no IOB, fora do sistema.
+4. Anexa o PDF em `/fiscal/pedidos/<pk>/nota-anexar/`.
+5. Confirma número/chave em `/fiscal/notas/` com **Autorizar**.
+6. Cancelamento exige justificativa e fica auditado.
+
+### Retenção fiscal
+
+```bash
+python manage.py limpar_notas_expiradas --dry-run
+python manage.py limpar_notas_expiradas
+```
+
+Remove somente notas com `retido_ate < hoje`. Cada remoção grava
+`fiscal.nota_retencao_expirada` na auditoria. Notas sem data de emissão não
+são removidas automaticamente.
+
+### E2E
+
+```bash
+python -m pytest tests_e2e/test_fluxo_pagamento_manual.py \
+  -q -o faulthandler_timeout=120
+```
+
+Aceite humano pendente: Nilton, Neto e Caio, além da execução em staging.

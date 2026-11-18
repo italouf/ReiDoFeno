@@ -1,6 +1,7 @@
 """Serviços de pedido: criação no checkout, aprovação e cancelamento."""
 import logging
 import re
+from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 
 from django.conf import settings
@@ -21,7 +22,7 @@ from stock.services import (
 )
 
 from .cart import Carrinho
-from .models import ObrigacaoEstoquePedido, Pagamento, Pedido
+from .models import ComprovantePagamento, ObrigacaoEstoquePedido, Pagamento, Pedido
 from .pricing import (  # noqa: F401 - reexportado para compatibilidade
     LIMIAR_ATACADO,
     calcular_item_pedido,
@@ -1047,6 +1048,32 @@ def _baixar_estoque_do_pedido(pedido: Pedido, *, request=None) -> None:
             )
 
 
+def _registrar_provedor_com_manual(
+    pedido: Pedido, *, id_externo: str, request=None
+) -> None:
+    """Sinaliza que a aprovação do provedor exige conciliação manual."""
+    from core.auditoria import registrar_auditoria
+    from core.models import LogAuditoria
+
+    if LogAuditoria.objects.filter(
+        acao="pedido.pagamento_provedor_com_manual",
+        objeto_id=str(pedido.pk),
+        depois__id_externo=id_externo,
+    ).exists():
+        return
+    registrar_auditoria(
+        acao="pedido.pagamento_provedor_com_manual",
+        instancia=pedido,
+        request=request,
+        depois={
+            "status": pedido.status,
+            "status_financeiro": pedido.status_financeiro,
+            "id_externo": id_externo,
+            "motivo": "prova manual ativa; conciliação manual necessária",
+        },
+    )
+
+
 @transaction.atomic
 def marcar_pagamento_aprovado(
     pedido: Pedido, *, id_externo: str = "", request=None
@@ -1142,20 +1169,29 @@ def marcar_pagamento_aprovado(
                 },
             )
         if not pedido.tem_prova_financeira():
-            pedido.financeiro_conciliado = True
-            pedido.save(update_fields=["financeiro_conciliado", "atualizado_em"])
-            from core.auditoria import registrar_auditoria
+            if pedido.comprovantes.exclude(
+                status=ComprovantePagamento.Status.REJEITADO
+            ).exists():
+                _registrar_provedor_com_manual(
+                    pedido, id_externo=id_externo, request=request
+                )
+            else:
+                pedido.financeiro_conciliado = True
+                pedido.save(
+                    update_fields=["financeiro_conciliado", "atualizado_em"]
+                )
+                from core.auditoria import registrar_auditoria
 
-            registrar_auditoria(
-                acao="pedido.financeiro_reconciliado",
-                instancia=pedido,
-                request=request,
-                depois={
-                    "origem": "provedor",
-                    "id_externo": id_externo,
-                    "financeiro_conciliado": True,
-                },
-            )
+                registrar_auditoria(
+                    acao="pedido.financeiro_reconciliado",
+                    instancia=pedido,
+                    request=request,
+                    depois={
+                        "origem": "provedor",
+                        "id_externo": id_externo,
+                        "financeiro_conciliado": True,
+                    },
+                )
         logger.info("Pedido %s já estava pago; evento ignorado.", pedido.numero)
         return pedido
 
@@ -1224,8 +1260,17 @@ def marcar_pagamento_aprovado(
         request=request,
         motivo="pagamento aprovado pelo provedor",
     )
-    pedido.financeiro_conciliado = True
-    pedido.save(update_fields=["financeiro_conciliado", "atualizado_em"])
+    if pedido.comprovantes.exclude(
+        status=ComprovantePagamento.Status.REJEITADO
+    ).exists():
+        pedido.financeiro_conciliado = False
+        pedido.save(update_fields=["financeiro_conciliado", "atualizado_em"])
+        _registrar_provedor_com_manual(
+            pedido, id_externo=id_externo, request=request
+        )
+    else:
+        pedido.financeiro_conciliado = True
+        pedido.save(update_fields=["financeiro_conciliado", "atualizado_em"])
 
     _baixar_estoque_do_pedido(pedido, request=request)
 
@@ -1321,6 +1366,299 @@ def reconciliar_pedido_financeiro(
             "financeiro_conciliado": True,
             "justificativa": justificativa.strip()[:500],
             "origem": origem,
+        },
+    )
+    return pedido
+
+
+def _normalizar_data_pagamento(data_pagamento):
+    if timezone.is_naive(data_pagamento):
+        return timezone.make_aware(data_pagamento)
+    return data_pagamento
+
+
+def _sincronizar_pagamento_manual(
+    pedido: Pedido,
+    *,
+    valor: Decimal,
+    data_pagamento,
+    referencia: str = "",
+) -> Pagamento:
+    """Mantém o Pagamento único do pedido como receita manual reconhecida."""
+    pagamento = (
+        Pagamento.objects.select_for_update().filter(pedido=pedido).first()
+    )
+    campos = {
+        "provedor": "manual",
+        "status": Pagamento.Status.APROVADO,
+        "valor": valor,
+        "aprovado_em": data_pagamento,
+        "estornado_em": None,
+        "preferencia_id": "",
+        "init_point": "",
+        "criacao_expira_em": None,
+        "id_externo": referencia[:60],
+    }
+    if pagamento is None:
+        return Pagamento.objects.create(pedido=pedido, **campos)
+    for campo, conteudo in campos.items():
+        setattr(pagamento, campo, conteudo)
+    pagamento.save(update_fields=list(campos))
+    return pagamento
+
+
+@transaction.atomic
+def registrar_pagamento_manual(
+    pedido: Pedido,
+    *,
+    metodo: str,
+    valor,
+    data_pagamento,
+    referencia: str = "",
+    observacao: str = "",
+    arquivo=None,
+    usuario,
+    request=None,
+) -> ComprovantePagamento:
+    """Registra prova manual e reconhece a receita quando o saldo fecha.
+
+    A baixa de estoque segue o mesmo caminho do pagamento aprovado pelo
+    provedor: consumo de reservas e obrigações. A conciliação financeira
+    continua pendente e é o que libera o avanço operacional (ADR-002/018).
+    """
+    from core.auditoria import registrar_auditoria
+
+    pedido = _pedido_bloqueado(pedido)
+    if (
+        pedido.status == Pedido.Status.CANCELADO
+        or pedido.status_financeiro != Pedido.StatusFinanceiro.PENDENTE
+    ):
+        raise ValidationError(
+            "Pedido não está apto a receber pagamento manual."
+        )
+
+    try:
+        valor_decimal = Decimal(str(valor))
+    except (ArithmeticError, TypeError, ValueError) as erro:
+        raise ValidationError("Valor de pagamento inválido.") from erro
+    if not valor_decimal.is_finite() or valor_decimal <= 0:
+        raise ValidationError("Valor de pagamento deve ser positivo.")
+    if valor_decimal != valor_decimal.quantize(Decimal("0.01")):
+        raise ValidationError(
+            "Valor de pagamento deve ter duas casas decimais."
+        )
+    if metodo not in ComprovantePagamento.Metodo.values:
+        raise ValidationError("Método de pagamento inválido.")
+    referencia = (referencia or "").strip()
+    if metodo == ComprovantePagamento.Metodo.PIX and not referencia:
+        raise ValidationError("PIX exige o ID da transação.")
+    if (
+        metodo == ComprovantePagamento.Metodo.PIX
+        and referencia
+        and ComprovantePagamento.objects.filter(
+            metodo=ComprovantePagamento.Metodo.PIX,
+            referencia=referencia,
+        ).exists()
+    ):
+        raise ValidationError(
+            "Já existe comprovante PIX com esta referência."
+        )
+
+    saldo_antes = pedido.saldo_devedor
+    if valor_decimal > saldo_antes:
+        raise ValidationError(
+            f"Valor excede o saldo devedor de R$ {saldo_antes}."
+        )
+
+    data_pagamento = _normalizar_data_pagamento(data_pagamento)
+    agora = timezone.now()
+    if data_pagamento > agora + timedelta(minutes=5):
+        raise ValidationError(
+            "Data do pagamento não pode estar no futuro."
+        )
+    if data_pagamento < agora - timedelta(days=365):
+        raise ValidationError(
+            "Data do pagamento anterior a um ano exige revisão."
+        )
+    antes = {
+        "status_financeiro": pedido.status_financeiro,
+        "financeiro_conciliado": pedido.financeiro_conciliado,
+        "saldo_devedor": str(saldo_antes),
+    }
+    comprovante = ComprovantePagamento.objects.create(
+        pedido=pedido,
+        metodo=metodo,
+        valor=valor_decimal,
+        data_pagamento=data_pagamento,
+        referencia=referencia.strip(),
+        observacao=observacao.strip(),
+        arquivo=arquivo,
+        registrado_por=usuario,
+    )
+
+    total_pago = pedido.total_comprovantes_ativos()
+    fechou_saldo = total_pago >= pedido.total
+    if fechou_saldo:
+        pedido.definir_status_financeiro(
+            Pedido.StatusFinanceiro.PAGO,
+            request=request,
+            usuario=usuario,
+            motivo="pagamento manual registrado",
+        )
+        pedido.financeiro_conciliado = False
+        pedido.save(update_fields=["financeiro_conciliado", "atualizado_em"])
+        _sincronizar_pagamento_manual(
+            pedido,
+            valor=pedido.total,
+            data_pagamento=data_pagamento,
+            referencia=referencia,
+        )
+        _baixar_estoque_do_pedido(pedido, request=request)
+
+    registrar_auditoria(
+        acao="pagamento_manual_registrado",
+        instancia=pedido,
+        request=request,
+        usuario=usuario,
+        antes=antes,
+        depois={
+            "status_financeiro": pedido.status_financeiro,
+            "financeiro_conciliado": pedido.financeiro_conciliado,
+            "metodo": metodo,
+            "valor": str(valor_decimal),
+            "referencia": referencia,
+            "total_pago": str(total_pago),
+            "saldo_devedor": str(pedido.saldo_devedor),
+            "fechou_saldo": fechou_saldo,
+            "comprovante_id": comprovante.pk,
+        },
+    )
+    return comprovante
+
+
+@transaction.atomic
+def conciliar_pagamento_manual(
+    pedido: Pedido, *, usuario, request=None
+) -> Pedido:
+    """Valida a prova manual e libera o avanço operacional do pedido."""
+    from core.auditoria import registrar_auditoria
+
+    pedido = _pedido_bloqueado(pedido)
+    if pedido.status_financeiro != Pedido.StatusFinanceiro.PAGO:
+        raise ValidationError(
+            "Só é possível conciliar pedido com financeiro pago."
+        )
+    if pedido.financeiro_conciliado:
+        return pedido
+    total_provas = pedido.total_comprovantes_ativos()
+    if total_provas < pedido.total:
+        raise ValidationError(
+            "Comprovantes ativos não cobrem o total do pedido "
+            f"(R$ {total_provas} de R$ {pedido.total})."
+        )
+
+    pedido.financeiro_conciliado = True
+    pedido.save(update_fields=["financeiro_conciliado", "atualizado_em"])
+    comprovantes_pendentes = list(
+        pedido.comprovantes.filter(
+            status=ComprovantePagamento.Status.PENDENTE
+        ).values_list("pk", flat=True)
+    )
+    conciliados = pedido.comprovantes.filter(
+        pk__in=comprovantes_pendentes
+    ).update(status=ComprovantePagamento.Status.CONCILIADO)
+
+    registrar_auditoria(
+        acao="pedido_conciliado",
+        instancia=pedido,
+        request=request,
+        usuario=usuario,
+        antes={"financeiro_conciliado": False},
+        depois={
+            "financeiro_conciliado": True,
+            "total_comprovantes": str(total_provas),
+            "comprovantes_conciliados": comprovantes_pendentes,
+            "comprovantes_conciliados_count": conciliados,
+        },
+    )
+    return pedido
+
+
+@transaction.atomic
+def rejeitar_conciliacao_pagamento(
+    pedido: Pedido, *, justificativa: str, usuario, request=None
+) -> Pedido:
+    """Rejeita a prova: reverte o financeiro sem inventar retorno físico."""
+    from core.auditoria import registrar_auditoria
+
+    if not (justificativa or "").strip():
+        raise ValidationError("Justificativa é obrigatória.")
+
+    pedido = _pedido_bloqueado(pedido)
+    if pedido.status_financeiro != Pedido.StatusFinanceiro.PAGO:
+        raise ValidationError(
+            "Só é possível rejeitar conciliação de pedido pago."
+        )
+    if pedido.financeiro_conciliado:
+        raise ValidationError(
+            "Pedido já conciliado não pode ser rejeitado; use o fluxo de "
+            "cancelamento/estorno."
+        )
+
+    antes = {
+        "status_financeiro": pedido.status_financeiro,
+        "financeiro_conciliado": pedido.financeiro_conciliado,
+    }
+    pedido.definir_status_financeiro(
+        Pedido.StatusFinanceiro.PENDENTE,
+        request=request,
+        usuario=usuario,
+        motivo="conciliação rejeitada",
+    )
+    pedido.financeiro_conciliado = False
+    pedido.save(update_fields=["financeiro_conciliado", "atualizado_em"])
+
+    rejeitados = pedido.comprovantes.exclude(
+        status=ComprovantePagamento.Status.REJEITADO
+    ).update(status=ComprovantePagamento.Status.REJEITADO)
+
+    pagamento = (
+        Pagamento.objects.select_for_update().filter(pedido=pedido).first()
+    )
+    if pagamento is not None and pagamento.status != Pagamento.Status.CANCELADO:
+        # A prova manual nunca foi confirmada: a receita provisória é
+        # removida, sem criar um estorno que não teria contrapartida no
+        # período do reconhecimento.
+        pagamento.status = Pagamento.Status.CANCELADO
+        pagamento.aprovado_em = None
+        pagamento.estornado_em = None
+        pagamento.save(
+            update_fields=["status", "aprovado_em", "estornado_em"]
+        )
+
+    _liberar_reservas_do_pedido(
+        pedido,
+        request=request,
+        usuario=usuario,
+        motivo="rejeição de conciliação",
+    )
+
+    registrar_auditoria(
+        acao="pedido_rejeitado_conciliacao",
+        instancia=pedido,
+        request=request,
+        usuario=usuario,
+        antes=antes,
+        depois={
+            "status_financeiro": pedido.status_financeiro,
+            "financeiro_conciliado": pedido.financeiro_conciliado,
+            "justificativa": justificativa.strip()[:500],
+            "comprovantes_rejeitados": rejeitados,
+            "pagamento_id": getattr(pagamento, "pk", None),
+            "receita_provisoria_removida": bool(
+                pagamento is not None
+                and pagamento.status == Pagamento.Status.CANCELADO
+            ),
         },
     )
     return pedido
@@ -1842,6 +2180,40 @@ def registrar_devolucao(
     return nota_entrada
 
 
+def _devolver_estoque_de_cancelamento(
+    pedido: Pedido, *, usuario=None, request=None
+) -> int:
+    """Devolve ao estoque quantidades já baixadas de pedido não pago."""
+    if not pedido.obrigacoes_estoque.filter(
+        quantidade_baixada__gt=Decimal("0.00")
+    ).exists():
+        return 0
+    devolvidos = _devolver_estoque_do_pedido(
+        pedido,
+        usuario=usuario,
+        motivo=(
+            f"Cancelamento do pedido {pedido.numero} após estorno/"
+            "rejeição de pagamento"
+        ),
+        request=request,
+    )
+    if devolvidos:
+        from core.auditoria import registrar_auditoria
+
+        registrar_auditoria(
+            acao="pedido.estoque_devolvido_cancelamento",
+            instancia=pedido,
+            request=request,
+            usuario=usuario,
+            depois={
+                "status": pedido.status,
+                "produtos_devolvidos": devolvidos,
+                "motivo": "cancelamento sem pagamento confirmado",
+            },
+        )
+    return devolvidos
+
+
 @transaction.atomic
 def cancelar_pedido(
     pedido: Pedido, *, request=None, usuario=None, permitir_pago: bool = True
@@ -1872,6 +2244,9 @@ def cancelar_pedido(
                 request=request,
                 usuario=usuario,
                 motivo="reparo de pedido já cancelado",
+            )
+            _devolver_estoque_de_cancelamento(
+                pedido, usuario=usuario, request=request
             )
             _cancelar_obrigacoes_estoque(pedido)
         logger.info(
@@ -1938,6 +2313,9 @@ def cancelar_pedido(
             request=request,
             usuario=usuario,
             motivo="cancelamento antes do pagamento",
+        )
+        _devolver_estoque_de_cancelamento(
+            pedido, usuario=usuario, request=request
         )
         _cancelar_obrigacoes_estoque(pedido)
 

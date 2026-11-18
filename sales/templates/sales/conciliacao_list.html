@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Conciliação financeira — Rei do Feno{% endblock %}
+{% block content %}
+{% include "components/cabecalho_pagina.html" with titulo="Conciliação financeira" contador=pedidos|length %}
+<p style="color:var(--tinta-700);">Pagamentos manuais reconhecidos e ainda não validados pelos responsáveis financeiros.</p>
+
+{% for pedido in pedidos %}
+<section class="cartao" style="margin-bottom:var(--espaco-4);">
+  <div style="display:flex; flex-wrap:wrap; gap:var(--espaco-2); align-items:baseline; justify-content:space-between;">
+    <h2 style="margin:0;">{{ pedido.numero }} — {{ pedido.cliente.nome }}</h2>
+    <span style="color:var(--tinta-700);">Total R$ {{ pedido.total }} · {{ pedido.unidade.nome }}</span>
+  </div>
+  <p style="margin:var(--espaco-2) 0; color:var(--tinta-700);">
+    Criado em {{ pedido.criado_em|date:"d/m/Y H:i" }}
+    {% if pedido.usuario_criador %}por {{ pedido.usuario_criador.username }}{% endif %}
+  </p>
+
+  <div class="tabela-envolve">
+    <table class="tabela">
+      <thead><tr>
+        <th scope="col">Método</th><th scope="col" class="num">Valor</th>
+        <th scope="col">Data</th><th scope="col">Referência</th>
+        <th scope="col">Status</th>
+        <th scope="col">Comprovante</th>
+      </tr></thead>
+      <tbody>
+        {% for comprovante in pedido.comprovantes.all %}
+        <tr>
+          <td>{{ comprovante.get_metodo_display }}</td>
+          <td class="num">R$ {{ comprovante.valor }}</td>
+          <td>{{ comprovante.data_pagamento|date:"d/m/Y H:i" }}</td>
+          <td>{{ comprovante.referencia|default:"—" }}</td>
+          <td>{% include "components/status_pedido.html" with status=comprovante.status rotulo=comprovante.get_status_display %}</td>
+          <td>
+            {% if comprovante.arquivo %}
+              <a href="{{ comprovante.arquivo.url }}" target="_blank" rel="noopener">Abrir</a>
+            {% else %}—{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div style="display:flex; flex-wrap:wrap; gap:var(--espaco-3); align-items:flex-end; margin-top:var(--espaco-3);">
+    <form method="post" action="{% url 'sales:conciliar_pedido' pedido.pk %}">
+      {% csrf_token %}
+      <button type="submit" class="btn">Conciliar</button>
+    </form>
+    <form method="post" action="{% url 'sales:rejeitar_pedido' pedido.pk %}" style="display:flex; gap:var(--espaco-2); align-items:flex-end; flex-wrap:wrap;">
+      {% csrf_token %}
+      <div class="campo" style="margin:0;">
+        <label for="justificativa-{{ pedido.pk }}">Justificativa da rejeição</label>
+        <input type="text" id="justificativa-{{ pedido.pk }}" name="justificativa" required maxlength="500">
+      </div>
+      <button type="submit" class="btn btn--secundario">Rejeitar</button>
+    </form>
+  </div>
+</section>
+{% empty %}
+{% include "components/estado_vazio.html" with icone="i-documento" titulo="Nenhum pagamento pendente de conciliação." descricao="Pagamentos manuais reconhecidos aparecem aqui até a validação financeira." %}
+{% endfor %}
+
+{% include "components/paginacao.html" %}
+{% endblock %}

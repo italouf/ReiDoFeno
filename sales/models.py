@@ -423,6 +423,101 @@ class Pedido(models.Model):
         """Margem de mercadoria; frete não é receita de produto."""
         return self.subtotal - self.cmv
 
+    def total_comprovantes_ativos(self) -> Decimal:
+        """Soma das provas ainda válidas (rejeitadas não quitam o pedido)."""
+        return sum(
+            (
+                comprovante.valor
+                for comprovante in self.comprovantes.exclude(
+                    status=ComprovantePagamento.Status.REJEITADO
+                )
+            ),
+            Decimal("0.00"),
+        )
+
+    @property
+    def saldo_devedor(self) -> Decimal:
+        """Quanto ainda falta receber, nunca negativo."""
+        return max(self.total - self.total_comprovantes_ativos(), Decimal("0.00"))
+
+
+class ComprovantePagamento(models.Model):
+    """Prova de pagamento manual (PIX, dinheiro ou cartão presencial)."""
+
+    class Metodo(models.TextChoices):
+        PIX = "pix", "PIX"
+        DINHEIRO = "dinheiro", "Dinheiro"
+        CARTAO_CREDITO = "cartao_credito", "Cartão de Crédito"
+        CARTAO_DEBITO = "cartao_debito", "Cartão de Débito"
+
+    class Status(models.TextChoices):
+        PENDENTE = "pendente", "Pendente de conciliação"
+        CONCILIADO = "conciliado", "Conciliado"
+        REJEITADO = "rejeitado", "Rejeitado"
+
+    pedido = models.ForeignKey(
+        Pedido,
+        on_delete=models.CASCADE,
+        related_name="comprovantes",
+        verbose_name="pedido",
+    )
+    metodo = models.CharField("método", max_length=20, choices=Metodo.choices)
+    valor = models.DecimalField("valor", max_digits=12, decimal_places=2)
+    data_pagamento = models.DateTimeField("data do pagamento")
+    referencia = models.CharField(
+        "referência",
+        max_length=100,
+        blank=True,
+        help_text="ID da transação PIX, número da autorização do cartão, etc.",
+    )
+    observacao = models.TextField("observação", blank=True)
+    arquivo = models.FileField(
+        "comprovante",
+        upload_to="comprovantes/%Y/%m/",
+        blank=True,
+        null=True,
+    )
+    status = models.CharField(
+        "status",
+        max_length=12,
+        choices=Status.choices,
+        default=Status.PENDENTE,
+        db_index=True,
+    )
+    registrado_por = models.ForeignKey(
+        Usuario,
+        on_delete=models.PROTECT,
+        related_name="comprovantes_registrados",
+        verbose_name="registrado por",
+    )
+    registrado_em = models.DateTimeField("registrado em", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "comprovante de pagamento"
+        verbose_name_plural = "comprovantes de pagamento"
+        ordering = ["-registrado_em"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(valor__gt=Decimal("0.00")),
+                name="comprovante_valor_positivo",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(valor__lt=Decimal("10000000000.00")),
+                name="comprovante_valor_dentro_do_limite",
+            ),
+            models.UniqueConstraint(
+                fields=("referencia",),
+                condition=models.Q(metodo="pix") & ~models.Q(referencia=""),
+                name="comprovante_pix_referencia_unica",
+            ),
+        ]
+
+    def __str__(self):
+        return (
+            f"Comprovante {self.pedido.numero} [{self.metodo}] "
+            f"R$ {self.valor} ({self.status})"
+        )
+
 
 class ItemPedidoQuerySet(models.QuerySet):
     """Protege o snapshot de custo contra mutações em massa."""

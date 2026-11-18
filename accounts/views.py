@@ -39,6 +39,8 @@ class PosLoginView(LoginRequiredMixin, View):
         grupos = set(usuario.groups.values_list("name", flat=True))
         if usuario.is_superuser or grupos & {"Administrador", "Gestor"}:
             return redirect("core:painel")
+        if "Financeiro" in grupos:
+            return redirect("sales:conciliacao_list")
         if "Emissor Fiscal" in grupos:
             return redirect("fiscal:relatorio_fiscal")
         if "Vendedor" in grupos:
