@@ -1,7 +1,7 @@
 # BACKUP — Backup noturno automatizado e envio offsite (R2/B2)
 
 **Fase:** 5
-**Status:** Em implementação
+**Status:** Implementada
 **Depende de:** ADR-001 (PostgreSQL local), ADR-006 (NF-e manual e PDFs), ADR-012 (Retenção fiscal 5 anos), ADR-019 (Estratégia de backup).
 
 ## Objetivo

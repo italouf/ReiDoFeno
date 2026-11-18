@@ -13,6 +13,7 @@ testpaths = [
     "privacy",
     "analytics",
     "tests/infra",
+    "docs/tests",
 ]
 addopts = "-ra"
 faulthandler_timeout = 45

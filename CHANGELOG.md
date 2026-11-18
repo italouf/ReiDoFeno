@@ -1,5 +1,58 @@
 # Changelog
 
+## [Fase 5 — hardening, backup, 2FA e observabilidade] — 2026-11-17
+
+- **BACKUP (ADR-019):** adicionados infra/backup/backup.sh,
+  infra/backup/apply-retention.sh e infra/backup/cron.d/reidofeno-backup
+  (02:30 diário). O script executa pg_dump -Fc com verificação via
+  pg_restore --list, arquiva mídia (/app/media ou bind-mount), compacta
+  e criptografa configurações sensíveis com ge (fail-closed sem chave em
+  produção), aplica retenção local de 7 dias, envia offsite via 
+clone
+  (R2/B2) com verificação de checksum SHA-256 e registra CRITICAL:
+  BACKUP_FAILED em /var/log/reidofeno/backup.log + comando
+  
+eportar_backup_falha (core.backup.notificar_falha_backup).
+- **DRILL:** adicionados infra/backup/restore.sh (container PostgreSQL
+  temporário, pg_restore, mídia e descriptografia ge opcional),
+  comando python manage.py validar_restore (reconciliação do ledger
+  MovimentoEstoque.delta, reservas ativas vs quantidade_bloqueada e
+  snapshot ItemPedido.custo_unitario) e template
+  docs/runbook/templates/drill-report.md.
+- **2FA (ADR-020):** TOTP (RFC 6238) via django-otp==1.7.5 e
+  qrcode==8.2 (SVG puro sem Pillow/C) obrigatório para Administrador,
+  Gestor, Emissor Fiscal, Financeiro e superusuários
+  (ccounts.middleware.OTPRequiredMiddleware, LoginView,
+  /accounts/2fa/setup/, /accounts/2fa/verify/). Gera 10 códigos de backup
+  de uso único (StaticDevice), restringe reset administrativo a outro
+  Administrador com justificativa e auditoria (ccounts.2fa_resetado) e
+  atualiza o fluxo E2E (	ests_e2e/test_fluxo_pagamento_manual.py).
+- **OBSERVABILIDADE:** /healthz/ passa a validar conexão PostgreSQL
+  (SELECT 1) e cache/Redis (cache.set/cache.get), retornando HTTP 200
+  ou 503 sem vazar strings de conexão/caminhos; Sentry SDK (ase.py /
+  configurar_sentry) usa DjangoIntegration, RedisIntegration,
+  	races_sample_rate=0.1, profiles_sample_rate=0.1,
+  send_default_pii=False e efore_send=core.logging_filters.filter_pii_event
+  (mascaramento recursivo de CPF, CNPJ numérico/alfanumérico e e-mail).
+- **RUNBOOK:** docs/runbook.md atualizado com contatos de emergência
+  (placeholders), árvore de decisão, procedimentos SEV1–SEV3 (site/502,
+  banco, disco, falha de backup, vazamento LGPD, perda de acesso 2FA),
+  DRILL, deploy/rollback, plano de fuga Render + Neon e checklists de
+  pré-deploy, pós-deploy e go-live (docs/runbook/templates/incident-report.md
+  e docs/tests/test_runbook_links.py).
+- **Validação local (Windows/SQLite):** **810 passed, 24 skipped** (PostgreSQL/Redis),
+  281 subtests; E2E Playwright com 2FA **1 passed**; Node gráficos **2/2**;
+  Ruff, manage.py check, manage.py check --deploy,
+  makemigrations --check --dry-run, ash -n (scripts .sh), Bandit (0
+  medium/high) e pip-audit (0 vulnerabilidades) limpos.
+  *Limitação local conhecida no Windows:* 	est_settings_production.py (9
+  subprocesses cp1252) e 	est_smoke_isolation.py (10 chamadas ash WSL sem
+  distro) falham apenas por ambiente Windows local e dependem do CI Linux.
+- **Pendências operacionais (cliente/operador):** provisionamento real de R2/B2
+  e chave ge, criação de projeto Sentry/UptimeRobot e SMTP real, execução do
+  backup/DRILL real na VPS descartável, registro de domínio/deploy em produção
+  e aceite humano de Nilton, Neto e Caio.
+
 ## [Fase 4 — pagamento manual + fiscal assistido] — 2026-11-16
 
 - **PAY-MANUAL:** `ComprovantePagamento` registra PIX, dinheiro e cartão

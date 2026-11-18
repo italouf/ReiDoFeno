@@ -1,7 +1,7 @@
 # DRILL — Restauração validada e evidência de RTO/RPO
 
 **Fase:** 5
-**Status:** Em implementação
+**Status:** Implementada
 **Depende de:** `docs/specs/fase-5/backup-offsite.md`, ADR-019.
 
 ## Objetivo
