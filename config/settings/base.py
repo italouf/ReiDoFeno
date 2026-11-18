@@ -44,6 +44,9 @@ INSTALLED_APPS = [
     # Terceiros
     "axes",
     "django_ratelimit",
+    "django_otp",
+    "django_otp.plugins.otp_totp",
+    "django_otp.plugins.otp_static",
 ]
 
 MIDDLEWARE = [
@@ -53,9 +56,11 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "django_otp.middleware.OTPMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "axes.middleware.AxesMiddleware",
+    "accounts.middleware.OTPRequiredMiddleware",
     "core.middleware.SecurityHeadersMiddleware",
 ]
 
@@ -122,6 +127,11 @@ AXES_COOLOFF_TIME = timedelta(minutes=15)
 AXES_LOCKOUT_PARAMETERS = [["username", "ip_address"]]
 AXES_RESET_ON_SUCCESS = True
 AXES_VERBOSE = 0
+
+# Autenticação de dois fatores (TOTP RFC 6238)
+OTP_REQUIRED_GROUPS = ["Administrador", "Gestor", "Emissor Fiscal", "Financeiro"]
+OTP_LOGIN_URL = "/accounts/2fa/verify/"
+OTP_TOTP_ISSUER = "Rei do Feno"
 
 # Rate limiting dos endpoints críticos (SEC-04).
 RATELIMIT_LOGIN = os.environ.get("RATELIMIT_LOGIN", "5/m")
@@ -193,19 +203,41 @@ FISCAL_ALERTA_HORAS_SEM_NFE = int(
 # Cancelamento automático de pedidos aguardando pagamento (em minutos).
 PEDIDO_TIMEOUT_MINUTOS = int(os.environ.get("PEDIDO_TIMEOUT_MINUTOS", "240"))
 
-SENTRY_DSN = os.environ.get("SENTRY_DSN", "")
-if SENTRY_DSN:
+
+def configurar_sentry(
+    dsn: str,
+    *,
+    environment: str | None = None,
+    release: str | None = None,
+) -> bool:
+    """Inicializa Sentry SDK com filtro de PII e amostragem controlada."""
+    if not dsn:
+        return False
+
     import sentry_sdk
     from sentry_sdk.integrations.django import DjangoIntegration
+    from sentry_sdk.integrations.redis import RedisIntegration
+
+    from core.logging_filters import filter_pii_event
 
     sentry_sdk.init(
-        dsn=SENTRY_DSN,
-        integrations=[DjangoIntegration()],
-        traces_sample_rate=float(
-            os.environ.get("SENTRY_TRACES_RATE", "0.1")
+        dsn=dsn,
+        integrations=[DjangoIntegration(), RedisIntegration()],
+        traces_sample_rate=float(os.environ.get("SENTRY_TRACES_RATE", "0.1")),
+        profiles_sample_rate=float(
+            os.environ.get("SENTRY_PROFILES_RATE", "0.1")
         ),
         send_default_pii=False,
+        environment=environment
+        or os.environ.get("DJANGO_ENVIRONMENT", "development"),
+        release=release or os.environ.get("APP_RELEASE", "unknown"),
+        before_send=filter_pii_event,
     )
+    return True
+
+
+SENTRY_DSN = os.environ.get("SENTRY_DSN", "").strip()
+configurar_sentry(SENTRY_DSN)
 
 LOGGING = {
     "version": 1,

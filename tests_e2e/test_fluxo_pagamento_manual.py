@@ -3,6 +3,8 @@
 import re
 
 import pytest
+from django_otp.oath import TOTP
+from django_otp.plugins.otp_totp.models import TOTPDevice
 from playwright.sync_api import expect, sync_playwright
 
 from core.models import LogAuditoria
@@ -19,6 +21,7 @@ def _criar_usuarios():
     from django.core.management import call_command
 
     from accounts.models import Usuario
+    from accounts.services import usuario_exige_2fa
 
     call_command("seed_groups", verbosity=0)
     senha = "senha-forte-123"
@@ -32,16 +35,33 @@ def _criar_usuarios():
             username=username, password=senha
         )
         usuario.groups.add(Group.objects.get(name=grupo))
-        usuarios[username] = senha
+        device = None
+        if usuario_exige_2fa(usuario):
+            device = TOTPDevice.objects.create(
+                user=usuario, name="e2e", confirmed=True
+            )
+        usuarios[username] = (senha, device)
     return usuarios
 
 
-def _login(contexto, base, username, senha):
+def _login(contexto, base, username, credencial):
+    senha, device = credencial
     page = contexto.new_page()
     page.goto(f"{base}/accounts/login/")
     page.fill("input[name='username']", username)
     page.fill("input[name='password']", senha)
     page.click("button[type='submit']")
+    if device is not None:
+        totp = TOTP(
+            device.bin_key,
+            device.step,
+            device.t0,
+            device.digits,
+            device.drift,
+        )
+        page.wait_for_url(re.compile(r"/accounts/2fa/verify/"))
+        page.fill("input[name='otp_token']", f"{totp.token():06d}")
+        page.click("button[type='submit']")
     return page
 
 
@@ -104,7 +124,7 @@ def test_fluxo_completo_pagamento_manual(live_server, tmp_path):
         expect(page.locator("body")).to_contain_text("registrado")
         expect(page.locator("body")).to_contain_text("Pago")
 
-        # 3. Financeiro concilia.
+        # 3. Financeiro concilia (com 2FA TOTP).
         contexto_financeiro = browser.new_context()
         page_financeiro = _login(
             contexto_financeiro,
@@ -117,7 +137,7 @@ def test_fluxo_completo_pagamento_manual(live_server, tmp_path):
         page_financeiro.get_by_role("button", name="Conciliar").first.click()
         expect(page_financeiro.locator("body")).to_contain_text("conciliado")
 
-        # 4. Emissor anexa PDF e autoriza a NF-e.
+        # 4. Emissor anexa PDF e autoriza a NF-e (com 2FA TOTP).
         contexto_emissor = browser.new_context()
         page_emissor = _login(
             contexto_emissor, base, "emissor-e2e", usuarios["emissor-e2e"]

@@ -29,6 +29,37 @@ def pytest_configure(config):
     )
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _force_login_com_otp():
+    """Preserva testes unitários que usam force_login para perfis com 2FA."""
+    from django.test import Client
+    from django_otp import DEVICE_ID_SESSION_KEY
+    from django_otp.plugins.otp_totp.models import TOTPDevice
+
+    from accounts.services import usuario_exige_2fa
+
+    original_force_login = Client.force_login
+
+    def _wrapped_force_login(self, user, backend=None, otp_verified=True):
+        original_force_login(self, user, backend=backend)
+        if otp_verified and getattr(user, "pk", None) and usuario_exige_2fa(user):
+            device, _ = TOTPDevice.objects.get_or_create(
+                user=user,
+                name="test-auto",
+                defaults={"confirmed": True},
+            )
+            if not device.confirmed:
+                device.confirmed = True
+                device.save(update_fields=["confirmed"])
+            sessao = self.session
+            sessao[DEVICE_ID_SESSION_KEY] = device.persistent_id
+            sessao.save()
+
+    Client.force_login = _wrapped_force_login
+    yield
+    Client.force_login = original_force_login
+
+
 @pytest.fixture(autouse=True)
 def limpar_cache_entre_testes():
     """Evita que contadores de rate limit vazem entre testes."""

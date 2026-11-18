@@ -97,6 +97,9 @@ Itens visíveis por papel; a autorização continua no servidor.
 
     <div class="menu-grupo">
       <p class="menu-titulo">Conta</p>
+      <a class="menu-item" href="{% url 'accounts:2fa_setup' %}" {% if request.resolver_match.view_name in 'accounts:2fa_setup accounts:2fa_verify' %}aria-current="page"{% endif %}>
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-escudo"/></svg>Segurança (2FA)
+      </a>
       <a class="menu-item" href="{% url 'privacy:minha_privacidade' %}" {% if request.resolver_match.view_name == 'privacy:minha_privacidade' %}aria-current="page"{% endif %}>
         <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-escudo"/></svg>Privacidade
       </a>
@@ -104,6 +107,5 @@ Itens visíveis por papel; a autorização continua no servidor.
   </nav>
 
   <div class="menu-rodape">
-    {% include "includes/nav_user.html" %}
-  </div>
+    {% include "includes/nav_user.html" %}\n  </div>
 </aside>

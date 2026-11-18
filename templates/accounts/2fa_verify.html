@@ -1,0 +1,28 @@
+{% extends "base_auth.html" %}
+{% block title %}Verificar 2FA — Rei do Feno{% endblock %}
+{% block auth_content %}
+{% include "includes/icones.html" %}
+<div class="form-autentica">
+  <h1>Verificação em dois fatores</h1>
+  <p class="ajuste">Informe o código de 6 dígitos do seu aplicativo autenticador ou um código de backup.</p>
+  <form method="post" data-enviar>
+    {% csrf_token %}
+    <input type="hidden" name="next" value="{{ next_url }}">
+    {% if form.errors %}
+      <div class="alerta alerta--erro" role="alert">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-erro"/></svg>
+        <div>{{ form.non_field_errors }}{{ form.otp_token.errors }}</div>
+      </div>
+    {% endif %}
+    <div class="campo">{{ form.otp_token.label_tag }}{{ form.otp_token }}</div>
+    <div class="campo" style="display:flex; align-items:center; gap:.5rem;">
+      {{ form.use_backup }}{{ form.use_backup.label_tag }}
+    </div>
+    <button type="submit" class="btn" style="width:100%; min-height:48px;">Confirmar código</button>
+  </form>
+  <form method="post" action="{% url 'accounts:logout' %}" style="margin-top:.75rem;">
+    {% csrf_token %}
+    <button type="submit" class="btn btn--secundario" style="width:100%;">Sair</button>
+  </form>
+</div>
+{% endblock %}

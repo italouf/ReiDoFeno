@@ -1,0 +1,14 @@
+{% extends "base_auth.html" %}
+{% block title %}Códigos de backup 2FA — Rei do Feno{% endblock %}
+{% block auth_content %}
+<div class="form-autentica">
+  <h1>2FA ativado com sucesso</h1>
+  <p class="ajuste">Guarde estes 10 códigos de backup em local seguro (papel/cofre). Cada código funciona uma única vez caso perca acesso ao aplicativo autenticador.</p>
+  <ul style="font-family:monospace; font-size:1rem; columns:2; list-style:none; padding:1rem; background:var(--areia-100, #f5f2eb); border:1px solid var(--borda, #d8d2c5); border-radius:4px;">
+    {% for code in backup_codes %}
+      <li style="padding:.2rem 0;">{{ code }}</li>
+    {% endfor %}
+  </ul>
+  <a class="btn" style="width:100%; min-height:48px; margin-top:1rem;" href="{{ next_url }}">Já anotei, acessar o sistema</a>
+</div>
+{% endblock %}

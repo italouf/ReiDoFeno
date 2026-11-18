@@ -8,6 +8,7 @@ on:
       - fase-2b-integridade-estoque
       - fase-2c-analytics-fiscal
       - fase-3-docker-staging
+      - fase-5-hardening-backup
   pull_request:
   workflow_dispatch:
 
