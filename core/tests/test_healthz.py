@@ -1,5 +1,8 @@
-"""Diagnóstico de IP usado exclusivamente pelo smoke de staging."""
-from django.test import SimpleTestCase, override_settings
+"""Testes de /healthz/ e /healthz/ip/."""
+from unittest.mock import patch
+
+from django.db import OperationalError
+from django.test import SimpleTestCase, TestCase, override_settings
 
 
 class HealthzIPTests(SimpleTestCase):
@@ -22,8 +25,59 @@ class HealthzIPTests(SimpleTestCase):
             resposta.json(), {"remote_addr": "198.51.100.10"}
         )
 
-    def test_healthz_continua_publico_e_estavel(self):
+
+class HealthzTests(TestCase):
+    def test_healthz_ok(self):
         resposta = self.client.get("/healthz/")
 
         self.assertEqual(resposta.status_code, 200)
-        self.assertEqual(resposta.json(), {"status": "ok"})
+        dados = resposta.json()
+        self.assertEqual(dados["status"], "ok")
+        self.assertEqual(dados["database"], "ok")
+        self.assertEqual(dados["cache"], "ok")
+        self.assertTrue(dados["timestamp"])
+
+    def test_healthz_db_down_retorna_503(self):
+        with patch(
+            "core.views.connection.cursor",
+            side_effect=OperationalError("postgres://user:secret@10.0.0.5/db"),
+        ):
+            resposta = self.client.get("/healthz/")
+
+        self.assertEqual(resposta.status_code, 503)
+        dados = resposta.json()
+        self.assertEqual(dados["status"], "error")
+        self.assertEqual(dados["database"], "error")
+        self.assertEqual(dados["cache"], "ok")
+
+    def test_healthz_redis_down_retorna_503(self):
+        with patch(
+            "core.views.cache.set",
+            side_effect=ConnectionError("redis://:secret@redis:6379/0"),
+        ):
+            resposta = self.client.get("/healthz/")
+
+        self.assertEqual(resposta.status_code, 503)
+        dados = resposta.json()
+        self.assertEqual(dados["status"], "error")
+        self.assertEqual(dados["database"], "ok")
+        self.assertEqual(dados["cache"], "error")
+
+    def test_healthz_nao_expoe_info_sensivel(self):
+        with (
+            patch(
+                "core.views.connection.cursor",
+                side_effect=OperationalError(
+                    "postgres://reidofeno:supersecret@db:5432/reidofeno"
+                ),
+            ),
+            patch(
+                "core.views.cache.set",
+                side_effect=ConnectionError("redis://:senhasecreta@redis:6379/0"),
+            ),
+        ):
+            resposta = self.client.get("/healthz/")
+
+        corpo = resposta.content.decode("utf-8").lower()
+        for termo in ("postgres://", "redis://", "supersecret", "senhasecreta", "traceback"):
+            self.assertNotIn(termo, corpo)

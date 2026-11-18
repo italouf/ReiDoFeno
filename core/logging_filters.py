@@ -1,4 +1,4 @@
-"""Filtro de logging que mascara possíveis CPFs/CNPJs em mensagens."""
+"""Filtros de logging e eventos Sentry para mascaramento de PII (LGPD)."""
 import re
 
 _PADRAO_DOCUMENTOS = re.compile(
@@ -12,10 +12,61 @@ _PADRAO_DOCUMENTOS = re.compile(
     r"(?=[A-Za-z0-9]{0,13}[A-Za-z])(?=[A-Za-z0-9]{0,13}\d)"
     r"[A-Za-z0-9]{14}(?![A-Za-z0-9])"
 )
+_PADRAO_EMAIL = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 
 
 def _mascarar(texto: str) -> str:
     return _PADRAO_DOCUMENTOS.sub("[DOC-REMOVIDO]", texto)
+
+
+def sanitizar_texto_pii(texto: str) -> str:
+    """Mascara CPF, CNPJ (numérico/alfanumérico) e e-mail em texto livre."""
+    mascarado = _mascarar(texto)
+    return _PADRAO_EMAIL.sub("[EMAIL-REMOVIDO]", mascarado)
+
+
+def _sanitizar_estrutura(valor, *, profundidade: int = 0):
+    if profundidade >= 10:
+        return valor
+    if isinstance(valor, str):
+        return sanitizar_texto_pii(valor)
+    if isinstance(valor, dict):
+        return {
+            chave: _sanitizar_estrutura(item, profundidade=profundidade + 1)
+            for chave, item in valor.items()
+        }
+    if isinstance(valor, list):
+        return [
+            _sanitizar_estrutura(item, profundidade=profundidade + 1)
+            for item in valor
+        ]
+    if isinstance(valor, tuple):
+        return tuple(
+            _sanitizar_estrutura(item, profundidade=profundidade + 1)
+            for item in valor
+        )
+    return valor
+
+
+def filter_pii_event(event, hint):
+    """Hook ``before_send`` do Sentry que remove PII antes do envio."""
+    del hint
+    if not isinstance(event, dict):
+        return event
+
+    for campo in (
+        "message",
+        "logentry",
+        "exception",
+        "breadcrumbs",
+        "request",
+        "extra",
+        "contexts",
+        "tags",
+    ):
+        if campo in event:
+            event[campo] = _sanitizar_estrutura(event[campo])
+    return event
 
 
 class SanitizePIIFilter:

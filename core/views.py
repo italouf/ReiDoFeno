@@ -1,6 +1,10 @@
+import logging
+
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.core.cache import cache
+from django.db import connection
 from django.db.models import F
 from django.http import Http404, JsonResponse
 from django.urls import reverse_lazy
@@ -23,11 +27,40 @@ from .forms import UnidadeForm
 from .models import Unidade
 
 GRUPOS_CADASTROS = ("Administrador", "Gestor")
+logger = logging.getLogger("reidofeno.healthz")
 
 
 def healthz(request):
-    """Endpoint de saúde para monitoramento (sem dados sensíveis)."""
-    return JsonResponse({"status": "ok"})
+    """Endpoint de saúde para monitoramento (sem expor detalhes internos)."""
+    db_status = "ok"
+    cache_status = "ok"
+
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT 1")
+            cursor.fetchone()
+    except Exception:
+        logger.error("Healthcheck database check failed", exc_info=True)
+        db_status = "error"
+
+    try:
+        cache.set("healthz:ping", "1", 5)
+        if cache.get("healthz:ping") != "1":
+            raise ValueError("cache_ping_mismatch")
+    except Exception:
+        logger.error("Healthcheck cache check failed", exc_info=True)
+        cache_status = "error"
+
+    saudavel = db_status == "ok" and cache_status == "ok"
+    return JsonResponse(
+        {
+            "status": "ok" if saudavel else "error",
+            "timestamp": timezone.now().isoformat(),
+            "database": db_status,
+            "cache": cache_status,
+        },
+        status=200 if saudavel else 503,
+    )
 
 
 def healthz_ip(request):
