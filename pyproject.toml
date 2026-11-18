@@ -12,6 +12,7 @@ testpaths = [
     "fiscal",
     "privacy",
     "analytics",
+    "tests/infra",
 ]
 addopts = "-ra"
 faulthandler_timeout = 45
