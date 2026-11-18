@@ -5,6 +5,9 @@ from .views import (
     ConfirmarVinculoClienteView,
     LoginView,
     PosLoginView,
+    TwoFactorResetView,
+    TwoFactorSetupView,
+    TwoFactorVerifyView,
     VincularClienteView,
 )
 
@@ -14,6 +17,13 @@ urlpatterns = [
     path("login/", LoginView.as_view(), name="login"),
     path("pos-login/", PosLoginView.as_view(), name="pos_login"),
     path("logout/", auth_views.LogoutView.as_view(), name="logout"),
+    path("2fa/setup/", TwoFactorSetupView.as_view(), name="2fa_setup"),
+    path("2fa/verify/", TwoFactorVerifyView.as_view(), name="2fa_verify"),
+    path(
+        "2fa/reset/<int:user_id>/",
+        TwoFactorResetView.as_view(),
+        name="2fa_reset",
+    ),
     path(
         "vincular-cliente/",
         VincularClienteView.as_view(),

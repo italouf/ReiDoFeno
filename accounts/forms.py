@@ -21,6 +21,29 @@ class LoginForm(AuthenticationForm):
         self.fields["password"].widget.attrs.update({"placeholder": "Sua senha"})
 
 
+class TwoFactorVerifyForm(forms.Form):
+    """Formulário de verificação de código TOTP ou código de backup."""
+
+    otp_token = forms.CharField(
+        label="Código de autenticação",
+        max_length=16,
+        widget=forms.TextInput(
+            attrs={
+                "autofocus": True,
+                "autocomplete": "one-time-code",
+                "placeholder": "000000 ou código de backup",
+            }
+        ),
+    )
+    use_backup = forms.BooleanField(
+        label="Usar código de backup",
+        required=False,
+    )
+
+    def clean_otp_token(self) -> str:
+        return self.cleaned_data["otp_token"].strip().replace(" ", "")
+
+
 class VinculoClienteForm(forms.Form):
     """Documento usado para localizar um cadastro ainda não vinculado."""
 

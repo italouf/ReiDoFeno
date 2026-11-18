@@ -44,6 +44,9 @@ INSTALLED_APPS = [
     # Terceiros
     "axes",
     "django_ratelimit",
+    "django_otp",
+    "django_otp.plugins.otp_totp",
+    "django_otp.plugins.otp_static",
 ]
 
 MIDDLEWARE = [
@@ -53,9 +56,11 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "django_otp.middleware.OTPMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "axes.middleware.AxesMiddleware",
+    "accounts.middleware.OTPRequiredMiddleware",
     "core.middleware.SecurityHeadersMiddleware",
 ]
 
@@ -122,6 +127,11 @@ AXES_COOLOFF_TIME = timedelta(minutes=15)
 AXES_LOCKOUT_PARAMETERS = [["username", "ip_address"]]
 AXES_RESET_ON_SUCCESS = True
 AXES_VERBOSE = 0
+
+# Autenticação de dois fatores (TOTP RFC 6238)
+OTP_REQUIRED_GROUPS = ["Administrador", "Gestor", "Emissor Fiscal", "Financeiro"]
+OTP_LOGIN_URL = "/accounts/2fa/verify/"
+OTP_TOTP_ISSUER = "Rei do Feno"
 
 # Rate limiting dos endpoints críticos (SEC-04).
 RATELIMIT_LOGIN = os.environ.get("RATELIMIT_LOGIN", "5/m")
