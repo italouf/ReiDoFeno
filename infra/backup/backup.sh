@@ -132,7 +132,7 @@ fi
 if [ "$DRY_RUN" -eq 0 ]; then
     log "Aplicando retenção local..."
     RETENTION_BIN="${RETENTION_SCRIPT:-$SCRIPT_DIR/apply-retention.sh}"
-    "$RETENTION_BIN" "$BACKUP_LOCAL" || fail "retention_failed"
+    bash "$RETENTION_BIN" "$BACKUP_LOCAL" || fail "retention_failed"
 fi
 
 # 5. Upload offsite + verificação SHA-256

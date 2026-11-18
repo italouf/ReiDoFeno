@@ -12,6 +12,7 @@ from django.test import SimpleTestCase
 RAIZ = Path(__file__).resolve().parents[2]
 BACKUP_SCRIPT = RAIZ / "infra" / "backup" / "backup.sh"
 RETENTION_SCRIPT = RAIZ / "infra" / "backup" / "apply-retention.sh"
+RESTORE_SCRIPT = RAIZ / "infra" / "backup" / "restore.sh"
 CRON_FILE = RAIZ / "infra" / "backup" / "cron.d" / "reidofeno-backup"
 
 
@@ -109,15 +110,22 @@ def _preparar_sandbox_backup(tmp_path: Path, *, checksum_invalido: bool = False)
 
 class BackupScriptsContractTests(SimpleTestCase):
     def test_scripts_existem_com_lf_e_sintaxe_valida(self):
-        for caminho in (BACKUP_SCRIPT, RETENTION_SCRIPT, CRON_FILE):
+        for caminho in (BACKUP_SCRIPT, RETENTION_SCRIPT, RESTORE_SCRIPT, CRON_FILE):
             self.assertTrue(caminho.is_file(), f"Ausente: {caminho}")
             self.assertNotIn(b"\r\n", caminho.read_bytes(), f"CRLF em {caminho}")
+
+        if os.name != "nt":
+            for script in (BACKUP_SCRIPT, RETENTION_SCRIPT, RESTORE_SCRIPT):
+                self.assertTrue(
+                    os.access(script, os.X_OK),
+                    f"Script sem permissão de execução (+x): {script}",
+                )
 
         bash = _encontrar_bash()
         if not bash:
             self.skipTest("Bash compatível indisponível")
 
-        for script in (BACKUP_SCRIPT, RETENTION_SCRIPT):
+        for script in (BACKUP_SCRIPT, RETENTION_SCRIPT, RESTORE_SCRIPT):
             res = subprocess.run(
                 [bash, "-n", str(script)],
                 capture_output=True,
